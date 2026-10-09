@@ -1,0 +1,19 @@
+# 本地密钥，绝对不要提交
+.env
+
+# 后台管理存下来的配置（模型、key），同样不能提交
+admin.json
+admin.json.tmp
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# Agent 在沙箱里跑出来的临时产物
+workspace/
+
+# 网页版「保存上下文」存下来的会话存档，是使用数据，不进仓库
+sessions/
+
+# 知识库索引缓存，会自动重建
+.cache/

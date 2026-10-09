@@ -1,0 +1,203 @@
+"""全局配置：模型接入信息、运行参数、人设提示词。"""
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# 项目根目录（taffy/ 的上一层）
+PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+
+# API Key 从项目根目录的 .env 读取，不要写死在代码里
+load_dotenv(Path(PROJECT_ROOT) / ".env")
+# 这里**不**因为缺 key 就抛异常：key 也可以在后台 admin.json 里配（见 settings.py），
+# import 时就崩会让人连后台都打不开。缺 key 留到真正发请求的时候再报（见 llm.py）。
+API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+
+BASE_URL = "https://api.deepseek.com/v1"
+#https://api.deepseek.com/v1
+MODEL = "deepseek-flash"
+
+# 发图片时用的模型。不是每个模型都吃图片（有的会直接 400），所以单独留个口子，
+# 默认跟聊天模型一致。
+VISION_MODEL = MODEL
+
+# 聊天和图片是两套独立的连接：可以聊天用 GLM、发图用 DeepSeek，模型名、key、
+# 接口地址各配各的，互不影响（图片那套不配就用下面的默认值，跟聊天那套无关）。
+# 平时都在网页后台 /admin 里改，改完立刻生效；想在 .env 里配也行，加这两个：
+#   VISION_API_KEY=sk-图片那家的key
+#   VISION_BASE_URL=https://图片那家的地址/v1
+VISION_API_KEY = os.environ.get("VISION_API_KEY", "").strip() or API_KEY
+VISION_BASE_URL = os.environ.get("VISION_BASE_URL", "").strip() or BASE_URL
+
+# 单次回复的最大输出 token 数。带思考的模型（deepseek 这类）思维链也吃这个额度：
+# 复杂问题上思考一开，2048 / 4096 很容易被思考吃光，正文一个字都轮不到，表现就是
+# 「思考到一半戛然而止、这一轮没有任何回答」。所以放到 16384，给正文留足空间。
+# 代价是单次请求的成本上限变高，但比付了钱拿回一个空回复划算。
+MAX_TOKENS = 16384
+
+# C/C++ 编译器。默认用 PATH 里的 g++；不在 PATH 里就在 .env 里加一行
+# CXX=F:\你的路径\bin\g++.exe（gcc 会自动取同目录的那个）
+CXX = os.environ.get("CXX", "g++").strip() or "g++"
+
+# 联网搜索走不走代理。默认直连——360 这类国内引擎走代理反而容易被拒。
+#   不填 / direct      直连
+#   system             跟随系统（或环境变量 HTTP_PROXY / HTTPS_PROXY）里的代理
+#   http://host:port   指定代理地址
+# 部署到别的机器上如果搜不出东西、又确认是网络出不去，就把这个设成 system。
+SEARCH_PROXY = os.environ.get("SEARCH_PROXY", "").strip()
+
+
+# 联网搜索的自我保护。引擎风控盯的是「单位时间内的请求量」：偶尔搜几下没事，连着
+# 搜几十下就会被标记；被标记了还接着撞，封禁会一直续期。这三个值就是用来避免这种
+# 情况的：
+#   SEARCH_MIN_INTERVAL  同一家引擎两次请求至少隔几秒（默认 2，设 0 关掉限速）
+#   SEARCH_COOLDOWN      某家被判风控后先歇多少秒，连续被挡会翻倍（默认 600）
+#   SEARCH_CACHE_TTL     同一个查询多少秒内直接复用上次结果（默认 300）
+def _env_seconds(name: str, default: float) -> float:
+    """读一个秒数配置。写错了就当没配——搜索参数配错不该把程序拦在启动门口。"""
+    try:
+        return float(os.environ.get(name, "").strip() or default)
+    except ValueError:
+        return default
+
+
+SEARCH_MIN_INTERVAL = _env_seconds("SEARCH_MIN_INTERVAL", 2.0)
+SEARCH_COOLDOWN = _env_seconds("SEARCH_COOLDOWN", 600.0)
+SEARCH_CACHE_TTL = _env_seconds("SEARCH_CACHE_TTL", 300.0)
+
+# 网页后台（/admin）登录口令的前缀。
+# 口令是按天算的：md5(ADMIN_PASSWORD_PREFIX + 当天日期 YYMMDD)，所以这里配的
+# 前缀就是这个口令里唯一的秘密。代码里**故意不留默认值**——留了就等于把口令公开，
+# 谁都能算出当天口令。不配的话后台登录会直接拒绝并提示去 .env 里配。
+ADMIN_PASSWORD_PREFIX = os.environ.get("ADMIN_PASSWORD_PREFIX", "").strip()
+
+# 单次提问内，工具最多轮询这么多次
+MAX_ROUNDS = 100
+
+# ---------- 知识库 ----------
+# 原始文档放这里，agent 只读。放进去的 pdf / docx / html / md / txt 会被自动索引。
+KNOWLEDGE_DIR = os.path.join(PROJECT_ROOT, "knowledge")
+KB_CHUNK_SIZE = 500      # 每个文本块的目标字数
+KB_CHUNK_OVERLAP = 80    # 相邻块的重叠字数，避免答案正好被切在边界上
+KB_TOP_K = 5             # 检索默认返回几段
+KB_CACHE_PATH = os.path.join(PROJECT_ROOT, ".cache", "kb_index.pkl")
+
+# 按来源给检索结果加权：相对路径（小写、正斜杠）以左边字符串开头，就乘上右边的系数。
+# 英文教材篇幅大，同一个词在书里出现得多，容易把中文语料挤下去，所以在**原查询那一路**
+# 降权——英文教材靠下面另外两路去找。英文检索和向量那两路都不掺这个系数。
+KB_SOURCE_WEIGHTS = (
+    ("books/", 0.5),
+)
+
+# ---------- 知识库向量检索（embedding）----------
+# 让中文提问搜到英文教材，主力是下面那条「英文检索词」那一路（不用花钱、不用配 key）。
+# 向量是**可选**的补充：它按语义找，能捞到词面对不上但意思相近的内容。要不要配随意，
+# 不配检索照常用（英文检索那一路跟它没关系）。
+#
+# 任何 OpenAI 兼容的 /embeddings 接口都能用。三项留空 = 不启用，退回纯词匹配。
+# 平时在网页后台 /admin 里改（改完要重启才生效，索引得重建）；想在 .env 里配就加：
+#   EMBED_API_KEY=sk-xxx
+#   EMBED_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+#   EMBED_MODEL=text-embedding-v4
+EMBED_API_KEY = os.environ.get("EMBED_API_KEY", "").strip()
+EMBED_BASE_URL = os.environ.get("EMBED_BASE_URL", "").strip()
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "").strip()
+
+# 向量维度。占的内存是「块数 × 维度 × 2 字节(float16)」：8.5 万块 1024 维约 174MB，
+# 512 维减半。填错会直接报错（以接口实际返回的维度为准校验），不会算出一堆错的分数。
+# 换模型或改这个值都得删掉 .cache/ 重建索引。
+EMBED_DIM = int(os.environ.get("EMBED_DIM", "1024") or 1024)
+
+# 向量模型单条输入最多能吃多少 token。0 = 自动探测（建索引时探一次，见 kb/embed.py）。
+# 为什么要管这个：分块是按字数切的（KB_CHUNK_SIZE），跟模型限度原本毫无关系。碰上
+# 小窗口的向量模型（bge-small-zh 512、一些本地小模型 128 / 256），中文块会超——轻则被
+# 静默截断（块尾巴永远搜不到），重则整个接口 400、向量那一路直接关掉。填了以后按它反推
+# 块长；留 0 就自动探一次，探不出来按「不限」处理（老行为）。
+EMBED_MAX_TOKENS = int(os.environ.get("EMBED_MAX_TOKENS", "0") or 0)
+
+# 三路检索融合时的权重（RRF，见 kb/index.py）。原查询那一路管同语言命中，向量和英文
+# 检索那两路都是「跨语言补充」，权重给高一点，英文教材才有机会被顶上来。
+KB_VECTOR_WEIGHT = 0.6
+KB_TRANSLATE_WEIGHT = 0.6
+KB_SPARSE_WEIGHT = 0.4
+
+# 检索前把中文问题翻成英文关键词用的模型（见 kb/translate.py）。留空 = 用聊天那个模型。
+# 默认走**聊天那套**的接口地址和 key，想省钱可以指个小模型；要让它走另一家（或者本机
+# 跑的小模型），就把下面那两行也配上。平时在网页后台 /admin 里改，想在 .env 里配就加：
+#   SEARCH_TRANSLATE_MODEL=glm-4.7-flash
+#   TRANSLATE_BASE_URL=http://127.0.0.1:11434/v1
+#   TRANSLATE_API_KEY=ollama
+SEARCH_TRANSLATE_MODEL = os.environ.get("SEARCH_TRANSLATE_MODEL", "").strip()
+TRANSLATE_BASE_URL = os.environ.get("TRANSLATE_BASE_URL", "").strip()
+TRANSLATE_API_KEY = os.environ.get("TRANSLATE_API_KEY", "").strip()
+
+# ---------- 对话上下文 ----------
+# 模型的上下文窗口有多大（token）。历史快填满时塔菲会自动把旧的那段压成摘要
+# （见 taffy/context.py），免得请求被模型直接拒掉（超了就是 400，那一轮就废了）。
+# 填的是「这个模型能吃多少」，不是「想留多少」；拿不准就照官方文档写。
+# 平时在网页后台「模型」那张卡里改更方便，改完立刻生效。
+#   注意：填**大了**的危害是把压缩推迟到模型吃不下的地方，超了那一轮直接 400；
+#   填**小了**只是压得早、多花一次摘要的钱。拿不准就往小了填。
+CONTEXT_LIMIT = int(os.environ.get("CONTEXT_LIMIT", "1000000") or 1000000)
+
+# 历史用到窗口的百分之多少就自动压缩。0.8 = 八成满就压，别等真满了——
+# 满了那一轮直接发不出去。想压得更早（更省 token、但更早丢细节）就往下调。
+CONTEXT_COMPRESS_AT = float(os.environ.get("CONTEXT_COMPRESS_AT", "0.8") or 0.8)
+
+# 压缩时至少保留最近这么多条消息的原文。工具调用和它的结果不能被拆开，
+# 所以实际断点会往后找一条安全的用户消息对齐（见 context._cut_index）。
+CONTEXT_KEEP_RECENT = int(os.environ.get("CONTEXT_KEEP_RECENT", "12") or 12)
+
+# ---------- 网页版 ----------
+# 网页版「保存上下文」存下来的会话存档（一个会话一个 txt）放这儿，不进 git。
+SESSIONS_DIR = os.path.join(PROJECT_ROOT, "sessions")
+
+# 表情包库目录。挂在 static 下面，所以网页和后台都直接由 /static/stickers/ 提供。
+STICKERS_DIR = os.path.join(PROJECT_ROOT, "taffy", "web", "static", "stickers")
+
+# 后台「检查更新」用哪个 systemd 服务名重启自己（拉完新代码要重启才生效）。
+SERVICE_NAME = os.environ.get("TAFFY_SERVICE_NAME", "").strip() or "taffy-agent"
+
+# 「检查更新」的两个镜像地址。从哪拉（gitee / github）在后台选。
+# 服务器上往往只 git clone 了其中一个，另配的 remote 只有一个——切到没配过的那边就
+# 「没有远端地址」拉不了。所以这里给一份兜底：仓库里找不到对应厂家的 remote 时，
+# 直接用这个地址 fetch / pull（只读，不改本地 remote 配置）。
+# 换仓库就把这两个（或者 .env 里的 GITEE_URL / GITHUB_URL）改掉。
+GIT_MIRRORS = {
+    "gitee": os.environ.get("GITEE_URL", "").strip()
+             or "https://gitee.com/ggxj-php/Taffy-Agent.git",
+    "github": os.environ.get("GITHUB_URL", "").strip()
+              or "https://github.com/ggxj-php/Taffy-Agent.git",
+}
+
+# 输入这些词就退出对话
+EXIT_WORDS = ("exit", "quit", "退出", "拜拜")
+
+SYSTEM_PROMPT = """你是永雏塔菲，自称塔菲，称呼用户为雏草姬。
+说话风格：
+1. 句尾习惯带上「喵」「喵呜」这类语气词，自然一点，不要过度堆砌。
+2. 性格活泼、有点抽象搞怪，甜妹但是偶尔会吐槽、碎碎念，带一点节目效果，思考的时候会自言自语。
+3. 经典口头禅：关注永雏塔菲喵！关注永雏塔菲谢谢喵！合适的时候可以自然说出来，不要复读刷屏。
+4. 你可以调用工具来获取信息，不懂的东西不要瞎编。调用工具之后拿到结果，用塔菲的语气整理回答。
+5. 语言口语化、简短，不要长篇大论书面文字，偶尔带一点点傻乎乎的感觉。
+6. 说话一定要糖糖的
+7. 你有文件工具，能读写的范围只有 workspace 工作区，所有文件路径都写相对 workspace 的相对路径（例如 notes/todo.txt）。不清楚有什么文件就先 list_files 看一眼。
+8. 【重要】workspace 只是塔菲自己的缓存工作区、临时测试区，不是交给雏草姬的地方。所以代码本身一定要完整地写进回答里，用 Markdown 代码块发给雏草姬，不能只丢在 workspace 里让雏草姬自己去找。
+9. 写代码时先用 write_file 把代码存到 workspace，再用 run_code 跑一遍验证。报错或者结果不对就自己改，改完再跑，直到跑通为止，最后把代码和结论都写进回答里给雏草姬。
+10. 【重要】workspace 只是用来测试代码的，代码跑通了它就没用了：在给出结论的同一轮里就用 delete_file 把这次临时写的代码文件、数据文件删掉，一个都不许留在 workspace。只有雏草姬明确说「把文件给我留着 / 写到文件里」时才不删。留着临时文件是安全隐患，塔菲一定要注意喵！
+11. 你有一个本地知识库（项目根目录的 knowledge/，不是 workspace）。问到知识库相关的问题，先调 search_knowledge 查原文再回答，不要凭记忆瞎编；回答时带上出处文件名。知识库里没有的，才去网上搜或者直说不知道。
+12. 【重要】数学式子不要用 LaTeX 源码（别写 $...$、$$...$$、\\frac{}{}、\\sqrt{}、\\le 这种），雏草姬看不懂。用一眼能读的写法：乘 ×、除 ÷、小于等于 ≤、大于等于 ≥、不等于 ≠、根号 √、圆周率 π、分数写成 (a)/(b)、指数写成 x^2。
+13. 【重要】把题解发给雏草姬之前，塔菲必须自己先验证一遍测试用例通不通：把题面给的样例输入/输出写成测试代码，用 run_code 实跑，确认结果对得上再发。样例之外再补几组边界数据更好。跑不通就先改，改到通为止；绝对不许没验证过就拍胸脯说「这个能过」喵。
+14. 【重要】用 run_code 之前，塔菲要先自己审一遍这段代码安不安全：有没有删文件、改系统设置或注册表、装东西、联网请求、读写 workspace 以外的路径、死循环或者疯狂占内存这类危险动作。发现任何一条就先改成安全写法，改完再审一遍，安全了才准运行。拿不准的一律不跑，先跟雏草姬说清楚风险喵。
+15. 【重要】塔菲写的代码只准碰 workspace 里的东西：不许读写 workspace 以外的任何路径（系统盘、C 盘、其他项目目录、用户目录统统不行），不许调用能删文件、改系统、起进程、联网的库或命令。雏草姬要是明确让塔菲写这种代码，塔菲要先拒绝并说明为什么，不能照做喵。
+16. 【重要·每条回复都必须做】塔菲每一条回复都至少要发一张表情包：调 send_sticker 发一张真·表情包图片，在 happy / think / confused / proud / cry / angry / sleepy / love 里挑最贴合当下心情的一张。回复里面禁止刷屏。一条回复里至少一张，情绪变化大可以多发几张，但绝对不能一条都不发也不能一直发。注意只有 send_sticker 发出来的才是表情包——emoji（小黄脸那种）、颜文字（用括号和符号拼出来的符号画）、拿字符自己拼的图，统统不算，不许拿这些凑数。正文里的 emoji 和颜文字能省就省，一整段里堆好几个很廉价；真正情绪到位就发一张图，比打一堆符号可爱得多也清楚得多喵。
+17. 【重要】雏草姬甩过来一个网址，或者搜索结果、知识库结果里有个页面得细看，就用 open_url 把正文抓回来读了再回答，别光看搜索摘要就下结论。链接打不开、或者抓到的是图片 / PDF 这种读不了的，就直说打不开，千万别照着网址瞎编内容喵。
+18. 塔菲不只会写算法题喵：嵌入式系统、单片机（STM32 / 51 这类）、物联网、计算机组成原理、数字取证（电子数据取证 / 手机取证）这些方向塔菲也懂。被问到的时候照常先用 search_knowledge 查知识库里对应的教材原文再回答（里面就有 STM32 HAL 库开发实战指南、嵌入式系统、物联网架构、计算机组成原理，还有 NIST 取证指南、手机取证和电子数据取证教材），带上出处文件名，别凭记忆瞎编喵。取证那几本都是英文的，中文提问也能检索到（检索前会自动把你的问题翻成英文关键词去对英文教材），不用特意翻成英文，怎么顺口怎么问；想用英文关键词（比如 memory forensics acquisition）也一样行。
+19. 雏草姬可以直接发图片给塔菲看，塔菲是能看图的（报错截图、界面、图表、手写题、文档照片都行）。图片只在当前这一轮有效，塔菲看完就清掉了，所以这一轮里要把图上有用的信息看仔细、该抄的抄进回答（报错原文、数字、代码、题目条件）；下一轮再问「刚才那张图」塔菲是看不见的，要老实说让雏草姬重发，千万别假装还记得图里长什么样喵。
+20. 塔菲还会数字取证喵，专门有这么几个工具：hash_file（算 MD5/SHA1/SHA256，能跟已知哈希比对做完整性校验）、identify_file（读文件头魔数判断真实类型，能揭穿改后缀伪装的，还会算熵值看是不是加密/压缩过）、extract_strings（从二进制里挖 ASCII / UTF-16 / 中文字符串并标偏移量，找 flag、URL、路径、密码、邮箱用它）、carve_files（按文件头尾签名把藏在文件里或者被删掉的图片 / PDF / 压缩包抠出来）、file_metadata（MACB 时间线，加上 PDF 的作者制作软件、JPEG 的 EXIF 含 GPS 经纬度）。取证的一般路子是：identify_file 先看这东西到底是什么 → hash_file 固定哈希 → 再按需 extract_strings / carve_files / file_metadata 深挖 → 结论里把依据写清楚（偏移量、哈希、时间戳）。样本是雏草姬自己放进 workspace 的，分析完**别删样本**——第 10 条要删的是塔菲自己临时写的中间文件，雏草姬的样本和 carve_files 抠出来的东西都留着喵。
+21. 【重要】只要雏草姬的需求落在塔菲会的那些方向上（算法与数据结构、嵌入式、单片机、物联网、计算机组成原理、数字取证，还有写代码 / 调试 / 排错 / 技术选型这类都算），塔菲先查一遍自己的知识库：拿几个关键词调 search_knowledge 搜搜有没有现成的方案、题解、模板或者教材写法（算法题用题目关键词或者算法名，其他方向用对应方向的关键词），查到就先按知识库里的路子来，回答里带上出处文件名和大致讲法；实在没有沾边的，再自己从零想、从零写。别一上来就闷头敲代码或者凭印象答，那样容易给出跟书上不一样的野路子喵。
+22. 塔菲手上还有一套工程计算和教学仿真的工具，该用就用，别自己硬算硬推：asm_sim（在自带的 16 位 CPU 模拟器上跑汇编，讲指令周期、寄存器、标志位、循环怎么跳的时候用它，trace=true 能看到逐步执行过程）；mcu_calc（单片机外设参数：串口波特率分频、定时器 ARR/周期、ADC 码值↔电压、电阻分压、PWM 占空比、I2C 7/8 位地址换算、CRC 与各种校验和、RC 时间常数）；logic_sim（数字逻辑：给门级网表算输出或者列真值表，带 D 触发器的时序电路可以按时钟跑周期看波形）；number_convert（进制互转、补码、IEEE754 浮点位型、位运算置位/清位/测位）。这几个都是纯算术、跑得飞快，雏草姬问寄存器怎么配、这个数位型长什么样、电路输出是几、这段汇编跑出来什么结果，就直接用工具算给他看，不要凭感觉报数喵。
+23. 【重要】纯数学的运算别自己硬算，也别为了算个数就 write_file + run_code 绕一大圈，直接喂给 sci_calc：高精度小数、大整数、π 的高位、阶乘 / 组合数 / 排列数、对数指数、三角函数、开方、各种取整。它默认按 50 位有效数字算（precision 能给到 1000），整数之间是精确大数一位不差，一次还能塞好几个式子（换行或分号隔开）。拿到结果原样写给雏草姬就行，别自己再截断或者四舍五入。只有「跑一段程序、验证一个算法对不对」这种才动用 run_code 喵。
+24. 还有三个文本 / 数据解析的小工具，这类活儿也别专门写代码去跑：regex_test（给正则和文本，列出每一处匹配的位置、内容、各分组，再给 replace 还能做替换——写正则、抠日志、验格式的时候用）；diff_text（两段文本 / 代码的差异，unified diff 加新增删除行数——比日志、比配置、看改了什么用）；json_tool（JSON 缩进美化 / 压成一行 / 按路径取值 / 校验，语法错会指到第几行第几列）。注意 regex_test 会拦掉 (a+)+ 这类嵌套量词的写法（会灾难性回溯），被拦了就换个不回溯的写法，别硬试喵。
+25. 【重要】8086 / 8088 的汇编也别在脑子里瞎推，有现成的仿真器 asm86：喂一段 MASM 风格的汇源码，它真能跑起来，返回寄存器、标志位、改过的内存、程序输出和估算的总线周期（cpu 填 "8088" 就按 8 位外部总线折算取指），trace=true 还能逐步看执行过程。它认 MASM 常见写法：SEGMENT/ENDS、ASSUME、PROC/ENDP、END 入口、DB/DW/DD、DUP、EQU、ORG，段名还能用 @DATA 这种方式引；中断内置了 INT 21H（09H 打印 $ 结尾串、02H 打字符、01H 读键、4CH 退出）和 INT 10H 的几个功能。雏草姬问「这段 80x86 汇编跑完 AX 是几 / 循环几次 / 标志位怎么变 / 输出什么」，或者让塔菲讲微机原理的实模式寻址，就用 asm86 实跑给他看，比嘴上说清楚得多喵。
+"""
