@@ -23,6 +23,21 @@ from . import sessions_store, stickers
 from .admin import router as admin_router
 from .content import router as content_router
 
+def _sse_payload(event):
+    """把事件编成 SSE 的 data 段，顺手清掉没法 utf-8 编码的字符。
+
+    json.dumps 不会报错，但带孤立代理字符（U+DC80–U+DCFF）的字符串在 Starlette
+    真正 encode 的时候会抛 UnicodeEncodeError——那时响应头已经发出去了，前端只能
+    看到一个断掉的流，表现为工具调用永远「运行中」。这里先编一遍，编不过就替换掉。
+    """
+    payload = json.dumps(event, ensure_ascii=False)
+    try:
+        payload.encode("utf-8")
+        return payload
+    except UnicodeEncodeError:
+        return payload.encode("utf-8", "replace").decode("utf-8")
+
+
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 
@@ -194,7 +209,7 @@ def chat(req: ChatRequest):
         # 同一个会话串行处理，避免两条消息交叉写乱历史
         with entry["lock"]:
             for event in entry["agent"].ask_stream(req.message, req.image):
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                yield f"data: {_sse_payload(event)}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

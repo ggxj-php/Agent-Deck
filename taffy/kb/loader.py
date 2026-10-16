@@ -119,9 +119,24 @@ def extensions():
     return tuple(sorted(_LOADERS))
 
 
+def _safe_text(text):
+    """把抽出来但没法编码的字符换掉。
+
+    PDF 字体编码损坏时，pypdf 会抽出 U+DC80–U+DCFF 这种「孤立代理字符」——
+    它们不是合法 Unicode，一旦进了索引，SSE 推流时 str.encode("utf-8") 会直接抛
+    UnicodeEncodeError，把整轮对话打断（前端表现为工具调用永远「运行中」）。
+    这里统一换成 U+FFFD，正常文本原样返回。
+    """
+    try:
+        text.encode("utf-8")
+        return text
+    except UnicodeEncodeError:
+        return text.encode("utf-8", "replace").decode("utf-8")
+
+
 def load(path):
     """解析一个文档，返回 [(文本段, 页码或 None)]；不支持的格式返回空列表。"""
     loader = _LOADERS.get(os.path.splitext(path)[1].lower())
     if loader is None:
         return []
-    return [(text, page) for text, page in loader(path) if text and text.strip()]
+    return [(_safe_text(text), page) for text, page in loader(path) if text and text.strip()]
