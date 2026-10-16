@@ -81,6 +81,10 @@ def to_english(query):
             model=settings.translate_model(),
             api_key=settings.translate_key(),
             base_url=settings.translate_base_url(),
+            # 把中文问题写成一行英文关键词，是纯粹的格式转换，不需要思考。
+            # 实测开着思考时：光是翻译就要多花 2 秒，个别模型思考吃满额度后
+            # 正文还会返回空字符串（那样英文检索这一路就白瞎了）。
+            thinking=False,
         )
     except Exception as exc:
         # 退回只用原查询是设计成这样的（翻译绝不能把检索搞挂），但别一声不吭：把

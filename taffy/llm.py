@@ -4,7 +4,7 @@ import threading
 from openai import OpenAI
 
 from . import settings
-from .config import MAX_TOKENS
+from .config import MAX_TOKENS, THINKING_PARAM
 
 _clients = {}
 _clients_lock = threading.Lock()
@@ -32,8 +32,19 @@ def _client(api_key, base_url):
         return client
 
 
+def _think_extra(thinking):
+    """要「关思考」时带的额外参数；开着就返回 None。
+
+    只在明确要关、且配置里指定了参数名时才发。开着就什么都不发——各家默认就是
+    思考，少发一个参数就少一分跟别的服务商不兼容的风险。
+    """
+    if thinking or not THINKING_PARAM:
+        return None
+    return {THINKING_PARAM: False}
+
+
 def complete(messages: list, model: str = "", api_key: str = "", base_url: str = "",
-             max_tokens: int = 1024):
+             max_tokens: int = 1024, thinking: bool = True):
     """一次性把回答收完，给内部的小任务用（比如检索前把问题翻成英文关键词）。
 
     max_tokens 不能太小：带思考的模型思维链也吃这个额度，给几百的话正文一个字都
@@ -44,19 +55,33 @@ def complete(messages: list, model: str = "", api_key: str = "", base_url: str =
     base = (base_url or "").strip() or settings.chat_base_url()
     if not key:
         raise RuntimeError(_NO_KEY)
-    reply = _client(key, base).chat.completions.create(
-        model=model,
-        messages=messages,
-        max_tokens=max_tokens,
-        temperature=0,     # 这类任务要的是稳定，不要发挥
-    )
+    extra = _think_extra(thinking)
+    # 先按要求的带参数发；要是不认这个参数（400），去掉它再试一次——
+    # 一个小任务不该因为参数不兼容就整条路废掉。
+    attempts = ([{"extra_body": extra}, {}] if extra else [{}])
+    reply = None
+    last_error = None
+    for kwargs in attempts:
+        try:
+            reply = _client(key, base).chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=0,     # 这类任务要的是稳定，不要发挥
+                **kwargs,
+            )
+            break
+        except Exception as exc:      # noqa: BLE001
+            last_error = exc
+    if reply is None:
+        raise last_error
     if not reply.choices:
         return ""
     return (reply.choices[0].message.content or "").strip()
 
 
 def stream_chat(messages: list, tools: list, model: str = "",
-                api_key: str = "", base_url: str = ""):
+                api_key: str = "", base_url: str = "", thinking: bool = True):
     """流式发一次请求，边收边吐增量。
 
     依次产出 ("thinking", 片段) / ("content", 片段)，最后产出
@@ -64,6 +89,9 @@ def stream_chat(messages: list, tools: list, model: str = "",
 
     model / api_key / base_url 留空就用后台配的聊天那套；带图的轮次由 core
     把图片那套的三个值传进来。
+
+    thinking=False 时带上「关思考」参数：网页上的开关走这里。开了就不带参数，
+    行为跟以前完全一样。
     """
     model = (model or "").strip() or settings.chat_model()
     settings.remember_model(model)
@@ -72,13 +100,24 @@ def stream_chat(messages: list, tools: list, model: str = "",
     if not key:
         raise RuntimeError(_NO_KEY)
 
-    stream = _client(key, base).chat.completions.create(
-        model=model,
-        messages=messages,
-        tools=tools,
-        max_tokens=MAX_TOKENS,
-        stream=True,
-    )
+    extra = _think_extra(thinking)
+    kwargs = {"extra_body": extra} if extra else {}
+    try:
+        stream = _client(key, base).chat.completions.create(
+            model=model,
+            messages=messages,
+            tools=tools,
+            max_tokens=MAX_TOKENS,
+            stream=True,
+            **kwargs,
+        )
+    except Exception as exc:      # noqa: BLE001
+        if extra:
+            raise RuntimeError(
+                f"{exc}（可能是这个接口不认 {THINKING_PARAM} 参数，"
+                "把网页上的「思考」开关打开再试一次）"
+            ) from exc
+        raise
 
     text_parts = []
     calls = {}  # index -> {"id", "name", "arguments"}，流式下 tool_call 是分片下发的

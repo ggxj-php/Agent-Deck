@@ -51,7 +51,7 @@ class TaffyAgent:
         """当前上下文用量，网页版拿它显示「上下文 xx%」。"""
         return context.usage(self.messages, settings.context_limit())
 
-    def ask_stream(self, user_input: str, image: str = None):
+    def ask_stream(self, user_input: str, image: str = None, thinking: bool = None):
         """把用户这句话丢给模型，边跑边吐事件，最多跑 MAX_ROUNDS 轮工具。
 
         image 是可选的图片 data URL。带了图就按图文混合发给模型，但这一轮
@@ -93,6 +93,8 @@ class TaffyAgent:
         # 带图这一轮整套走图片那套配置（模型 + key + 接口地址），纯文字走聊天那套，
         # 两套在后台能分开配（比如聊天 GLM、图片 DeepSeek）。
         # 工具循环里图片还在历史里，所以整轮都用同一套，不会中途换来换去。
+        # 网页上那个「思考」开关：不传就按「开」处理，跟以前的行为一致。
+        think = True if thinking is None else bool(thinking)
         vision = image_slot is not None
         model = settings.model_for(vision=vision)
         api_key = settings.key_for(vision=vision)
@@ -104,7 +106,7 @@ class TaffyAgent:
                 try:
                     for kind, payload in stream_chat(
                         _sendable(self.messages), TOOLS, model,
-                        api_key=api_key, base_url=base_url,
+                        api_key=api_key, base_url=base_url, thinking=think,
                     ):
                         if kind == "message":
                             message = payload

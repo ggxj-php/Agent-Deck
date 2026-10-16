@@ -79,6 +79,8 @@ class ChatRequest(BaseModel):
     message: str = ""
     # 可选的内联图片（data:image/...;base64,...）。不落盘，这一轮跑完就丢。
     image: str | None = None
+    # 「深度思考」开关（网页顶栏那个）。不传 = 开，跟以前的行为一致。
+    thinking: bool | None = None
 
 
 def _session(session_id):
@@ -208,7 +210,7 @@ def chat(req: ChatRequest):
     def events():
         # 同一个会话串行处理，避免两条消息交叉写乱历史
         with entry["lock"]:
-            for event in entry["agent"].ask_stream(req.message, req.image):
+            for event in entry["agent"].ask_stream(req.message, req.image, req.thinking):
                 yield f"data: {_sse_payload(event)}\n\n"
         yield "data: [DONE]\n\n"
 

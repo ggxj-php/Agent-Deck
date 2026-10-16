@@ -35,6 +35,12 @@ VISION_BASE_URL = os.environ.get("VISION_BASE_URL", "").strip() or BASE_URL
 # 代价是单次请求的成本上限变高，但比付了钱拿回一个空回复划算。
 MAX_TOKENS = 16384
 
+# 「关思考」要发给接口的那个参数名。百炼 / DashScope 系的中转认 enable_thinking，
+# 网页上那个「思考」开关就靠它生效。换成不认这个参数的接口（有些官方 API 会对
+# 未知参数直接 400）时，在 .env 里写一行 THINKING_PARAM= （留空）就能关掉这个行为，
+# 开关会变成不起作用但也不会报错。
+THINKING_PARAM = os.environ.get("THINKING_PARAM", "enable_thinking").strip()
+
 # C/C++ 编译器。默认用 PATH 里的 g++；不在 PATH 里就在 .env 里加一行
 # CXX=F:\你的路径\bin\g++.exe（gcc 会自动取同目录的那个）
 CXX = os.environ.get("CXX", "g++").strip() or "g++"

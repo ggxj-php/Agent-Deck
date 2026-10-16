@@ -1336,3 +1336,72 @@ body.admin .card input[type="file"] { padding: 8px 10px; font-size: 13px; }
   .admin-main { padding-top: 0; }
 }
 
+
+
+/* ---------- 顶栏的「思考」开关 ---------- */
+
+/* 跟页面同一套粉色：胶囊外形 + 小滑钮，开着是粉底白钮，关掉是灰底。
+   手机上和「新会话」「⋯」挤在一行，所以整体做得比较矮。 */
+.think-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink-soft);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color .18s ease, border-color .18s ease, background .18s ease;
+}
+
+.think-toggle:active { transform: scale(.96); }
+
+.think-toggle-text { flex: none; }
+
+.think-toggle-track {
+  flex: none;
+  position: relative;
+  width: 30px;
+  height: 16px;
+  border-radius: 999px;
+  background: #ece0e7;
+  transition: background .18s ease;
+}
+
+.think-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(224, 114, 159, .35);
+  transition: transform .18s ease;
+}
+
+.think-toggle.on {
+  color: var(--pink-deep);
+  border-color: #ffc2dc;
+  background: #fff7fb;
+}
+
+.think-toggle.on .think-toggle-track {
+  background: linear-gradient(135deg, var(--pink-dark), var(--pink-deep));
+}
+
+.think-toggle.on .think-toggle-knob { transform: translateX(14px); }
+
+@media (max-width: 480px) {
+  /* 小屏再收一点，别把「新会话」挤没了 */
+  .think-toggle { gap: 5px; padding: 4px 7px 4px 8px; font-size: 11px; }
+  .think-toggle-track { width: 26px; height: 15px; }
+  .think-toggle-knob { width: 11px; height: 11px; }
+  .think-toggle.on .think-toggle-knob { transform: translateX(11px); }
+}

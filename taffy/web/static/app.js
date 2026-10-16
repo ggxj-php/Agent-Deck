@@ -6,6 +6,9 @@
    两个独立会话；同一标签页刷新仍保留，关掉标签页才丢。 */
 
 const STORAGE_KEY = 'taffy_session_id';
+/* 「深度思考」开关存 localStorage（跟会话 id 不一样：这个希望同一个浏览器
+   里所有标签页共用、刷新也在）。默认是开。 */
+const THINK_KEY = 'taffy_thinking';
 const AVATAR = '/static/avatar.jpg';
 
 /* 表情包清单从后端读（后台可以增删，加了新的刷新一下就有）。
@@ -73,6 +76,7 @@ const ctxFillEl = document.getElementById('ctx-fill');
 const ctxTextEl = document.getElementById('ctx-text');
 const tbMoreEl = document.getElementById('tb-more');
 const tbActionsEl = document.getElementById('tb-actions');
+const thinkToggleEl = document.getElementById('think-toggle');
 
 let sessionId = sessionStorage.getItem(STORAGE_KEY);
 let busy = false;
@@ -487,7 +491,7 @@ async function refreshContext() {
 const STREAM_IDLE_MS = 60000;
 
 async function streamChat(id, message, onEvent, image) {
-  const body = { session_id: id, message };
+  const body = { session_id: id, message, thinking: thinkingOn() };
   if (image) body.image = image;
 
   const controller = new AbortController();
@@ -977,6 +981,31 @@ newChatEl.addEventListener('click', async () => {
   }
   inputEl.focus();
 });
+
+/* ---------------- 深度思考开关 ---------------- */
+
+/* 默认开。关掉之后后端会带 enable_thinking=false 发请求：模型不再先想一大段，
+   回答快好几倍，但复杂推理、算法推导这类会变浅。 */
+function thinkingOn() {
+  return localStorage.getItem(THINK_KEY) !== '0';
+}
+
+function paintThinking() {
+  const on = thinkingOn();
+  thinkToggleEl.classList.toggle('on', on);
+  thinkToggleEl.classList.toggle('off', !on);
+  thinkToggleEl.setAttribute('aria-checked', on ? 'true' : 'false');
+  thinkToggleEl.title = on
+    ? '深度思考：开（点一下关掉，回答更快）'
+    : '深度思考：关（点一下打开，难题想得更细）';
+}
+
+thinkToggleEl.addEventListener('click', () => {
+  localStorage.setItem(THINK_KEY, thinkingOn() ? '0' : '1');
+  paintThinking();
+});
+
+paintThinking();
 
 /* ---------------- 开场 ---------------- */
 
