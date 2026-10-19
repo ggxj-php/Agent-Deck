@@ -23,6 +23,25 @@ def _valid_image(image):
     )
 
 
+def _sticker_moods(args):
+    """从 send_sticker 的参数里取出这次要发哪几张表情包。
+
+    正常是 moods 数组（一次调用发多张）；也兼容模型直接塞 mood 字符串或
+    单个字符串的旧写法，免得它一换参数格式就发不出图。
+    """
+    if not isinstance(args, dict):
+        return []
+    raw = args.get("moods")
+    if isinstance(raw, str):
+        return [raw] if raw else []
+    if isinstance(raw, (list, tuple)):
+        return [m for m in raw if isinstance(m, str) and m]
+    single = args.get("mood")
+    if isinstance(single, str) and single:
+        return [single]
+    return []
+
+
 def _sendable(messages):
     """发请求前剔掉非法的 assistant 消息。
 
@@ -151,16 +170,23 @@ class TaffyAgent:
                     args, result = execute(name, function["arguments"])
 
                     if name == "send_sticker":
-                        stickers_sent += 1
-                        if stickers_sent > STICKER_LIMIT:
-                            # 硬上限：这一轮发的够多了，回执改成提醒，图不再发出去
+                        # 一次调用可以带多张（moods 数组），逐个发出去。
+                        # 表情包不是让模型念出来的，所以走单独的 sticker 事件。
+                        moods = _sticker_moods(args)
+                        sent = 0
+                        for mood in moods:
+                            if stickers_sent >= STICKER_LIMIT:
+                                break
+                            stickers_sent += 1
+                            sent += 1
+                            yield {"type": "sticker", "mood": mood}
+
+                        if sent == 0:
+                            # 硬上限：这一轮已经发够了，回执改成提醒，图不再发出去
                             result = "这一轮的表情包已经发够了，不用再发了"
                             yield {"type": "tool_end", "name": name, "args": args, "result": result}
-                        elif isinstance(args, dict) and args.get("mood"):
-                            # 表情包不是让模型念出来的，是直接发出去，所以单独给个事件
-                            yield {"type": "sticker", "mood": args["mood"]}
-                        else:
-                            yield {"type": "tool_end", "name": name, "args": args, "result": result}
+                        elif sent < len(moods):
+                            result = f"（这轮最多发 {STICKER_LIMIT} 张，多出来的没发）"
                     else:
                         yield {"type": "tool_end", "name": name, "args": args, "result": result}
 
