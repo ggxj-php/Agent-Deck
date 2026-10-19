@@ -173,4 +173,5 @@ def stream_chat(messages: list, tools: list, model: str = "",
             )
         raise RuntimeError(f"模型没返回任何内容（finish_reason={finish}）")
 
+    yield "finish", finish
     yield "message", message

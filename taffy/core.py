@@ -6,7 +6,8 @@
 import re
 
 from . import context, settings
-from .config import EXIT_WORDS, MAX_ROUNDS, STICKER_LIMIT
+from .config import (EXIT_WORDS, MAX_ROUNDS, RESUME_INSTRUCTION, RESUME_WORDS,
+                       STICKER_LIMIT)
 from .llm import stream_chat
 from .tools import TOOLS, execute
 from .tools.sticker import MOODS
@@ -95,6 +96,14 @@ def _valid_image(image):
     )
 
 
+def _is_resume(text):
+    """用户这句是不是「继续」这类指令（用来接着上一轮被截断的回复写）。"""
+    if not isinstance(text, str):
+        return False
+    cleaned = text.strip().strip("。．.!！~～,，、 \t\n").lower()
+    return cleaned in RESUME_WORDS
+
+
 def _sticker_moods(args):
     """从 send_sticker 的参数里取出这次要发哪几张表情包。
 
@@ -137,6 +146,8 @@ class TaffyAgent:
         # 现问一次（而不是 import 时定死）：后台改了提示词，新会话立刻就是新的，
         # 不用重启；已经在聊的会话还留着它自己那份（第一条早就定下来了）。
         self.messages = [{"role": "system", "content": settings.system_prompt()}]
+        # 上一轮是不是被截断/中断了。是的话，用户发「继续」就接着写而不是重开一轮。
+        self.cut_off = False
 
     def context_usage(self):
         """当前上下文用量，网页版拿它显示「上下文 xx%」。"""
@@ -157,6 +168,7 @@ class TaffyAgent:
           sticker     {mood}                       塔菲发了一张表情包
           compressed  {dropped, before_tokens, ...} 历史太长，旧的那段被压成摘要了
           error       {message}                    出错了
+          cut         {reason}                     回复被截断/中断了，可以发「继续」接着写
           done        {context}                    这一轮结束（附带当前上下文用量）
         """
         # 历史快把模型的上下文窗口填满时，先把旧的那段压成摘要（见 taffy/context.py）。
@@ -165,8 +177,14 @@ class TaffyAgent:
         if squeezed and squeezed.get("ok"):
             yield {"type": "compressed", **squeezed}
 
+        # 上一轮被截断/中断了，这句又是「继续」→ 让模型接着写，别当新问题重开
+        resume = self.cut_off and _is_resume(user_input)
+        self.cut_off = False
+
         image_slot = None
-        if image:
+        if resume:
+            self.messages.append({"role": "user", "content": RESUME_INSTRUCTION})
+        elif image:
             if not _valid_image(image):
                 yield {"type": "error", "message": "这张图塔菲收不了喵（只支持常见图片格式，且不超过 4MB）"}
                 return
@@ -191,10 +209,14 @@ class TaffyAgent:
         api_key = settings.key_for(vision=vision)
         base_url = settings.base_url_for(vision=vision)
 
+        finished = False
+        last_round = ""      # 最近一轮已经吐出去的原始正文，流被掐断时用来补历史
         try:
             stickers_sent = 0
             for _ in range(MAX_ROUNDS):
                 message = None
+                finish_reason = None
+                chunks = []
                 splitter = _StickerStream(STICKER_LIMIT, stickers_sent)
                 try:
                     for kind, payload in stream_chat(
@@ -203,9 +225,12 @@ class TaffyAgent:
                     ):
                         if kind == "message":
                             message = payload
+                        elif kind == "finish":
+                            finish_reason = payload
                         elif kind == "thinking":
                             yield {"type": "thinking", "text": payload}
                         else:
+                            chunks.append(payload)
                             # 正文里可能夹着 [sticker:mood]，边收边切开
                             for ev, value in splitter.feed(payload):
                                 if ev == "content":
@@ -216,8 +241,10 @@ class TaffyAgent:
                     for ev, value in splitter.flush():
                         yield {"type": "content", "text": value}
                 except Exception as exc:
+                    last_round = "".join(chunks)
                     yield {"type": "error", "message": f"模型请求失败：{exc}"}
                     return
+                last_round = "".join(chunks)
                 stickers_sent = splitter.used
 
                 if message is None:
@@ -232,6 +259,11 @@ class TaffyAgent:
                 self.messages.append(message)
                 calls = message.get("tool_calls")
                 if not calls:
+                    finished = True
+                    if finish_reason == "length":
+                        # 输出被 max_tokens 截断了：正文只写了一半，提示可以发「继续」
+                        self.cut_off = True
+                        yield {"type": "cut", "reason": "输出达到长度上限被截断"}
                     yield {"type": "done", "context": self.context_usage()}
                     return
 
@@ -281,9 +313,14 @@ class TaffyAgent:
                 # 收尾：正文写完了、工具只调了表情包 → 这一轮到此为止，
                 # 不再给模型「接着说」的机会，这是治刷屏的关键一步。
                 if sticker_only and message.get("content"):
+                    finished = True
+                    if finish_reason == "length":
+                        self.cut_off = True
+                        yield {"type": "cut", "reason": "输出达到长度上限被截断"}
                     yield {"type": "done", "context": self.context_usage()}
                     return
 
+            finished = True
             yield {"type": "content", "text": "喵呜…工具调太多次了，塔菲脑子转不动了喵"}
             yield {"type": "done", "context": self.context_usage()}
         finally:
@@ -293,6 +330,12 @@ class TaffyAgent:
                     "role": "user",
                     "content": (user_input + "\n" if user_input else "") + "[图片已阅，数据已清除]",
                 }
+
+            # 这一轮没正常结束（网络掐断 / 浏览器关了 / 生成器被取消）：
+            # 把已经说出去的那段正文补进历史，用户发「继续」时模型才知道说到哪儿了。
+            if not finished and last_round.strip():
+                self.messages.append({"role": "assistant", "content": last_round})
+                self.cut_off = True
 
     def ask(self, user_input: str):
         """终端版：把事件流直接打到屏幕上。"""

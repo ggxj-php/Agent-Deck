@@ -576,6 +576,10 @@ function handleEvent(turn, event) {
     case 'sticker':
       addSticker(turn, event.mood);
       break;
+    case 'cut':
+      noticeBubble(turn,
+        `塔菲话还没说完就断了（${event.reason || '网络中断'}）。发「继续」让塔菲接着讲喵～`);
+      break;
     case 'compressed':
       noticeBubble(turn,
         `这段聊得有点长啦，塔菲把前面 ${event.dropped} 条旧记录压成摘要了喵` +
