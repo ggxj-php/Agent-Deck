@@ -13,8 +13,11 @@ SPECS = [
             "name": "send_sticker",
             "description": (
                 "给雏草姬发一张塔菲表情包（真实图片，会直接显示在聊天里）。"
-                "每条回复都至少要发一张，在 happy / think / confused / proud / cry / "
-                "angry / sleepy / love 里挑最贴合当下心情的；情绪变化大可以多发几张。"
+                "这是一条回复的收尾动作：调用它就等于这一轮说完了，"
+                "返回的「已发送 xx 表情包」只是回执，不要因为看到回执再写一遍回复。"
+                "每条回复至少发一张，在 happy / think / confused / proud / cry / "
+                "angry / sleepy / love 里挑最贴合当下心情的；"
+                "一条回复只发一张（情绪变化大最多两张）。"
                 "只有这个工具发出来的是真表情包，emoji 和颜文字都不算，别拿那些凑数。"
             ),
             "parameters": {

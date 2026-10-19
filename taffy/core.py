@@ -4,7 +4,7 @@
 终端（ask/run）和网页后端都消费同一套事件，行为完全一致。
 """
 from . import context, settings
-from .config import EXIT_WORDS, MAX_ROUNDS
+from .config import EXIT_WORDS, MAX_ROUNDS, STICKER_LIMIT
 from .llm import stream_chat
 from .tools import TOOLS, execute
 
@@ -101,6 +101,7 @@ class TaffyAgent:
         base_url = settings.base_url_for(vision=vision)
 
         try:
+            stickers_sent = 0
             for _ in range(MAX_ROUNDS):
                 message = None
                 try:
@@ -133,6 +134,15 @@ class TaffyAgent:
                     yield {"type": "done", "context": self.context_usage()}
                     return
 
+                # 这一轮是不是只调了发表情包？表情包是「收尾动作」，发完这一轮就该结束。
+                #
+                # 以前不管什么工具都会继续下一轮：模型收到「已发送 xx 表情包」的回执，
+                # 又以为得再回一遍（人格里还写着「每条回复都要发一张」），于是每轮写一整段
+                # 正文 + 再发一张图，一个提问能刷出十几段话和十几张图（实测 40KB 正文）。
+                sticker_only = all(
+                    (c.get("function") or {}).get("name") == "send_sticker" for c in calls
+                )
+
                 for call in calls:
                     function = call["function"]
                     name = function["name"]
@@ -140,9 +150,17 @@ class TaffyAgent:
 
                     args, result = execute(name, function["arguments"])
 
-                    # 表情包不是让模型念出来的，是直接发出去，所以单独给个事件
-                    if name == "send_sticker" and isinstance(args, dict) and args.get("mood"):
-                        yield {"type": "sticker", "mood": args["mood"]}
+                    if name == "send_sticker":
+                        stickers_sent += 1
+                        if stickers_sent > STICKER_LIMIT:
+                            # 硬上限：这一轮发的够多了，回执改成提醒，图不再发出去
+                            result = "这一轮的表情包已经发够了，不用再发了"
+                            yield {"type": "tool_end", "name": name, "args": args, "result": result}
+                        elif isinstance(args, dict) and args.get("mood"):
+                            # 表情包不是让模型念出来的，是直接发出去，所以单独给个事件
+                            yield {"type": "sticker", "mood": args["mood"]}
+                        else:
+                            yield {"type": "tool_end", "name": name, "args": args, "result": result}
                     else:
                         yield {"type": "tool_end", "name": name, "args": args, "result": result}
 
@@ -151,6 +169,12 @@ class TaffyAgent:
                         "tool_call_id": call["id"],
                         "content": result,
                     })
+
+                # 收尾：正文写完了、工具只调了表情包 → 这一轮到此为止，
+                # 不再给模型「接着说」的机会，这是治刷屏的关键一步。
+                if sticker_only and message.get("content"):
+                    yield {"type": "done", "context": self.context_usage()}
+                    return
 
             yield {"type": "content", "text": "喵呜…工具调太多次了，塔菲脑子转不动了喵"}
             yield {"type": "done", "context": self.context_usage()}
