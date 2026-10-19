@@ -3,15 +3,87 @@
 对外主要是 ask_stream()：它是一个事件生成器，把思考、正文、工具调用逐段吐出来。
 终端（ask/run）和网页后端都消费同一套事件，行为完全一致。
 """
+import re
+
 from . import context, settings
 from .config import EXIT_WORDS, MAX_ROUNDS, STICKER_LIMIT
 from .llm import stream_chat
 from .tools import TOOLS, execute
+from .tools.sticker import MOODS
 
 # 内联图片只认 data:image/...;base64,... 这种。上限按 base64 字符串长度算，
 # 4MB 的原图编码后约 5.5MB，留点余量；再大就不收，免得一张巨图把内存顶爆。
 _IMAGE_PREFIX = "data:image/"
 _IMAGE_MAX_CHARS = 8 * 1024 * 1024
+
+# 正文里的表情包标记，形如 [sticker:happy]。
+#
+# 为什么用「正文标记」而不是工具调用：工具调用只能挂在一条消息的最末尾，
+# 后面没法再接正文，所以靠 send_sticker 工具永远做不出「文字-图-文字」。
+# 改成让模型在正文里写标记，服务端边收流边切成 sticker 事件，
+# 前端 contentChunk / addSticker 本来就是按顺序往气泡里追加，天然能交错。
+_STICKER_MARK = re.compile(r"\[\s*sticker\s*:\s*([a-zA-Z_]+)\s*\]", re.I)
+_MARK_PREFIX = "[sticker:"
+
+
+class _StickerStream:
+    """把正文流里的 [sticker:mood] 标记实时切出来，变成 content / sticker 事件。
+
+    增量流有两个麻烦：
+      1. 标记可能在两个 chunk 之间断开（"...[sti" + "cker:happy]"），不能急着显示；
+      2. 标记只是文字，模型写成什么样都得兜住（多余空格、大小写、拼错的 mood）。
+    所以攒着 buffer，能确定的立刻吐，疑似标记开头的尾巴留到下一块再说。
+    """
+
+    # 标记最长也就 "[sticker:confused]" 16 个字符，留点余量
+    _TAIL_MAX = 24
+
+    def __init__(self, limit, used=0):
+        self.buf = ""
+        self.limit = limit
+        self.used = used
+        self.dropped = 0        # 超过上限被丢掉几张
+
+    def feed(self, text):
+        """喂一段增量，返回 [(kind, value)]，kind 是 'content' 或 'sticker'。"""
+        self.buf += text or ""
+        events = []
+        while True:
+            match = _STICKER_MARK.search(self.buf)
+            if match:
+                if match.start():
+                    events.append(("content", self.buf[:match.start()]))
+                mood = match.group(1).lower()
+                if mood in MOODS and self.used < self.limit:
+                    self.used += 1
+                    events.append(("sticker", mood))
+                else:
+                    self.dropped += 1
+                self.buf = self.buf[match.end():]
+                continue
+
+            # 没有完整标记，检查结尾是不是标记的开头，是就先留着
+            cut = self.buf.rfind("[")
+            if cut != -1:
+                tail = self.buf[cut:]
+                if len(tail) <= self._TAIL_MAX and (
+                    _MARK_PREFIX.startswith(tail) or tail.startswith(_MARK_PREFIX)
+                ):
+                    if cut:
+                        events.append(("content", self.buf[:cut]))
+                    self.buf = tail
+                    return events
+
+            if self.buf:
+                events.append(("content", self.buf))
+                self.buf = ""
+            return events
+
+    def flush(self):
+        """一条消息结束了，把还攒着的尾巴当正文吐出来。"""
+        out = [("content", self.buf)] if self.buf else []
+        self.buf = ""
+        return out
 
 
 def _valid_image(image):
@@ -123,6 +195,7 @@ class TaffyAgent:
             stickers_sent = 0
             for _ in range(MAX_ROUNDS):
                 message = None
+                splitter = _StickerStream(STICKER_LIMIT, stickers_sent)
                 try:
                     for kind, payload in stream_chat(
                         _sendable(self.messages), TOOLS, model,
@@ -133,10 +206,19 @@ class TaffyAgent:
                         elif kind == "thinking":
                             yield {"type": "thinking", "text": payload}
                         else:
-                            yield {"type": "content", "text": payload}
+                            # 正文里可能夹着 [sticker:mood]，边收边切开
+                            for ev, value in splitter.feed(payload):
+                                if ev == "content":
+                                    yield {"type": "content", "text": value}
+                                else:
+                                    yield {"type": "sticker", "mood": value}
+                    # 这一轮收尾了，把还没吐的尾巴补上
+                    for ev, value in splitter.flush():
+                        yield {"type": "content", "text": value}
                 except Exception as exc:
                     yield {"type": "error", "message": f"模型请求失败：{exc}"}
                     return
+                stickers_sent = splitter.used
 
                 if message is None:
                     yield {"type": "error", "message": "模型没有返回任何内容"}
