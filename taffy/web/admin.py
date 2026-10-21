@@ -23,7 +23,10 @@ from pydantic import BaseModel
 from .. import llm, settings
 from ..config import ADMIN_PASSWORD_PREFIX, CONTEXT_COMPRESS_AT, EMBED_DIM
 from ..kb import stats as kb_stats
-from . import sysinfo, traffic, update
+from . import blacklist, sysinfo, traffic, update
+
+# 启动后台线程对一次账：名单里有、UFW 里没有的补回去（正常不会发生）
+blacklist.start_sync()
 
 router = APIRouter()
 
@@ -284,7 +287,10 @@ def _ip_prompt(d):
 def ip_detail(request: Request, ip: str, days: int = 7):
     """某个 IP 这段时间的访问明细：路径 / UA / 状态码 / 时间线。"""
     _require(request)
-    return traffic.ip_detail(ip, days=days)
+    detail = traffic.ip_detail(ip, days=days)
+    if detail.get("ok"):
+        detail["banned"] = ip.strip() in blacklist.banned_ips()
+    return detail
 
 
 @router.post("/api/admin/ip-analyze")
@@ -312,6 +318,45 @@ def ip_analyze(req: IpAnalyzeRequest, request: Request):
     with _ip_cache_lock:
         _ip_cache[key] = (time.time(), text)
     return {"ok": True, "analysis": text, "cached": False, "detail": detail}
+
+
+# ---------- IP 黑名单 ----------
+
+class BlacklistRequest(BaseModel):
+    ip: str
+    action: str = "add"        # add / remove
+    reason: str = ""
+
+
+def _actor_ip(request):
+    """操作者自己的 IP（nginx 会把真实 IP 放在 X-Real-IP）。"""
+    return (request.headers.get("x-real-ip")
+            or (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+            or (request.client.host if request.client else ""))
+
+
+@router.get("/api/admin/blacklist")
+def blacklist_state(request: Request):
+    """当前黑名单。"""
+    _require(request)
+    return {"ok": True, "bans": blacklist.list_bans()}
+
+
+@router.post("/api/admin/blacklist")
+def blacklist_change(req: BlacklistRequest, request: Request):
+    """加 / 解封。加的时候拒绝本机、内网、以及操作者自己的 IP。"""
+    _require(request)
+    action = (req.action or "add").strip().lower()
+    if action == "add":
+        result = blacklist.ban(req.ip, reason=req.reason, actor=_actor_ip(request))
+    elif action == "remove":
+        result = blacklist.unban(req.ip)
+    else:
+        raise HTTPException(status_code=400, detail="action 只能是 add 或 remove")
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "操作失败")
+    result["bans"] = blacklist.list_bans()
+    return result
 
 
 # ---------- 检查更新 ----------

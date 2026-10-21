@@ -631,13 +631,11 @@ function renderTraffic(info) {
     ? barRows(info.status.map((x) => ({ label: x.code, value: x.count, text: `${x.count} 次` })))
     : '<div class="hint">没有记录</div>';
 
-  // 访问最多的 IP
-  trafficIpsEl.innerHTML = (info.top_ips || []).length
-    ? info.top_ips.map((x) => `<div class="row clickable" role="button" tabindex="0" data-ip="${x.ip}">
-        <div class="row-main">${x.ip}<span class="row-sub">${x.place || ''}</span></div>
-        <div class="row-num">${x.count}</div>
-      </div>`).join('')
-    : '<div class="hint">没有记录</div>';
+  // 访问最多的 IP（全量，前端分页）
+  ipListData = info.top_ips || [];
+  ipPage = 1;
+  renderIpList();
+  loadBlacklist();
 }
 
 const trafficDayDetailEl = document.getElementById('traffic-day-detail');
@@ -717,6 +715,8 @@ async function openIpModal(ip) {
       return;
     }
     ipModalSubEl.textContent = ip;
+    ipModalBanned = !!d.banned;
+    paintBanButton();
     renderIpDetail(d);
     runIpAnalysis();     // 打开就自动分析（后端有半小时缓存，重复点不重复烧 token）
   } catch (err) {
@@ -746,6 +746,12 @@ async function runIpAnalysis() {
 }
 
 trafficIpsEl.addEventListener('click', (ev) => {
+  const btn = ev.target.closest ? ev.target.closest('.pager button') : null;
+  if (btn && !btn.disabled) {
+    ipPage += btn.dataset.page === 'prev' ? -1 : 1;
+    renderIpList();
+    return;
+  }
   const row = ev.target.closest ? ev.target.closest('.row.clickable') : null;
   if (row && row.dataset.ip) openIpModal(row.dataset.ip);
 });
@@ -759,6 +765,123 @@ ipModalRunEl.addEventListener('click', runIpAnalysis);
 ipModalEl.addEventListener('click', (ev) => {
   if (ev.target === ipModalEl) closeIpModal();   // 点遮罩关掉
 });
+
+/* IP 黑名单：封禁 / 解封（后端写 UFW） */
+
+let banList = [];
+let ipModalBanned = false;
+
+async function loadBlacklist() {
+  const el = document.getElementById('traffic-blacklist');
+  if (!el) return;
+  try {
+    const r = await api('/api/admin/blacklist');
+    banList = r.bans || [];
+  } catch (err) {
+    el.innerHTML = `<div class="hint">读不到黑名单：${err.message}</div>`;
+    return;
+  }
+  renderBlacklist();
+}
+
+function renderBlacklist() {
+  const el = document.getElementById('traffic-blacklist');
+  if (!el) return;
+  if (!banList.length) {
+    el.innerHTML = '<div class="hint">还没有封任何 IP</div>';
+    return;
+  }
+  el.innerHTML = banList.map((b) => `<div class="row">
+      <div class="row-main">${b.ip}<span class="row-sub">${b.ts || ''}${b.reason ? ' · ' + b.reason : ''}</span></div>
+      <button type="button" class="mini" data-unban="${b.ip}">解封</button>
+    </div>`).join('');
+}
+
+function paintBanButton() {
+  const btn = document.getElementById('ip-modal-ban');
+  if (!btn) return;
+  btn.textContent = ipModalBanned ? '解封' : '封禁';
+  btn.classList.toggle('danger', !ipModalBanned);
+}
+
+async function toggleBan() {
+  if (!ipModalIp) return;
+  const btn = document.getElementById('ip-modal-ban');
+  const wantBan = !ipModalBanned;
+  btn.disabled = true;
+  btn.textContent = wantBan ? '封禁中…' : '解封中…';
+  try {
+    const r = await api('/api/admin/blacklist', {
+      ip: ipModalIp,
+      action: wantBan ? 'add' : 'remove',
+      reason: wantBan ? '后台手动封禁' : '',
+    });
+    banList = r.bans || [];
+    ipModalBanned = wantBan;
+    renderBlacklist();
+    paintBanButton();
+    if (wantBan) {
+      ipModalSubEl.textContent = `${ipModalIp} · 已封禁（UFW 已生效）`;
+    } else {
+      ipModalSubEl.textContent = `${ipModalIp} · 已解封`;
+    }
+  } catch (err) {
+    btn.textContent = ipModalBanned ? '解封' : '封禁';
+    ipModalSubEl.textContent = `操作失败：${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('ip-modal-ban').addEventListener('click', toggleBan);
+document.getElementById('traffic-blacklist').addEventListener('click', async (ev) => {
+  const btn = ev.target.closest ? ev.target.closest('[data-unban]') : null;
+  if (!btn) return;
+  const ip = btn.dataset.unban;
+  btn.disabled = true;
+  btn.textContent = '解封中…';
+  try {
+    const r = await api('/api/admin/blacklist', { ip, action: 'remove' });
+    banList = r.bans || [];
+    renderBlacklist();
+  } catch (err) {
+    btn.textContent = '失败';
+  }
+});
+
+/* 「访问最多的 IP」分页：全量列，一页 IP_PAGE_SIZE 条 */
+
+const IP_PAGE_SIZE = 15;
+let ipListData = [];
+let ipPage = 1;
+
+function renderIpList() {
+  const total = ipListData.length;
+  if (!total) {
+    trafficIpsEl.innerHTML = '<div class="hint">没有记录</div>';
+    return;
+  }
+  const pages = Math.max(1, Math.ceil(total / IP_PAGE_SIZE));
+  ipPage = Math.min(Math.max(1, ipPage), pages);
+  const start = (ipPage - 1) * IP_PAGE_SIZE;
+  const rows = ipListData.slice(start, start + IP_PAGE_SIZE);
+
+  let html = rows.map((x) => `<div class="row clickable" role="button" tabindex="0" data-ip="${x.ip}">
+      <div class="row-main">${x.ip}<span class="row-sub">${x.place || ''}</span></div>
+      <div class="row-num">${x.count}</div>
+    </div>`).join('');
+
+  if (pages > 1) {
+    html += `<div class="pager">
+      <button type="button" data-page="prev" ${ipPage <= 1 ? 'disabled' : ''}>上一页</button>
+      <span class="pager-info">第 ${ipPage} / ${pages} 页 · 共 ${total} 个</span>
+      <button type="button" data-page="next" ${ipPage >= pages ? 'disabled' : ''}>下一页</button>
+    </div>`;
+  } else {
+    html += `<div class="pager"><span class="pager-info">共 ${total} 个 IP</span></div>`;
+  }
+  trafficIpsEl.innerHTML = html;
+}
 
 async function loadTraffic() {
   if (panelView.hidden || trafficBusy) return;

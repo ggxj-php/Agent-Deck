@@ -21,6 +21,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
 from ..config import PROJECT_ROOT
+from . import blacklist
 
 LOG_DIR = "/var/log/nginx"
 ACCESS_LOG = os.path.join(LOG_DIR, "access.log")
@@ -426,6 +427,7 @@ def _compute(days, overseas):
             hour=0, minute=0, second=0, microsecond=0)
 
     in_tencent = _tencent_matcher()
+    banned_ips = blacklist.banned_ips()
 
     # 第一遍：收集候选 IP（排掉本机 / 扫描器 / 腾讯网段），查归属地
     #
@@ -465,7 +467,7 @@ def _compute(days, overseas):
                 if (geo.get(ip) or {}).get("country") in ("中国", "China", "")}
 
     # 第二遍：出统计
-    n_loop = n_bots = n_tc = n_os = n_idc = 0
+    n_loop = n_bots = n_tc = n_os = n_idc = n_ban = 0
     requests = pv = chat = 0
     bytes_out = 0
     rt_sum = 0.0
@@ -484,6 +486,9 @@ def _compute(days, overseas):
 
         if ip in LOOPBACK:
             n_loop += 1
+            continue
+        if ip in banned_ips:
+            n_ban += 1
             continue
         if ip in scanner_ips:
             n_bots += 1
@@ -564,6 +569,7 @@ def _compute(days, overseas):
             "overseas": n_os,
             "idc": n_idc,
             "bot_ips": len(scanner_ips),
+            "blacklist": n_ban,
         },
         "per_day": [
             {"date": d, "requests": v["requests"], "pv": v["pv"],
@@ -580,9 +586,10 @@ def _compute(days, overseas):
             {"name": name, "count": c, "percent": round(c * 100.0 / total_ips, 1)}
             for name, c in region.most_common()
         ],
+        # 全量给，前端自己分页（真实访客本来就不多，多的时候也不至于截断）
         "top_ips": [
             {"ip": ip, "count": c, "place": _geo_place(geo.get(ip))}
-            for ip, c in ip_count.most_common(10)
+            for ip, c in ip_count.most_common()
         ],
         "log_files": len(files),
     }

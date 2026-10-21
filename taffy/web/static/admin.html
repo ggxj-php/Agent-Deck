@@ -238,6 +238,12 @@
           <div id="traffic-ips" class="rows"></div>
           <p class="hint">排掉本机、扫描器、机房、腾讯网段之后的真实访客；只算加载过前端资源的（只抓首页那种算扫描器）。</p>
         </div>
+
+        <div class="card">
+          <h2>IP 黑名单</h2>
+          <p class="hint">封禁会写进 UFW（所有端口都拦，服务器重启也还在），只支持公网 IPv4。本机 / 内网 / 你自己当前的 IP 会被拒绝。</p>
+          <div id="traffic-blacklist" class="rows"></div>
+        </div>
       </section>
 
       <!-- ---------- 模型 ---------- -->
@@ -576,6 +582,7 @@
     <div id="ip-modal-ai" class="ip-ai" hidden></div>
     <div class="modal-btns">
       <button type="button" id="ip-modal-close" class="modal-cancel">关闭</button>
+      <button type="button" id="ip-modal-ban">封禁</button>
       <button type="button" id="ip-modal-run" hidden>重新分析</button>
     </div>
   </div>
