@@ -1690,3 +1690,27 @@ sup, sub { font-size: 0.72em; line-height: 0; }
   .hbar { grid-template-columns: 74px 1fr auto; }
   .day-bar-wrap { height: 84px; }
 }
+
+/* 按天柱子：可点选 + 下方明细（手机没有 hover，靠点击看数） */
+.day-col {
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 2px 1px 1px;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .15s ease;
+}
+
+.day-col.on { background: #fff0f7; }
+.day-col.on .day-num { color: var(--pink-deep); font-weight: 600; }
+.day-col.on .day-label { color: var(--pink-deep); }
+.day-col:focus-visible { outline: 2px solid var(--pink-dark); outline-offset: 2px; }
+
+.day-detail {
+  margin: 8px 0 0;
+  min-height: 19px;
+  font-size: 12.5px;
+  color: var(--ink);
+  line-height: 1.6;
+}
+
+.day-detail b { color: var(--pink-deep); }

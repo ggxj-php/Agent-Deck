@@ -599,13 +599,19 @@ function renderTraffic(info) {
     const max = Math.max(1, ...days.map((d) => d.requests));
     trafficDaysEl.innerHTML = days.map((d) => {
       const h = Math.max(3, Math.round((d.requests / max) * 100));
-      return `<div class="day-col" title="${d.date}：${d.requests} 次请求 / PV ${d.pv} / ${d.ips} 个 IP / 聊天 ${d.chat}">
+      const title = `${d.date}：${d.requests} 次请求 / PV ${d.pv} / ${d.ips} 个 IP / 聊天 ${d.chat}`;
+      // 手机没有 hover，所以整根柱子做成可点的，明细显示在下面那行
+      return `<div class="day-col" role="button" tabindex="0" title="${title}"
+                   data-date="${d.date}" data-req="${d.requests}" data-pv="${d.pv}"
+                   data-ips="${d.ips}" data-chat="${d.chat}">
         <div class="day-num">${d.requests}</div>
         <div class="day-bar-wrap"><div class="day-bar" style="height:${h}%"></div></div>
         <div class="day-label">${d.date.slice(5)}</div>
       </div>`;
     }).join('');
-    trafficDaysHintEl.textContent = '柱高按「总请求数」；鼠标停上去能看到当天的 PV / 独立 IP / 聊天数。';
+    trafficDaysHintEl.textContent = '柱高按「总请求数」；点一下柱子，当天的明细显示在下面（电脑上也可以悬停）。';
+    // 默认把最后一天选中，手机上一进来就有数看
+    paintDayDetail(trafficDaysEl.lastElementChild);
   }
 
   // 地区分布
@@ -633,6 +639,31 @@ function renderTraffic(info) {
       </div>`).join('')
     : '<div class="hint">没有记录</div>';
 }
+
+const trafficDayDetailEl = document.getElementById('traffic-day-detail');
+
+function paintDayDetail(col) {
+  if (!trafficDayDetailEl) return;
+  trafficDaysEl.querySelectorAll('.day-col').forEach((c) => c.classList.toggle('on', c === col));
+  if (!col || !col.dataset.date) {
+    trafficDayDetailEl.textContent = '点柱子看当天明细喵';
+    return;
+  }
+  const d = col.dataset;
+  trafficDayDetailEl.innerHTML = `<b>${d.date}</b> · ${d.req} 次请求 · PV ${d.pv}` +
+    ` · 独立 IP ${d.ips} · 聊天 ${d.chat}`;
+}
+
+// 点击 / 回车都能选中（手机上只有点击）
+trafficDaysEl.addEventListener('click', (ev) => {
+  const col = ev.target.closest ? ev.target.closest('.day-col') : null;
+  if (col) paintDayDetail(col);
+});
+trafficDaysEl.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  const col = ev.target.closest ? ev.target.closest('.day-col') : null;
+  if (col) { ev.preventDefault(); paintDayDetail(col); }
+});
 
 async function loadTraffic() {
   if (panelView.hidden || trafficBusy) return;
