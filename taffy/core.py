@@ -3,6 +3,7 @@
 对外主要是 ask_stream()：它是一个事件生成器，把思考、正文、工具调用逐段吐出来。
 终端（ask/run）和网页后端都消费同一套事件，行为完全一致。
 """
+import json
 import re
 
 from . import context, settings
@@ -282,6 +283,19 @@ class TaffyAgent:
                     yield {"type": "tool_start", "name": name, "arguments": function["arguments"]}
 
                     args, result = execute(name, function["arguments"])
+
+                    # 画图的产物要在前端插一张卡片，所以除了回执再单独发个事件
+                    if name == "render_html":
+                        try:
+                            payload = json.loads(result)
+                        except Exception:
+                            payload = {}
+                        if payload.get("artifact_id"):
+                            yield {
+                                "type": "artifact",
+                                "id": payload["artifact_id"],
+                                "title": payload.get("title") or "",
+                            }
 
                     if name == "send_sticker":
                         # 一次调用可以带多张（moods 数组），逐个发出去。

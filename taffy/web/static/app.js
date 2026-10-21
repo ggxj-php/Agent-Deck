@@ -407,6 +407,56 @@ function addSticker(turn, mood) {
   updateToBottom();
 }
 
+// 塔菲画的图：用沙箱 iframe 渲染，脚本能跑但摸不到父页面
+function addArtifact(turn, event) {
+  settleThinking(turn);
+  turn.content = null;
+
+  const id = String(event.id || '').replace(/[^0-9a-f]/gi, '');
+  if (!id) return;
+
+  const wrap = el('div', 'artifact');
+
+  const bar = el('div', 'artifact-bar');
+  const title = el('span', 'artifact-title');
+  title.textContent = event.title || '塔菲画的图';
+  const open = el('a', 'artifact-open');
+  open.href = `/api/artifact/${id}`;
+  open.target = '_blank';
+  open.rel = 'noopener noreferrer';
+  open.textContent = '放大';
+  bar.appendChild(title);
+  bar.appendChild(open);
+
+  const frame = el('iframe', 'artifact-frame');
+  // 关键：只给 allow-scripts，绝不带 allow-same-origin ——
+  // 这样脚本跑在不透明源里，读不到本站的 cookie / localStorage，也摸不到父页面
+  frame.setAttribute('sandbox', 'allow-scripts');
+  frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.setAttribute('loading', 'lazy');
+  frame.setAttribute('title', event.title || '塔菲画的图');
+  frame.src = `/api/artifact/${id}`;
+
+  wrap.appendChild(bar);
+  wrap.appendChild(frame);
+  turn.bubble.appendChild(wrap);
+  updateToBottom();
+}
+
+// 产物里的脚本会把自身高度报上来，据此调整 iframe 高度（最高 820px）
+window.addEventListener('message', (event) => {
+  const data = event.data;
+  if (!data || data.type !== 'taffy-artifact-height') return;
+  const frames = document.querySelectorAll('iframe.artifact-frame');
+  for (const frame of frames) {
+    if (frame.contentWindow === event.source) {
+      const height = Number(data.height) || 0;
+      if (height > 0) frame.style.height = Math.max(120, Math.min(820, height)) + 'px';
+      break;
+    }
+  }
+});
+
 function errorBubble(turn, message) {
   settleThinking(turn);
   turn.content = null;
@@ -575,6 +625,9 @@ function handleEvent(turn, event) {
       break;
     case 'sticker':
       addSticker(turn, event.mood);
+      break;
+    case 'artifact':
+      addArtifact(turn, event);
       break;
     case 'cut':
       noticeBubble(turn,

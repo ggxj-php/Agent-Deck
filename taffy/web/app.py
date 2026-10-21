@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from .. import settings
 from ..config import CONTEXT_COMPRESS_AT
 from ..core import TaffyAgent
+from ..tools import render as render_tool
 from ..kb import warmup
 from . import sessions_store, stickers
 from .admin import router as admin_router
@@ -102,6 +103,31 @@ def index():
 def ping():
     """前端从后台切回来时探活用，不碰会话。"""
     return {"ok": True}
+
+
+@app.get("/api/artifact/{artifact_id}")
+def get_artifact(artifact_id: str):
+    """把塔菲画的那张图取出来给 iframe 渲染。
+
+    这个响应带两个硬防护：
+      * `Content-Security-Policy: sandbox allow-scripts` —— 就算有人把地址直接
+        丢到新标签页打开，文档也跑在不透明源里，读不到本站的 cookie / localStorage；
+      * 其余 CSP 全是 'none'，外链资源、fetch、表单提交一律禁掉。
+    """
+    item = render_tool.get_artifact(artifact_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="这张图过期或者不存在了喵")
+    from fastapi import Response
+    return Response(
+        content=item["html"],
+        media_type="text/html; charset=utf-8",
+        headers={
+            "Content-Security-Policy": render_tool.ARTIFACT_CSP,
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @app.get("/api/stickers")

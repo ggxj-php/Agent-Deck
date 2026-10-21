@@ -5,9 +5,9 @@
 import json
 
 from . import (asm86, asm_sim, basics, calc, files, forensics, kb, logic, mcu,
-               numconv, runner, search, sticker, text)
+               numconv, render, runner, search, sticker, text)
 
-_MODULES = (basics, kb, search, files, forensics, runner, sticker,
+_MODULES = (basics, kb, search, files, forensics, runner, sticker, render,
             asm_sim, asm86, mcu, logic, numconv, calc, text)
 
 TOOLS = []
