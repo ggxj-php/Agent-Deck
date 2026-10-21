@@ -1925,3 +1925,16 @@ sup, sub { font-size: 0.72em; line-height: 0; }
   background: #ffe9e9;
   color: #c62828;
 }
+
+/* 风险条目上的站点标注 */
+.risk-site {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #f0f4ff;
+  color: #3b5bdb;
+  font-size: 10.5px;
+  font-weight: 600;
+  vertical-align: middle;
+}

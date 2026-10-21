@@ -62,6 +62,33 @@ BOT_PATH = re.compile(
 )
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
 
+# 站点口径。日志里两个站混在一起：www 是塔菲，api 是 one-api；
+# 裸 IP 和随机 Host 头都落到默认 server（one-api）。
+SITE_WWW = "www.taffy.icu"
+SITE_API = "api.taffy.icu"
+SITE_LABELS = {SITE_WWW: "www", SITE_API: "api"}
+SITE_ALIASES = {"www": SITE_WWW, "api": SITE_API, "all": "all", "": SITE_WWW}
+
+
+def norm_site(site):
+    s = (site or "www").strip().lower()
+    return SITE_ALIASES.get(s, SITE_WWW)
+
+
+def site_of(rec):
+    """这条请求属于哪个站。"""
+    host = (rec["host"] or "").strip().lower()
+    if host == SITE_WWW:
+        return SITE_WWW
+    if host == SITE_API:
+        return SITE_API
+    if not host:
+        # 老日志没有 host 字段，按路径猜
+        guess = _classify("", rec["url"].split("?")[0], rec["ref"] or "")
+        return SITE_API if guess == SITE_API else SITE_WWW
+    # 裸 IP / 各种随机 Host 头 → 默认 server 是 one-api
+    return SITE_API
+
 # 真访客才会碰的路径：前端资源 / 接口 / 头像。扫描器一般只抓 HTML 表面
 # 扫描器也会抓 favicon / logo，所以只认「真前端」才有的：打包 js/css 和头像。
 # **不能把 /api/ 算进来**：扫描器最爱挨个试 /api/user/login、/api/config 这类接口，
@@ -418,7 +445,7 @@ def _human(n):
 
 # ---------------- 主逻辑 ----------------
 
-def _compute(days, overseas, scanners=True):
+def _compute(days, overseas, scanners=True, only_site=SITE_WWW):
     files = _log_files(days)
     if not files:
         return {"ok": False, "error": "找不到 nginx 访问日志（要 root 才能读）"}
@@ -440,6 +467,8 @@ def _compute(days, overseas, scanners=True):
     scanner_ips = set()
     app_ips = set()   # 真正加载过前端资源（JS/CSS/接口）的 IP，才算真访客
     for r in _iter_records(files, since):
+        if only_site != "all" and site_of(r) != only_site:
+            continue
         ip = r["ip"]
         if ip in LOOPBACK:
             continue
@@ -484,6 +513,8 @@ def _compute(days, overseas, scanners=True):
     first_ts = last_ts = None
 
     for r in _iter_records(files, since):
+        if only_site != "all" and site_of(r) != only_site:
+            continue
         ip = r["ip"]
         base = r["url"].split("?")[0]
 
@@ -553,6 +584,8 @@ def _compute(days, overseas, scanners=True):
         "days": days,
         "overseas": bool(overseas),
         "scanners": bool(scanners),
+        "site": only_site,
+        "site_label": SITE_LABELS.get(only_site, "全部站点"),
         "range": {
             "from": first_ts.strftime("%Y-%m-%d") if first_ts else "",
             "to": last_ts.strftime("%Y-%m-%d") if last_ts else "",
@@ -599,10 +632,11 @@ def _compute(days, overseas, scanners=True):
     }
 
 
-def snapshot(days=7, overseas=False, scanners=True):
+def snapshot(days=7, overseas=False, scanners=True, site="www"):
     """给后台接口用：带 60 秒缓存 + 单线程扫描。"""
     days = max(0, min(int(days or 0), 90))
-    key = (days, bool(overseas), bool(scanners))
+    site = norm_site(site)
+    key = (days, bool(overseas), bool(scanners), site)
     now = time.time()
     cached = _cached.get(key)
     if cached and now - cached[0] < _CACHE_TTL:
@@ -617,7 +651,7 @@ def snapshot(days=7, overseas=False, scanners=True):
         again = _cached.get(key)
         if again and time.time() - again[0] < _CACHE_TTL:
             return again[1]
-        payload = _compute(days, overseas, scanners)
+        payload = _compute(days, overseas, scanners, site)
         _cached[key] = (time.time(), payload)
         return payload
     finally:
@@ -752,7 +786,7 @@ LOGIN_HINTS = (
 RISK_MIN_SCORE = 20
 
 
-def risk_candidates(days=7, limit=30):
+def risk_candidates(days=7, limit=30, site="all"):
     """从日志里按启发式挑出最可疑的一批 IP，交给模型做终审。
 
     为什么要粗筛：全量日志喂给模型又贵又没必要。这里先用规则打分，
@@ -773,7 +807,10 @@ def risk_candidates(days=7, limit=30):
         "paths": Counter(), "status": Counter(), "uas": Counter(), "hosts": Counter(),
     })
 
+    site = norm_site(site)
     for r in _iter_records(files, since):
+        if only_site != "all" and site_of(r) != only_site:
+            continue
         ip = r["ip"]
         if ip in LOOPBACK:
             continue
@@ -783,6 +820,7 @@ def risk_candidates(days=7, limit=30):
         d["paths"][base] += 1
         d["status"][r["status"]] += 1
         d["uas"][(r["ua"] or "-")[:90]] += 1
+        d["sites"][SITE_LABELS.get(site_of(r), "其他")] += 1
         d["hosts"][r["host"] or "-"] += 1
         if is_sensitive_path(base):
             d["sens"] += 1
@@ -837,6 +875,7 @@ def risk_candidates(days=7, limit=30):
             "login": d["login"],
             "garbage": d["garbage"],
             "static_hits": static_hits,
+            "sites": "/".join(s for s, _ in d["sites"].most_common()),
         })
 
     cands.sort(key=lambda x: -x["score"])

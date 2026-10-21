@@ -234,7 +234,8 @@ def sysinfo_state(request: Request):
 # ---------- 访问日志 / 流量 ----------
 
 @router.get("/api/admin/traffic")
-def traffic_state(request: Request, days: int = 7, overseas: int = 0, scanners: int = 1):
+def traffic_state(request: Request, days: int = 7, overseas: int = 0,
+                  scanners: int = 1, site: str = "www"):
     """访问日志统计：页面访问 / 独立 IP / 地区分布 / 热门路径 / 状态码。
 
     口径和命令行版 /root/taffy-traffic.py 一样：排掉本机、扫描器、腾讯网段，
@@ -242,7 +243,8 @@ def traffic_state(request: Request, days: int = 7, overseas: int = 0, scanners: 
     结果在模块里缓存 60 秒，重复点不会反复扫日志。
     """
     _require(request)
-    return traffic.snapshot(days=days, overseas=bool(overseas), scanners=bool(scanners))
+    return traffic.snapshot(days=days, overseas=bool(overseas),
+                            scanners=bool(scanners), site=site)
 
 
 # 同一个 IP 半小时内分析过就直接给结果，别让人多点几次就多烧几次 token

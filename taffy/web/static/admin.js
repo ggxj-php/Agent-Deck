@@ -601,7 +601,9 @@ function renderTraffic(info) {
   const parts = [`本机 ${ex.loopback || 0}`, `扫描器 ${ex.bots || 0} 次 / ${ex.bot_ips || 0} 个 IP`, `机房/云 ${ex.idc || 0}`, `腾讯网段 ${ex.tencent || 0}`];
   if (!info.overseas) parts.push(`海外 ${ex.overseas || 0}`);
   if (!info.scanners) parts.unshift('（扫描器没过滤）');
-  trafficHintEl.textContent = `${info.log_files || 0} 个日志文件 · 已排除：${parts.join(' · ')} · ` +
+  const scope = info.site_label && info.site_label !== '全部站点'
+    ? `仅 ${info.site_label}.taffy.icu` : '全部站点';
+  trafficHintEl.textContent = `统计范围：${scope} · ${info.log_files || 0} 个日志文件 · 已排除：${parts.join(' · ')} · ` +
     `算于 ${info.generated_at || ''}（60 秒内不会重算）`;
 
   // 按天趋势
@@ -852,6 +854,7 @@ function renderRiskList(data) {
       <div class="row-main">
         <span class="risk-badge ${it.risk}">${RISK_LABEL[it.risk] || it.risk}</span>
         <span class="risk-ip">${it.ip}</span>
+        <span class="risk-site">${it.sites || ''}</span>
         <span class="row-sub">${it.role || ''}${it.place ? ' · ' + it.place.split(' ').slice(-2).join(' ') : ''}</span>
         <div class="risk-reason">${it.reason || ''}</div>
       </div>
