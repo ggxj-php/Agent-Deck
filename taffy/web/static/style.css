@@ -1714,3 +1714,79 @@ sup, sub { font-size: 0.72em; line-height: 0; }
 }
 
 .day-detail b { color: var(--pink-deep); }
+
+/* ---------- 后台：IP 分析弹窗 ---------- */
+.row.clickable {
+  cursor: pointer;
+  border-radius: 8px;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .15s ease;
+}
+
+.row.clickable:hover { background: #fff6fb; }
+.row.clickable:focus-visible { outline: 2px solid var(--pink-dark); outline-offset: 2px; }
+
+.modal-box.wide {
+  max-width: 560px;
+  max-height: 82vh;
+  overflow-y: auto;
+}
+
+.ip-detail { font-size: 12.5px; color: var(--ink); }
+
+.ip-meta {
+  margin: 0 0 6px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.ip-flag { color: var(--pink-deep); }
+
+.ip-block { margin: 8px 0; }
+
+.ip-label {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  margin-bottom: 4px;
+}
+
+.ip-chip {
+  display: inline-block;
+  margin: 0 4px 4px 0;
+  padding: 2px 7px;
+  border-radius: 8px;
+  background: #fff0f7;
+  color: var(--pink-deep);
+  font-size: 11.5px;
+  word-break: break-all;
+}
+
+.ip-timeline {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 180px;
+  overflow: auto;
+  border-radius: 10px;
+  background: #fdf6fa;
+  border: 1px solid var(--line);
+  font-size: 11.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.ip-ai {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff6fb;
+  border: 1px solid #ffd9e8;
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink);
+}
+
+.ip-ai.busy { color: var(--ink-soft); }

@@ -611,3 +611,65 @@ def snapshot(days=7, overseas=False):
         return payload
     finally:
         _lock.release()
+
+
+# ---------------- 单个 IP 的明细（给后台「AI 分析」用） ----------------
+
+def ip_detail(ip, days=7, sample=40):
+    """把某个 IP 这段时间的访问记录整理成一份「给模型看」的精简材料。
+
+    只取前 sample 条请求，UA / 路径 / 状态码各取 top，避免把整本日志喂给模型
+    （既贵又没用）。
+    """
+    ip = (ip or "").strip()
+    if not ip or not re.fullmatch(r"[0-9a-fA-F:.]{3,45}", ip):
+        return {"ok": False, "error": "IP 格式不对"}
+
+    files = _log_files(days)
+    if not files:
+        return {"ok": False, "error": "找不到 nginx 访问日志"}
+
+    since = None
+    if days:
+        since = (datetime.now(LOCAL_TZ) - timedelta(days=days - 1)).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+
+    recs = [r for r in _iter_records(files, since) if r["ip"] == ip]
+    if not recs:
+        return {"ok": False, "error": "这段时间没有这个 IP 的记录"}
+
+    geo = (_load_geo().get(ip) or {})
+    status = Counter(r["status"] for r in recs)
+    paths = Counter(r["url"].split("?")[0] for r in recs)
+    uas = Counter((r["ua"] or "-") for r in recs)
+    hosts = Counter((r["host"] or "-") for r in recs)
+
+    return {
+        "ok": True,
+        "ip": ip,
+        "days": days,
+        "geo": {
+            "country": geo.get("country") or "",
+            "region": geo.get("region") or "",
+            "city": geo.get("city") or "",
+            "isp": geo.get("isp") or "",
+            "as": geo.get("as") or "",
+            "idc": _is_idc(geo),
+        },
+        "count": len(recs),
+        "first": recs[0]["ts"].strftime("%m-%d %H:%M:%S"),
+        "last": recs[-1]["ts"].strftime("%m-%d %H:%M:%S"),
+        "statuses": status.most_common(6),
+        "paths": paths.most_common(12),
+        "uas": [(ua[:120], n) for ua, n in uas.most_common(4)],
+        "hosts": hosts.most_common(4),
+        "samples": [
+            {
+                "t": r["ts"].strftime("%m-%d %H:%M:%S"),
+                "status": r["status"],
+                "path": r["url"][:120],
+                "ua": (r["ua"] or "-")[:80],
+            }
+            for r in recs[:sample]
+        ],
+    }

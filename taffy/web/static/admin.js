@@ -633,7 +633,7 @@ function renderTraffic(info) {
 
   // 访问最多的 IP
   trafficIpsEl.innerHTML = (info.top_ips || []).length
-    ? info.top_ips.map((x) => `<div class="row">
+    ? info.top_ips.map((x) => `<div class="row clickable" role="button" tabindex="0" data-ip="${x.ip}">
         <div class="row-main">${x.ip}<span class="row-sub">${x.place || ''}</span></div>
         <div class="row-num">${x.count}</div>
       </div>`).join('')
@@ -663,6 +663,101 @@ trafficDaysEl.addEventListener('keydown', (ev) => {
   if (ev.key !== 'Enter' && ev.key !== ' ') return;
   const col = ev.target.closest ? ev.target.closest('.day-col') : null;
   if (col) { ev.preventDefault(); paintDayDetail(col); }
+});
+
+/* 点 IP 弹窗：先看日志明细，再让当前接入的模型分析它在干什么 */
+
+const ipModalEl = document.getElementById('ip-modal');
+const ipModalTitleEl = document.getElementById('ip-modal-title');
+const ipModalSubEl = document.getElementById('ip-modal-sub');
+const ipModalDetailEl = document.getElementById('ip-modal-detail');
+const ipModalAiEl = document.getElementById('ip-modal-ai');
+const ipModalRunEl = document.getElementById('ip-modal-run');
+const ipModalCloseEl = document.getElementById('ip-modal-close');
+let ipModalIp = null;
+
+function closeIpModal() {
+  ipModalEl.hidden = true;
+  ipModalIp = null;
+}
+
+function renderIpDetail(d) {
+  const g = d.geo || {};
+  const place = [g.country, g.region, g.city].filter(Boolean).join(' ');
+  const rows = [];
+  rows.push(`<div class="ip-meta">${place || '归属未知'}${g.isp ? ' · ' + g.isp : ''}` +
+    `${g.as ? ' · ' + g.as : ''}${g.idc ? ' · <b class="ip-flag">疑似机房</b>' : ''}</div>`);
+  rows.push(`<div class="ip-meta">${d.first} ~ ${d.last}，共 <b>${d.count}</b> 次请求</div>`);
+  rows.push('<div class="ip-block"><div class="ip-label">状态码</div>' +
+    d.statuses.map(([c, n]) => `<span class="ip-chip">${c} × ${n}</span>`).join('') + '</div>');
+  rows.push('<div class="ip-block"><div class="ip-label">访问路径</div>' +
+    d.paths.slice(0, 8).map(([p, n]) => `<span class="ip-chip">${p} × ${n}</span>`).join('') + '</div>');
+  rows.push('<div class="ip-block"><div class="ip-label">User-Agent</div>' +
+    d.uas.map(([ua, n]) => `<span class="ip-chip">${n}× ${ua}</span>`).join('') + '</div>');
+  rows.push('<div class="ip-block"><div class="ip-label">时间线（前 ' + d.samples.length + ' 条）</div>' +
+    '<pre class="ip-timeline">' + d.samples.map((s) =>
+      `${s.t}  ${s.status}  ${s.path}`).join('\n') + '</pre></div>');
+  ipModalDetailEl.innerHTML = rows.join('');
+}
+
+async function openIpModal(ip) {
+  ipModalIp = ip;
+  ipModalTitleEl.textContent = ip;
+  ipModalSubEl.textContent = '正在读取日志…';
+  ipModalDetailEl.innerHTML = '';
+  ipModalAiEl.hidden = true;
+  ipModalAiEl.textContent = '';
+  ipModalRunEl.hidden = true;
+  ipModalEl.hidden = false;
+
+  try {
+    const d = await api(`/api/admin/ip-detail?ip=${encodeURIComponent(ip)}&days=${trafficDays}`);
+    if (!d.ok) {
+      ipModalSubEl.textContent = d.error || '读不到记录';
+      return;
+    }
+    ipModalSubEl.textContent = ip;
+    renderIpDetail(d);
+    runIpAnalysis();     // 打开就自动分析（后端有半小时缓存，重复点不重复烧 token）
+  } catch (err) {
+    ipModalSubEl.textContent = `读不到：${err.message}`;
+  }
+}
+
+async function runIpAnalysis() {
+  if (!ipModalIp) return;
+  ipModalRunEl.hidden = true;
+  ipModalAiEl.hidden = false;
+  ipModalAiEl.textContent = '塔菲正在分析这个 IP 的日志…';
+  ipModalAiEl.classList.add('busy');
+  try {
+    const r = await api('/api/admin/ip-analyze', { ip: ipModalIp, days: trafficDays });
+    ipModalAiEl.textContent = r.analysis || '（没分析出东西）';
+    ipModalAiEl.classList.remove('busy');
+    if (r.cached) {
+      ipModalAiEl.insertAdjacentHTML('beforeend', '\n\n（这半小时内分析过，直接用缓存）');
+    }
+    ipModalRunEl.hidden = false;
+  } catch (err) {
+    ipModalAiEl.classList.remove('busy');
+    ipModalAiEl.textContent = `分析失败：${err.message}`;
+    ipModalRunEl.hidden = false;
+  }
+}
+
+trafficIpsEl.addEventListener('click', (ev) => {
+  const row = ev.target.closest ? ev.target.closest('.row.clickable') : null;
+  if (row && row.dataset.ip) openIpModal(row.dataset.ip);
+});
+trafficIpsEl.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  const row = ev.target.closest ? ev.target.closest('.row.clickable') : null;
+  if (row && row.dataset.ip) { ev.preventDefault(); openIpModal(row.dataset.ip); }
+});
+ipModalCloseEl.addEventListener('click', closeIpModal);
+ipModalRunEl.addEventListener('click', runIpAnalysis);
+ipModalEl.addEventListener('click', (ev) => {
+  if (ev.target === ipModalEl) closeIpModal();   // 点遮罩关掉
 });
 
 async function loadTraffic() {

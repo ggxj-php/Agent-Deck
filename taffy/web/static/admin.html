@@ -567,5 +567,19 @@
 </div>
 
 <script src="/static/admin.js"></script>
+<!-- IP 分析弹窗（点「访问最多的 IP」里的一行打开） -->
+<div class="modal" id="ip-modal" hidden>
+  <div class="modal-box wide">
+    <h3 id="ip-modal-title">IP 分析</h3>
+    <p class="modal-hint" id="ip-modal-sub"></p>
+    <div id="ip-modal-detail" class="ip-detail">正在读取日志…</div>
+    <div id="ip-modal-ai" class="ip-ai" hidden></div>
+    <div class="modal-btns">
+      <button type="button" id="ip-modal-close" class="modal-cancel">关闭</button>
+      <button type="button" id="ip-modal-run" hidden>重新分析</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

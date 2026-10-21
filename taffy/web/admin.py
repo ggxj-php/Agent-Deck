@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .. import settings
+from .. import llm, settings
 from ..config import ADMIN_PASSWORD_PREFIX, CONTEXT_COMPRESS_AT, EMBED_DIM
 from ..kb import stats as kb_stats
 from . import sysinfo, traffic, update
@@ -239,6 +239,79 @@ def traffic_state(request: Request, days: int = 7, overseas: int = 0):
     """
     _require(request)
     return traffic.snapshot(days=days, overseas=bool(overseas))
+
+
+# 同一个 IP 半小时内分析过就直接给结果，别让人多点几次就多烧几次 token
+_ip_cache = {}
+_ip_cache_lock = threading.Lock()
+IP_ANALYSIS_TTL = 1800
+
+_IP_SYSTEM_PROMPT = (
+    "你是网站运维安全分析师。根据给定的访问日志判断这个 IP 是什么角色。\n"
+    "严格按下面三行输出，不要客套、不要多余的话：\n"
+    "角色：<真实访客 / 搜索引擎爬虫 / 漏洞扫描器 / 账号爆破 / 内容采集器 / "
+    "云厂商探测 / 网络空间测绘 / 其他>\n"
+    "依据：<一两句，必须引用日志里的具体证据>\n"
+    "建议：<一句话：放行 / 观察 / 封禁>\n"
+    "依据必须只来自给定的日志数据，不许编造日志里没有的路径或行为；"
+    "数据不足就直接说「证据不足」。"
+)
+
+
+class IpAnalyzeRequest(BaseModel):
+    ip: str
+    days: int = 7
+
+
+def _ip_prompt(d):
+    """把 ip_detail 的材料压成一段给模型看的文字。"""
+    g = d["geo"]
+    lines = [
+        f"IP：{d['ip']}",
+        f"归属：{g['country']} {g['region']} {g['city']} / {g['isp']} / {g['as']}",
+        f"时间窗：{d['first']} ~ {d['last']}，共 {d['count']} 次请求",
+        "状态码：" + "、".join(f"{c}×{n}" for c, n in d["statuses"]),
+        "访问路径：" + "、".join(f"{p}×{n}" for p, n in d["paths"]),
+        "User-Agent：" + " | ".join(ua for ua, _ in d["uas"]),
+        "请求时间线（时间 状态码 路径）：",
+    ]
+    for s in d["samples"]:
+        lines.append(f"  {s['t']} {s['status']} {s['path']}")
+    return "\n".join(lines)
+
+
+@router.get("/api/admin/ip-detail")
+def ip_detail(request: Request, ip: str, days: int = 7):
+    """某个 IP 这段时间的访问明细：路径 / UA / 状态码 / 时间线。"""
+    _require(request)
+    return traffic.ip_detail(ip, days=days)
+
+
+@router.post("/api/admin/ip-analyze")
+def ip_analyze(req: IpAnalyzeRequest, request: Request):
+    """让当前接入的模型分析这个 IP 在干什么。"""
+    _require(request)
+    key = (req.ip, max(1, min(int(req.days or 7), 90)))
+    now = time.time()
+    with _ip_cache_lock:
+        hit = _ip_cache.get(key)
+        if hit and now - hit[0] < IP_ANALYSIS_TTL:
+            return {"ok": True, "analysis": hit[1], "cached": True}
+
+    detail = traffic.ip_detail(req.ip, days=key[1])
+    if not detail.get("ok"):
+        raise HTTPException(status_code=400, detail=detail.get("error") or "读不到这个 IP 的记录")
+
+    # thinking 关掉：这种短判断不需要绕弯子，省 token 也快
+    text = llm.complete(
+        [{"role": "system", "content": _IP_SYSTEM_PROMPT},
+         {"role": "user", "content": _ip_prompt(detail)}],
+        max_tokens=900, thinking=False,
+    )
+    text = (text or "").strip() or "模型没给出分析结果"
+    with _ip_cache_lock:
+        _ip_cache[key] = (time.time(), text)
+    return {"ok": True, "analysis": text, "cached": False, "detail": detail}
 
 
 # ---------- 检查更新 ----------
