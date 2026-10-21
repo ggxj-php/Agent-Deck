@@ -1028,6 +1028,57 @@ function welcome() {
   );
 }
 
+// ---------- 返回键确认：防手滑把聊天关掉 ----------
+//
+// 手机上从左边一划（或者按返回键）就把整个页面带走了，聊到一半的内容直接没。
+// 做法：页面进来先压一格「守护历史」，这样用户按返回时触发的是 popstate、
+// 页面留在原地，我们先弹自己的确认框；确认了才真的退出去。
+const leaveModalEl = document.getElementById('leave-modal');
+const leaveCancelEl = document.getElementById('leave-cancel');
+const leaveOkEl = document.getElementById('leave-ok');
+
+let leavingConfirmed = false;   // 已经确认离开，别再拦
+
+function closeLeaveModal() {
+  leaveModalEl.hidden = true;
+}
+
+// 压一格守护历史。确认离开之后就别再压了，否则用户永远退不出去。
+function armLeaveGuard() {
+  if (leavingConfirmed) return;
+  history.pushState({ taffyGuard: 1 }, '', location.href);
+}
+
+window.addEventListener('popstate', () => {
+  if (leavingConfirmed) return;
+  armLeaveGuard();              // 先把历史补回来，页面留在原地
+  leaveModalEl.hidden = false;  // 弹确认框
+});
+
+leaveCancelEl.addEventListener('click', closeLeaveModal);
+
+leaveOkEl.addEventListener('click', () => {
+  leavingConfirmed = true;
+  closeLeaveModal();
+  // 退两格：一格是守护格，一格才是真正的上一页。
+  // 第二次退的时候如果历史里已经没有更早的页面（比如微信里直接打开链接），
+  // 浏览器会自己忽略，用户再按一次返回就退出了。
+  history.back();
+  setTimeout(() => history.back(), 120);
+});
+
+// 点遮罩空白处 = 取消
+leaveModalEl.addEventListener('click', (event) => {
+  if (event.target === leaveModalEl) closeLeaveModal();
+});
+
+// ESC 也取消
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !leaveModalEl.hidden) closeLeaveModal();
+});
+
+armLeaveGuard();
+
 (async function init() {
   loadStickerLib();   // 不等它，表情包清单到了就用新的，没到就用兜底那份
   try {
