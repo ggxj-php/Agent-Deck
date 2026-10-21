@@ -415,6 +415,7 @@ def _parse_risk_json(text):
 
 class RiskScanRequest(BaseModel):
     days: int = 7
+    site: str = "all"      # all / www / api
 
 
 @router.post("/api/admin/risk-scan")
@@ -422,13 +423,15 @@ def risk_scan(req: RiskScanRequest, request: Request):
     """全量日志粗筛 + AI 终审：找出高危 IP，按风险排好序给前端。"""
     _require(request)
     days = max(1, min(int(req.days or 7), 90))
+    site = traffic.norm_site(req.site or "all")
+    key = (days, site)
     now = time.time()
     with _risk_cache_lock:
-        hit = _risk_cache.get(days)
+        hit = _risk_cache.get(key)
         if hit and now - hit[0] < RISK_ANALYSIS_TTL:
             return {"ok": True, "cached": True, **hit[1]}
 
-    scan = traffic.risk_candidates(days=days, limit=30)
+    scan = traffic.risk_candidates(days=days, limit=30, site=site)
     if not scan.get("ok"):
         raise HTTPException(status_code=400, detail=scan.get("error") or "读不到日志")
     cands = scan.get("candidates") or []
@@ -458,11 +461,13 @@ def risk_scan(req: RiskScanRequest, request: Request):
 
     payload = {
         "total_scanned": scan.get("total_scanned", 0),
+        "site": site,
+        "site_label": traffic.SITE_LABELS.get(site, "全部站点"),
         "items": items,
         "raw_model_output": text,
     }
     with _risk_cache_lock:
-        _risk_cache[days] = (time.time(), payload)
+        _risk_cache[key] = (time.time(), payload)
     return {"ok": True, "cached": False, **payload}
 
 

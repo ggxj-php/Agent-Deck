@@ -67,7 +67,11 @@ LOOPBACK = ("127.0.0.1", "::1", "localhost")
 SITE_WWW = "www.taffy.icu"
 SITE_API = "api.taffy.icu"
 SITE_LABELS = {SITE_WWW: "www", SITE_API: "api"}
-SITE_ALIASES = {"www": SITE_WWW, "api": SITE_API, "all": "all", "": SITE_WWW}
+SITE_ALIASES = {
+    "www": SITE_WWW, "api": SITE_API, "all": "all", "": SITE_WWW,
+    # 也认全名——别处传进来的可能已经是规范化之后的值
+    SITE_WWW: SITE_WWW, SITE_API: SITE_API,
+}
 
 
 def norm_site(site):
@@ -804,12 +808,13 @@ def risk_candidates(days=7, limit=30, site="all"):
 
     per = defaultdict(lambda: {
         "n": 0, "sens": 0, "login": 0, "deny": 0, "rawhost": 0, "garbage": 0,
-        "paths": Counter(), "status": Counter(), "uas": Counter(), "hosts": Counter(),
+        "paths": Counter(), "status": Counter(), "uas": Counter(),
+        "hosts": Counter(), "sites": Counter(),
     })
 
     site = norm_site(site)
     for r in _iter_records(files, since):
-        if only_site != "all" and site_of(r) != only_site:
+        if site != "all" and site_of(r) != site:
             continue
         ip = r["ip"]
         if ip in LOOPBACK:

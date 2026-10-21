@@ -840,6 +840,7 @@ initIpSearch();
 
 const RISK_LABEL = { high: '高危', medium: '中危', low: '低危' };
 let riskBusy = false;
+let riskSite = 'all';   // 风险分析扫哪个站：all / www / api
 
 function renderRiskList(data) {
   const list = document.getElementById('risk-list');
@@ -872,9 +873,10 @@ async function runRiskScan() {
   btn.textContent = '分析中…';
   hint.textContent = '先扫日志粗筛，再让模型判定，大概 5~10 秒';
   try {
-    const r = await api('/api/admin/risk-scan', { days: trafficDays });
+    const r = await api('/api/admin/risk-scan', { days: trafficDays, site: riskSite });
     renderRiskList(r);
-    hint.textContent = `扫了 ${r.total_scanned || 0} 个 IP，挑出 ${(r.items || []).length} 个可疑的` +
+    const scope = r.site_label && r.site_label !== '全部站点' ? `仅 ${r.site_label} · ` : '';
+    hint.textContent = `${scope}扫了 ${r.total_scanned || 0} 个 IP，挑出 ${(r.items || []).length} 个可疑的` +
       (r.cached ? '（30 分钟内的缓存结果）' : '');
   } catch (err) {
     hint.textContent = `分析失败：${err.message}`;
@@ -901,6 +903,13 @@ async function banFromList(btn) {
     btn.disabled = false;
   }
 }
+
+document.querySelectorAll('#risk-site button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    riskSite = btn.dataset.site || 'all';
+    document.querySelectorAll('#risk-site button').forEach((b) => b.classList.toggle('on', b === btn));
+  });
+});
 
 const riskScanBtnEl = document.getElementById('risk-scan-btn');
 if (riskScanBtnEl) riskScanBtnEl.addEventListener('click', runRiskScan);
