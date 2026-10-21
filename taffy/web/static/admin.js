@@ -778,6 +778,25 @@ ipModalEl.addEventListener('click', (ev) => {
   if (ev.target === ipModalEl) closeIpModal();   // 点遮罩关掉
 });
 
+/* 手动查任意 IP（被过滤掉的扫描器也能查/封） */
+
+function initIpSearch() {
+  const input = document.getElementById('ip-search-input');
+  const btn = document.getElementById('ip-search-btn');
+  if (!input || !btn) return;
+  const go = () => {
+    const ip = (input.value || '').trim();
+    if (!ip) return;
+    input.value = ip;
+    openIpModal(ip);
+  };
+  btn.addEventListener('click', go);
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); go(); }
+  });
+}
+initIpSearch();
+
 /* IP 黑名单：封禁 / 解封（后端写 UFW） */
 
 let banList = [];
