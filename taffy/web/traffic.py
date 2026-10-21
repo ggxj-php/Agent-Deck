@@ -78,6 +78,87 @@ COUNTRY_ALIAS = {
     "香港特別行政區": "香港",
 }
 
+# ---------------- 机房 / 云主机 / IDC 识别 ----------------
+#
+# 目的：只留真实访客，把机房 IP（云服务器、VPS、CDN、托管、扫描器老巢）全排掉。
+# 判定三重保险，命中任意一个就算机房：
+#   1. ip-api 的 hosting / proxy 标志（对国外机房很准）
+#   2. ASN 黑名单（中国云商的 ISP 名字往往没有 cloud 字样，比如华数、火山引擎）
+#   3. ISP / org / AS 字符串关键词（兜住没进名单的小机房）
+IDC_ASNS = {
+    # 阿里云
+    "37963", "45102", "24429", "134963",
+    # 腾讯云
+    "45090", "132203", "132591", "133478",
+    # 华为云 / 百度云 / 字节火山引擎 / UCloud / 金山云
+    "55990", "136907", "38365", "137718", "135377", "137694",
+    # 华数传媒（杭州，大量 IDC 段）
+    "24139",
+    # 国际云 / CDN / 托管
+    "16509", "14618", "8987",          # AWS
+    "15169", "396982", "19527",        # Google
+    "8075", "8068", "12076",           # Azure
+    "13335",                            # Cloudflare
+    "20940", "16625", "21342",          # Akamai
+    "14061",                            # DigitalOcean
+    "20473",                            # Vultr / Choopa
+    "63949",                            # Linode
+    "16276",                            # OVH
+    "24940", "213230",                  # Hetzner
+    "9009",                             # M247
+    "51167",                            # Contabo
+    "12876",                            # Scaleway
+    "31898",                            # Oracle Cloud
+    "36351",                            # IBM SoftLayer
+    "33070", "19994",                   # Rackspace
+    "36352",                            # HostPapa / ColoCrossing
+    "53667",                            # FranTech / BuyVM
+    "21859",                            # Zenlayer
+    "18779",                            # EGIHosting
+    "47583",                            # Hostinger
+    "22612",                            # Namecheap
+    "54290",                            # Hostwinds
+    "8100",                             # QuadraNet
+    "40676",                            # Psychz
+    "197769",                           # VPS Dedicated
+    "199524",                           # Gcore
+    "54113",                            # Fastly
+    "60068",                            # CDN77
+    "19551",                            # Imperva
+    "30148",                            # Sucuri
+}
+
+IDC_WORDS = re.compile(
+    r"cloud|hosting|data ?cent(er|re)|datacenter|\bidc\b|colocation|\bcolo\b|"
+    r"server|vps|dedicat|virtual private|"
+    r"amazon|aws|google|microsoft|azure|digitalocean|vultr|linode|akamai|cloudflare|"
+    r"ovh|hetzner|leaseweb|m247|choopa|contabo|scaleway|zenlayer|hostpapa|frantch|"
+    r"egihosting|hosting|"
+    r"alibaba|aliyun|tencent|huawei|volcano|bytedance|ucloud|kingsoft|baidu|"
+    r"网络中心|数据中心|云计算|云服务|机房|网络科技|信息技术|传媒网络|"
+    r"internet network information center",
+    re.I,
+)
+
+
+def _asn_number(text):
+    m = re.match(r"AS(\d+)", (text or "").strip(), re.I)
+    return m.group(1) if m else ""
+
+
+def _is_idc(info):
+    """是不是机房 / 云主机 / 已经上过黑名单的托管 IP。"""
+    if not info:
+        return False
+    if info.get("hosting") or info.get("proxy"):
+        return True
+    asn = _asn_number(info.get("as"))
+    if asn and asn in IDC_ASNS:
+        return True
+    blob = " ".join(str(info.get(k) or "") for k in ("isp", "org", "as"))
+    return bool(IDC_WORDS.search(blob))
+
+
 _CACHE_TTL = 60           # 秒；同一口径 60 秒内直接返回上次结果
 _cached = {}              # (days, overseas) -> (ts, payload)
 _lock = threading.Lock()  # 同一时间只让一个线程扫日志
@@ -212,35 +293,59 @@ def _save_geo(cache):
             continue
 
 
+GEO_FIELDS = ("status,country,regionName,city,isp,org,as,hosting,proxy,query")
+GEO_BUDGET_SEC = 8.0   # 一次请求里最多花这么久补归属地
+
+
 def _fill_geo(ips):
-    """补齐没查过的 IP。只在后台点开流量页时走到，限个数限时间，查不到就算了。"""
+    """补齐没查过（或者缓存是旧版、没有 hosting/as 字段）的 IP。
+
+    只在后台点开流量页时走到：限个数、限时间，查不到就留空，
+    顶多是这个 IP 少一条判定依据，绝不让后台卡住。
+    """
     cache = _load_geo()
-    missing = [ip for ip in ips if ip not in cache][:60]
+    # 旧缓存只有 country/region/city/isp，缺 as / hosting → 也要补查，否则机房判定不全
+    missing = [ip for ip in ips if ip not in cache or "hosting" not in (cache.get(ip) or {})]
     if not missing:
         return cache
-    try:
-        body = json.dumps(missing).encode("utf-8")
-        req = urllib.request.Request(
-            "http://ip-api.com/batch?fields=status,country,regionName,city,isp,query&lang=zh-CN",
-            data=body, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            data = json.load(resp)
-        for item in data:
-            q = (item or {}).get("query")
-            if not q:
-                continue
-            if item.get("status") == "success":
-                cache[q] = {
-                    "country": item.get("country") or "",
-                    "region": item.get("regionName") or "",
-                    "city": item.get("city") or "",
-                    "isp": item.get("isp") or "",
-                }
-            else:
-                cache[q] = {"country": "", "region": "", "city": "", "isp": ""}
-        _save_geo(cache)
-    except Exception:
-        pass
+
+    # 候选 IP 可能几百个，一次全查会拖慢后台：分块查，给个总时间预算。
+    # 没轮上的下次点开继续补（缓存是累积的），所以最多头一两次看着慢一点。
+    deadline = time.time() + GEO_BUDGET_SEC
+    for start in range(0, len(missing), 100):
+        if time.time() > deadline:
+            break
+        chunk = missing[start:start + 100]
+        try:
+            body = json.dumps(chunk).encode("utf-8")
+            req = urllib.request.Request(
+                "http://ip-api.com/batch?fields=" + GEO_FIELDS + "&lang=zh-CN",
+                data=body, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.load(resp)
+            for item in data:
+                q = (item or {}).get("query")
+                if not q:
+                    continue
+                if item.get("status") == "success":
+                    cache[q] = {
+                        "country": item.get("country") or "",
+                        "region": item.get("regionName") or "",
+                        "city": item.get("city") or "",
+                        "isp": item.get("isp") or "",
+                        "org": item.get("org") or "",
+                        "as": item.get("as") or "",
+                        "hosting": bool(item.get("hosting")),
+                        "proxy": bool(item.get("proxy")),
+                    }
+                else:
+                    cache[q] = {"country": "", "region": "", "city": "", "isp": "",
+                                "org": "", "as": "", "hosting": False, "proxy": False}
+        except Exception:
+            break
+        # 免费接口限 45 次/分钟，块之间稍微停一下
+        time.sleep(0.3)
+    _save_geo(cache)
     return cache
 
 
@@ -324,13 +429,14 @@ def _compute(days, overseas):
 
     geo = _fill_geo(candidate)
 
-    keep = None
+    # 只留真实访客：机房 / 云主机 / 代理一律排掉（不管算不算海外）
+    keep = {ip for ip in candidate if not _is_idc(geo.get(ip))}
     if not overseas:
-        keep = {ip for ip in candidate
+        keep = {ip for ip in keep
                 if (geo.get(ip) or {}).get("country") in ("中国", "China", "")}
 
     # 第二遍：出统计
-    n_loop = n_bots = n_tc = n_os = 0
+    n_loop = n_bots = n_tc = n_os = n_idc = 0
     requests = pv = chat = 0
     bytes_out = 0
     rt_sum = 0.0
@@ -356,8 +462,11 @@ def _compute(days, overseas):
         if in_tencent(ip):
             n_tc += 1
             continue
-        if keep is not None and ip not in keep:
-            n_os += 1
+        if ip not in keep:
+            if _is_idc(geo.get(ip)):
+                n_idc += 1
+            else:
+                n_os += 1
             continue
 
         ts = r["ts"]
@@ -424,6 +533,7 @@ def _compute(days, overseas):
             "bots": n_bots,
             "tencent": n_tc,
             "overseas": n_os,
+            "idc": n_idc,
         },
         "per_day": [
             {"date": d, "requests": v["requests"], "pv": v["pv"],
