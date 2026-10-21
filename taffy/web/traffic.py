@@ -63,8 +63,10 @@ BOT_PATH = re.compile(
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
 
 # 真访客才会碰的路径：前端资源 / 接口 / 头像。扫描器一般只抓 HTML 表面
-# 扫描器也会抓 favicon / logo，所以只认「真前端」才有的：打包 js/css 和接口
-APP_HINTS = ("/static/", "/api/", "/avatar", "/manifest")
+# 扫描器也会抓 favicon / logo，所以只认「真前端」才有的：打包 js/css 和头像。
+# **不能把 /api/ 算进来**：扫描器最爱挨个试 /api/user/login、/api/config 这类接口，
+# 算进来它们就成了「加载过前端资源的真人」——112.14.75.8 就是这么逃掉的。
+APP_HINTS = ("/static/", "/avatar", "/manifest")
 
 TAFFY_PATHS = re.compile(r"^/(admin|api/(chat|context|session|ping|stickers|admin)|static/)")
 API_PATHS = re.compile(
