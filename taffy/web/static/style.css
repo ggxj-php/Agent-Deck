@@ -1455,3 +1455,69 @@ body.admin .card input[type="file"] { padding: 8px 10px; font-size: 13px; }
   border: 0;
   background: #fff;
 }
+
+/* ---------- 数学式子 ---------- */
+.math-block {
+  display: block;
+  margin: 8px 0;
+  padding: 8px 10px;
+  text-align: center;
+  background: #fff8fc;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.math-lines {
+  display: inline-block;
+  text-align: left;
+  line-height: 1.9;
+}
+
+/* 矩阵 / cases：小表格，两侧用伪元素画括号 */
+.math-mat,
+.math-cases {
+  display: inline-table;
+  position: relative;
+  vertical-align: middle;
+  margin: 2px 6px;
+  border-collapse: collapse;
+}
+
+.math-mat td {
+  padding: 1px 8px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.math-mat::before,
+.math-mat::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  border: 1.5px solid var(--ink-soft);
+}
+
+.math-mat::before { left: -3px; border-right: 0; }
+.math-mat::after { right: -3px; border-left: 0; }
+
+.math-cases td {
+  padding: 1px 6px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.math-cases::before {
+  content: '{';
+  display: inline-block;
+  font-size: 1.7em;
+  line-height: 1;
+  vertical-align: middle;
+  margin-right: 1px;
+  color: var(--ink-soft);
+}
+
+/* 上下标别把行高撑开 */
+sup, sub { font-size: 0.72em; line-height: 0; }

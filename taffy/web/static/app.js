@@ -91,63 +91,288 @@ const el = (tag, cls) => {
   return node;
 };
 
-/* ---------------- 数学式子 ---------------- */
+/* ---------------- 数学式子美化 ---------------- */
 
-/* 模型偶尔还是漏出 LaTeX，雏草姬看不懂，这里把它翻成人能读的写法。
-   代码块和行内代码里的内容一律原样保留，绝不改动。 */
+/* 模型大部分时候用 Unicode 写数学（x²、√、×），本来就正常；只有在写复杂公式时
+   才会漏出 LaTeX。旧版用正则一个个替换，碰到嵌套花括号（比如求根公式里的
+   \frac{-b\pm\sqrt{b^2-4ac}}{2a}）就全盘失效，矩阵更是原样吐出来。
+   这里改成真正扫描一遍：花括号配对、递归转换，转换不了的保持原样，绝不吞内容。
+   代码块和行内代码一律原样保留。 */
+
 const MATH_WORDS = {
-  times: '×', cdot: '·', div: '÷', pm: '±', mp: '∓',
-  le: '≤', leq: '≤', ge: '≥', geq: '≥', ne: '≠', neq: '≠',
-  approx: '≈', equiv: '≡', sim: '∼', propto: '∝',
-  infty: '∞', sum: '∑', prod: '∏', int: '∫', oint: '∮',
-  partial: '∂', nabla: '∇', forall: '∀', exists: '∃',
-  in: '∈', notin: '∉', subset: '⊂', subseteq: '⊆', supset: '⊃', supseteq: '⊇',
-  cup: '∪', cap: '∩', emptyset: '∅', therefore: '∴', because: '∵',
+  // 运算符
+  times: '×', cdot: '·', div: '÷', pm: '±', mp: '∓', ast: '∗', star: '⋆',
+  oplus: '⊕', otimes: '⊗', bullet: '•',
+  // 关系
+  le: '≤', leq: '≤', ge: '≥', geq: '≥', ne: '≠', neq: '≠', approx: '≈',
+  equiv: '≡', cong: '≅', sim: '∼', simeq: '≃', propto: '∝', ll: '≪', gg: '≫',
+  // 大符号
+  infty: '∞', sum: '∑', prod: '∏', coprod: '∐',
+  int: '∫', iint: '∬', iiint: '∭', oint: '∮',
+  partial: '∂', nabla: '∇', forall: '∀', exists: '∃', nexists: '∄',
+  // 集合 / 逻辑
+  in: '∈', notin: '∉', ni: '∋', subset: '⊂', subseteq: '⊆', supset: '⊃',
+  supseteq: '⊇', cup: '∪', cap: '∩', setminus: '∖', emptyset: '∅',
+  varnothing: '∅', therefore: '∴', because: '∵', neg: '¬', land: '∧', lor: '∨',
+  // 箭头
   rightarrow: '→', to: '→', Rightarrow: '⇒', leftarrow: '←', Leftarrow: '⇐',
-  leftrightarrow: '↔', Leftrightarrow: '⇔', mapsto: '↦',
-  ldots: '…', cdots: '…', dots: '…', vdots: '⋮', ddots: '⋱',
-  angle: '∠', perp: '⊥', parallel: '∥', triangle: '△', circ: '∘',
-  degree: '°', log: 'log', ln: 'ln', lg: 'lg', lim: 'lim', gcd: 'gcd', mod: 'mod',
+  leftrightarrow: '↔', Leftrightarrow: '⇔', Longrightarrow: '⟹', implies: '⟹',
+  iff: '⟺', mapsto: '↦', uparrow: '↑', downarrow: '↓',
+  // 省略号 / 点
+  ldots: '…', cdots: '⋯', dots: '…', vdots: '⋮', ddots: '⋱', prime: '′',
+  // 几何
+  angle: '∠', perp: '⊥', parallel: '∥', triangle: '△', circ: '∘', degree: '°',
+  // 函数名：去掉反斜杠，保持原来的字母
+  sin: 'sin', cos: 'cos', tan: 'tan', cot: 'cot', sec: 'sec', csc: 'csc',
+  arcsin: 'arcsin', arccos: 'arccos', arctan: 'arctan',
+  sinh: 'sinh', cosh: 'cosh', tanh: 'tanh',
+  log: 'log', ln: 'ln', lg: 'lg', exp: 'exp', lim: 'lim', max: 'max', min: 'min',
+  sup: 'sup', inf: 'inf', det: 'det', dim: 'dim', ker: 'ker', gcd: 'gcd',
+  deg: 'deg', arg: 'arg', mod: 'mod', bmod: 'mod',
+  // 希腊字母
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε',
-  zeta: 'ζ', eta: 'η', theta: 'θ', iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ',
-  nu: 'ν', xi: 'ξ', pi: 'π', rho: 'ρ', sigma: 'σ', tau: 'τ', upsilon: 'υ',
-  phi: 'φ', varphi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω',
+  zeta: 'ζ', eta: 'η', theta: 'θ', vartheta: 'ϑ', iota: 'ι', kappa: 'κ',
+  lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π', varpi: 'ϖ', rho: 'ρ',
+  varrho: 'ϱ', sigma: 'σ', varsigma: 'ς', tau: 'τ', upsilon: 'υ', phi: 'φ',
+  varphi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω',
   Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ', Pi: 'Π',
   Sigma: 'Σ', Upsilon: 'Υ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
+  // 其他
+  ell: 'ℓ', hbar: 'ℏ', Re: 'ℜ', Im: 'ℑ', aleph: 'ℵ',
+  checkmark: '✓', square: '□', blacksquare: '■',
 };
 
-function demathExpr(expr) {
-  let s = expr;
-  s = s.replace(/\\[,;!]/g, ' ');
-  s = s.replace(/\\(?:d|t)?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '($1)/($2)');
-  s = s.replace(/\\sqrt\s*\[([^\]]*)\]\s*\{([^{}]*)\}/g, '$1√($2)');
-  s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, '√($1)');
-  s = s.replace(/\^\s*\{([^{}]*)\}/g, '^($1)');
-  s = s.replace(/_\s*\{([^{}]*)\}/g, '_($1)');
-  s = s.replace(/\\(?:text|mathrm|mathbf|mathit|operatorname)\s*\{([^{}]*)\}/g, '$1');
-  s = s.replace(/\\(?:left|right)\s*/g, '');
-  s = s.replace(/\\([A-Za-z]+)/g, (m, name) => (name in MATH_WORDS ? MATH_WORDS[name] : m));
-  return s;
+// 从 s[i] === '{' 开始找配对的花括号，返回 [内容, 结束位置]；配不上返回 null
+function readBrace(s, i) {
+  if (s[i] !== '{') return null;
+  let depth = 0;
+  for (let k = i; k < s.length; k++) {
+    const ch = s[k];
+    if (ch === '\\') { k++; continue; }   // \{ \} 这种转义不算结构
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return [s.slice(i + 1, k), k + 1];
+    }
+  }
+  return null;
 }
 
-function demathText(seg) {
-  let out = seg
-    .replace(/\$\$([\s\S]+?)\$\$/g, (m, e) => demathExpr(e))
-    .replace(/\\\[([\s\S]+?)\\\]/g, (m, e) => demathExpr(e))
-    .replace(/\$([^$\n]+?)\$/g, (m, e) => demathExpr(e))
-    .replace(/\\\(([\s\S]+?)\\\)/g, (m, e) => demathExpr(e));
-  // 兜底：散落在正文里的 \le、\times 之类也翻掉，认不出来的保留原样
-  return out.replace(/\\([A-Za-z]+)/g, (m, name) => (name in MATH_WORDS ? MATH_WORDS[name] : m));
+// 读命令后面的一个参数：{...} 或者单个字符
+function readArg(s, i) {
+  while (i < s.length && s[i] === ' ') i++;
+  if (i >= s.length) return null;
+  if (s[i] === '{') return readBrace(s, i);
+  return [s[i], i + 1];
 }
 
-function demath(text) {
-  // 按围栏代码块 / 行内代码切分，只处理纯文本片段
+// 矩阵 / cases / aligned 这些环境排一下，别让 \begin{pmatrix} 原样露出来
+function renderEnv(env, body) {
+  const rows = body.split(/\\\\/)
+    .map((r) => r.trim())
+    .filter((r) => r.length);
+  if (!rows.length) return '';
+  const cells = rows.map((r) => r.split('&').map((c) => convertLatex(c.trim())));
+
+  if (env === 'aligned' || env === 'align' || env === 'gathered' || env === 'split' ||
+      env === 'equation' || env === 'gather') {
+    // 多行推导：一行一段，保持原来的顺序
+    return '<span class="math-lines">' + cells.map((r) => r.join(' ')).join('<br>') + '</span>';
+  }
+  const cls = env === 'cases' ? 'math-cases' : 'math-mat';
+  const trs = cells.map((r) => '<tr>' + r.map((c) => '<td>' + c + '</td>').join('') + '</tr>').join('');
+  return '<table class="' + cls + '"><tbody>' + trs + '</tbody></table>';
+}
+
+// 递归转换一段 LaTeX
+function convertLatex(src) {
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+
+    if (ch === '\\') {
+      const m = /^\\([A-Za-z]+|[,;:! ])/.exec(src.slice(i));
+      if (!m) { out += ch; i++; continue; }
+      const name = m[1];
+      i += m[0].length;
+
+      // \frac{a}{b}
+      if (name === 'frac' || name === 'dfrac' || name === 'tfrac') {
+        const a = readArg(src, i);
+        if (!a) { out += 'frac'; continue; }
+        const b = readArg(src, a[1]);
+        if (!b) { out += '(' + convertLatex(a[0]) + ')/'; i = a[1]; continue; }
+        const fa = convertLatex(a[0]);
+        const fb = convertLatex(b[0]);
+        // 简单的 a/b 不加括号，复杂一点的才包起来
+        const simple = /^[\w\u0370-\u03ff.]+$/.test(fa) && /^[\w\u0370-\u03ff.]+$/.test(fb);
+        out += simple ? fa + '/' + fb : '(' + fa + ')/(' + fb + ')';
+        i = b[1];
+        continue;
+      }
+
+      // \sqrt{x} / \sqrt[n]{x}
+      if (name === 'sqrt') {
+        let deg = '';
+        if (src[i] === '[') {
+          const close = src.indexOf(']', i);
+          if (close > 0) { deg = src.slice(i + 1, close); i = close + 1; }
+        }
+        const a = readArg(src, i);
+        if (!a) { out += '√'; continue; }
+        out += (deg ? '<sup>' + deg + '</sup>' : '') + '√(' + convertLatex(a[0]) + ')';
+        i = a[1];
+        continue;
+      }
+
+      // \text{...} 这类只取里面的文字
+      if (name === 'text' || name === 'mathrm' || name === 'mathbf' || name === 'mathit' ||
+          name === 'mathsf' || name === 'mathtt' || name === 'operatorname' || name === 'mathcal') {
+        const a = readArg(src, i);
+        if (a) { out += convertLatex(a[0]); i = a[1]; continue; }
+      }
+
+      // \begin{pmatrix} ... \end{pmatrix}
+      if (name === 'begin') {
+        const a = readArg(src, i);
+        if (a) {
+          const env = a[0].trim();
+          const endTag = '\\end{' + env + '}';
+          const endIdx = src.indexOf(endTag, a[1]);
+          if (endIdx >= 0) {
+            const body = src.slice(a[1], endIdx);
+            // document 只是个外壳，里面照常转
+            out += (env === 'document') ? convertLatex(body) : renderEnv(env, body);
+            i = endIdx + endTag.length;
+            continue;
+          }
+        }
+        continue;
+      }
+
+      // 导言区命令：整条丢掉（连同它的 {...} 参数）
+      if (name === 'documentclass' || name === 'usepackage' || name === 'pagestyle' ||
+          name === 'thispagestyle' || name === 'setlength' || name === 'newcommand') {
+        const a = readArg(src, i);
+        if (a) i = a[1];
+        continue;
+      }
+
+      if (name === 'end') continue;   // 孤零零的 \end 丢掉
+      if (name === 'left' || name === 'right' || name === 'big' || name === 'Big' ||
+          name === 'bigg' || name === 'Bigg' || name === 'displaystyle' || name === 'limits' ||
+          name === 'nolimits') continue;   // 纯排版命令，没有字形
+      if (name === ',' || name === ';' || name === ':' || name === '!' || name === ' ') {
+        out += ' ';
+        continue;
+      }
+      if (name === 'quad') { out += ' '; continue; }
+      if (name === 'qquad') { out += '  '; continue; }
+      if (name in MATH_WORDS) { out += MATH_WORDS[name]; continue; }
+      out += '\\' + name;   // 认不出来就原样留着，绝不吞掉
+      continue;
+    }
+
+    // 上下标：^{...} _{...} 或者 ^2 _n
+    // 注意前面必须是字母/数字/右括号，否则 _这是斜体_ 会被当成下标
+    if (ch === '^' || ch === '_') {
+      const before = i > 0 ? src[i - 1] : '';
+      const canBeScript = /[0-9A-Za-z\u0370-\u03ff}\)\]]/.test(before);
+      const a = canBeScript ? readArg(src, i + 1) : null;
+      if (a) {
+        const tag = ch === '^' ? 'sup' : 'sub';
+        out += '<' + tag + '>' + convertLatex(a[0]) + '</' + tag + '>';
+        i = a[1];
+        continue;
+      }
+    }
+
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
+// URL / 邮箱先藏起来，免得里面的 _ 被当成下标
+function protectLinks(text, bag) {
+  return text.replace(/https?:\/\/[^\s<>()"'`]+|[\w.+-]+@[\w.-]+\.\w+/g, (m) => {
+    bag.push(m);
+    return '\u0001' + (bag.length - 1) + '\u0001';
+  });
+}
+
+function restoreLinks(text, bag) {
+  return text.replace(/\u0001(\d+)\u0001/g, (m, n) => bag[Number(n)] || m);
+}
+
+function mathifyText(seg) {
+  const bag = [];
+  let out = protectLinks(seg, bag);
+
+  // 行间公式：单独成块
+  out = out.replace(/\$\$([\s\S]+?)\$\$/g,
+    (m, e) => '\n\n<div class="math-block">' + convertLatex(e) + '</div>\n\n');
+  out = out.replace(/\\\[([\s\S]+?)\\\]/g,
+    (m, e) => '\n\n<div class="math-block">' + convertLatex(e) + '</div>\n\n');
+
+  // 行内公式：只认看起来真是数学的（避免把 "$5" 这种金额吃掉）
+  out = out.replace(/\$([^$\n]+?)\$/g, (m, e) => {
+    if (!/[\\^_{}=]/.test(e)) return m;
+    return convertLatex(e);
+  });
+  out = out.replace(/\\\(([\s\S]+?)\\\)/g, (m, e) => convertLatex(e));
+
+  // 兜底：正文里散落的 \frac、\sin、^{}、_{} 也翻掉
+  out = convertLatex(out);
+
+  // 乘法星号：两边都是字母数字才换，避免误伤 markdown 的 * 列表和 **加粗**
+  out = out.replace(/([0-9A-Za-z])\s*\*\s*(?=[0-9A-Za-z])/g, '$1 × ');
+
+  return restoreLinks(out, bag);
+}
+
+// 模型经常把公式塞进 ``` 代码块里（前半段用 Unicode 画矩阵，后半段又漂成裸 LaTeX），
+// 所以代码块不能一律跳过：里面要是 LaTeX 就转，是真代码就原样留着。
+const LATEX_HINT = /\\(?:frac|dfrac|tfrac|sqrt|sum|prod|int|iint|iiint|oint|lim|left|right|begin|end|pm|mp|cdot|times|div|le|leq|ge|geq|ne|neq|approx|equiv|cong|infty|alpha|beta|gamma|delta|epsilon|theta|lambda|mu|pi|rho|sigma|tau|phi|chi|psi|omega|Delta|Sigma|Omega|partial|nabla|forall|exists|in|notin|subset|cup|cap|rightarrow|Rightarrow|leftarrow|leftrightarrow|to|mapsto|quad|qquad|text|mathrm|mathbf|mathit|overline|underline|vec|hat|bar|dot|ddot|cdots|ldots|dots|vdots|ddots|prime|circ|degree|angle|perp|parallel|triangle|pm|mp)\b/;
+
+// 真代码的特征：有这些词就绝不按公式处理
+const CODE_HINT = /\b(?:function|def|class|import|from|const|let|var|return|if|else|elif|for|while|print|console|public|private|protected|void|static|struct|typedef|include|package|func|async|await|try|catch|throw|raise|lambda|echo|printf|System\.out)\b|;;|=>|->\s*\{|</;
+
+function looksLikeLatex(body) {
+  if (!body) return false;
+  if (CODE_HINT.test(body)) return false;
+  return LATEX_HINT.test(body);
+}
+
+function mathify(text) {
+  // 按围栏代码块 / 行内代码切分
   return text
     .split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g)
     .map((part) => {
-      const isCode = part.startsWith('```') || part.startsWith('~~~') ||
-        (part.startsWith('`') && part.endsWith('`') && part.length > 1);
-      return isCode ? part : demathText(part);
+      const isFence = part.startsWith('```') || part.startsWith('~~~');
+      const isInline = !isFence && part.startsWith('`') && part.endsWith('`') && part.length > 1;
+
+      if (isFence) {
+        // 去掉围栏本身，看里面装的是什么
+        const body = part.replace(/^(?:```|~~~)[^\n]*\n?/, '').replace(/(?:```|~~~)\s*$/, '');
+        if (looksLikeLatex(body)) {
+          // LaTeX 的 % 注释行、空行先清掉
+          const clean = body
+            .split('\n')
+            .filter((line) => !/^\s*%/.test(line))
+            .join('\n')
+            .trim();
+          return '\n\n<div class="math-block">' + convertLatex(clean) + '</div>\n\n';
+        }
+        return part;
+      }
+      if (isInline) {
+        const body = part.slice(1, -1);
+        if (looksLikeLatex(body)) return convertLatex(body);
+        return part;
+      }
+      return mathifyText(part);
     })
     .join('');
 }
@@ -159,7 +384,7 @@ function demath(text) {
 const SANITIZE_CONFIG = { FORBID_TAGS: ['style'], FORBID_ATTR: ['style'] };
 
 function renderMarkdown(text) {
-  return DOMPurify.sanitize(marked.parse(demath(text)), SANITIZE_CONFIG);
+  return DOMPurify.sanitize(marked.parse(mathify(text)), SANITIZE_CONFIG);
 }
 
 /* 复制文本。手机连局域网 IP 打开时是 http 页面，不是安全上下文，
