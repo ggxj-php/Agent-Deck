@@ -417,15 +417,22 @@ def _compute(days, overseas):
     in_tencent = _tencent_matcher()
 
     # 第一遍：收集候选 IP（排掉本机 / 扫描器 / 腾讯网段），查归属地
+    #
+    # 扫描器按 IP 整体拉黑：只要这个 IP 探过 /.env、/.git 这类敏感路径，
+    # 或者 UA 一眼是工具，那它后面装的「正常请求」也不再算访客——
+    # 扫描器经常先探一下敏感路径、再老老实实 get 首页，逐条判断会漏。
     candidate = set()
+    scanner_ips = set()
     for r in _iter_records(files, since):
-        if r["ip"] in LOOPBACK:
+        ip = r["ip"]
+        if ip in LOOPBACK:
             continue
         if _is_bot(r["ua"], r["url"].split("?")[0]):
+            scanner_ips.add(ip)
             continue
-        if in_tencent(r["ip"]):
+        if in_tencent(ip):
             continue
-        candidate.add(r["ip"])
+        candidate.add(ip)
 
     geo = _fill_geo(candidate)
 
@@ -456,7 +463,7 @@ def _compute(days, overseas):
         if ip in LOOPBACK:
             n_loop += 1
             continue
-        if _is_bot(r["ua"], base):
+        if ip in scanner_ips:
             n_bots += 1
             continue
         if in_tencent(ip):
@@ -534,6 +541,7 @@ def _compute(days, overseas):
             "tencent": n_tc,
             "overseas": n_os,
             "idc": n_idc,
+            "bot_ips": len(scanner_ips),
         },
         "per_day": [
             {"date": d, "requests": v["requests"], "pv": v["pv"],

@@ -585,7 +585,7 @@ function renderTraffic(info) {
   document.getElementById('t-chat-note').textContent = '发到 /api/chat 的次数';
 
   const ex = info.excluded || {};
-  const parts = [`本机 ${ex.loopback || 0}`, `扫描器 ${ex.bots || 0}`, `机房/云 ${ex.idc || 0}`, `腾讯网段 ${ex.tencent || 0}`];
+  const parts = [`本机 ${ex.loopback || 0}`, `扫描器 ${ex.bots || 0} 次 / ${ex.bot_ips || 0} 个 IP`, `机房/云 ${ex.idc || 0}`, `腾讯网段 ${ex.tencent || 0}`];
   if (!info.overseas) parts.push(`海外 ${ex.overseas || 0}`);
   trafficHintEl.textContent = `${info.log_files || 0} 个日志文件 · 已排除：${parts.join(' · ')} · ` +
     `算于 ${info.generated_at || ''}（60 秒内不会重算）`;
