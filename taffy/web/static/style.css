@@ -1521,3 +1521,172 @@ body.admin .card input[type="file"] { padding: 8px 10px; font-size: 13px; }
 
 /* 上下标别把行高撑开 */
 sup, sub { font-size: 0.72em; line-height: 0; }
+
+/* ---------- 后台：访问流量页 ---------- */
+.traffic-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.seg button {
+  border: 0;
+  background: #fff;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.seg button.on {
+  background: linear-gradient(135deg, var(--pink-dark), var(--pink-deep));
+  color: #fff;
+}
+
+.traffic-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+/* 按天柱状图 */
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 2px 0;
+  overflow-x: auto;
+}
+
+.day-col {
+  flex: 1 1 0;
+  min-width: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.day-num {
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.day-bar-wrap {
+  width: 100%;
+  height: 110px;
+  display: flex;
+  align-items: flex-end;
+}
+
+.day-bar {
+  width: 100%;
+  min-height: 3px;
+  border-radius: 6px 6px 2px 2px;
+  background: linear-gradient(180deg, var(--pink), var(--pink-deep));
+}
+
+.day-label {
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* 横向条形（地区 / 路径 / 状态码） */
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.hbar {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12.5px;
+}
+
+.hbar-label {
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hbar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: #fff0f7;
+  overflow: hidden;
+}
+
+.hbar-track span {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--pink), var(--pink-deep));
+}
+
+.hbar-value {
+  color: var(--ink-soft);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 文字行（Top IP） */
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  font-size: 12.5px;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.row:last-child { border-bottom: 0; }
+
+.row-main {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-sub {
+  margin-left: 6px;
+  color: var(--ink-soft);
+  font-size: 11.5px;
+}
+
+.row-num {
+  color: var(--pink-deep);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 480px) {
+  .hbar { grid-template-columns: 74px 1fr auto; }
+  .day-bar-wrap { height: 84px; }
+}

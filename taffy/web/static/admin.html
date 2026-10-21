@@ -34,6 +34,9 @@
           <button type="button" class="nav-item" data-view="dashboard" title="仪表盘">
             <span class="nav-text">仪表盘</span>
           </button>
+          <button type="button" class="nav-item" data-view="traffic" title="访问流量">
+            <span class="nav-text">访问流量</span>
+          </button>
         </div>
       </section>
 
@@ -159,6 +162,80 @@
           </div>
           <div class="bar"><span id="mem-bar"></span></div>
           <p class="hint" id="sysinfo-hint">每 5 秒自己刷一次喵。</p>
+        </div>
+      </section>
+
+      <!-- ---------- 访问流量 ---------- -->
+      <section class="view" data-view="traffic" hidden>
+        <div class="card">
+          <h2>访问流量</h2>
+          <div class="traffic-tools">
+            <div class="seg" id="traffic-range">
+              <button type="button" data-days="1">今天</button>
+              <button type="button" data-days="7" class="on">近 7 天</button>
+              <button type="button" data-days="30">近 30 天</button>
+            </div>
+            <label class="traffic-opt">
+              <input type="checkbox" id="traffic-overseas"> 含海外 IP
+            </label>
+            <button type="button" id="traffic-refresh" class="ghost">刷新</button>
+          </div>
+          <div class="stats">
+            <div class="stat">
+              <div class="stat-label">页面访问 PV</div>
+              <div class="stat-value" id="t-pv">—</div>
+              <div class="stat-note">只算首页和后台页</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">独立 IP</div>
+              <div class="stat-value" id="t-ips">—</div>
+              <div class="stat-note">同一个 IP 只算一次</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">总请求</div>
+              <div class="stat-value" id="t-req">—</div>
+              <div class="stat-note" id="t-req-note"></div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">出流量</div>
+              <div class="stat-value" id="t-bytes">—</div>
+              <div class="stat-note" id="t-bytes-note"></div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">聊天消息</div>
+              <div class="stat-value" id="t-chat">—</div>
+              <div class="stat-note" id="t-chat-note"></div>
+            </div>
+          </div>
+          <p class="hint" id="traffic-hint">点开就自动算喵。</p>
+        </div>
+
+        <div class="card">
+          <h2>按天趋势</h2>
+          <div id="traffic-days" class="chart"></div>
+          <p class="hint" id="traffic-days-hint"></p>
+        </div>
+
+        <div class="card">
+          <h2>地区分布</h2>
+          <div id="traffic-regions" class="bars"></div>
+          <p class="hint">按独立 IP 数算占比；中国的拆到省，国外的按国家。</p>
+        </div>
+
+        <div class="card">
+          <h2>热门路径</h2>
+          <div id="traffic-paths" class="bars"></div>
+        </div>
+
+        <div class="card">
+          <h2>状态码</h2>
+          <div id="traffic-status" class="bars"></div>
+        </div>
+
+        <div class="card">
+          <h2>访问最多的 IP</h2>
+          <div id="traffic-ips" class="rows"></div>
+          <p class="hint">排掉本机、扫描器、腾讯网段之后的真实访客。</p>
         </div>
       </section>
 

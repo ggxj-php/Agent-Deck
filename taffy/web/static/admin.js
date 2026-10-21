@@ -294,6 +294,7 @@ function showView(name) {
 
 const VIEW_HOOKS = {
   dashboard: refreshSysinfo,
+  traffic: loadTraffic,
   prompt: loadPrompt,
   stickers: loadStickers,
   knowledge: loadKnowledge,
@@ -540,6 +541,119 @@ async function refreshSysinfo() {
 
   sysinfoHintEl.textContent = '每 5 秒自己刷一次喵。' +
     (mem && mem.percent >= 85 ? ' 内存快满了，注意别让它开太多会话喵！' : '');
+}
+
+/* ---------------- 访问流量 ---------------- */
+
+let trafficDays = 7;
+let trafficOverseas = false;
+let trafficBusy = false;
+
+const trafficHintEl = document.getElementById('traffic-hint');
+const trafficDaysEl = document.getElementById('traffic-days');
+const trafficDaysHintEl = document.getElementById('traffic-days-hint');
+const trafficRegionsEl = document.getElementById('traffic-regions');
+const trafficPathsEl = document.getElementById('traffic-paths');
+const trafficStatusEl = document.getElementById('traffic-status');
+const trafficIpsEl = document.getElementById('traffic-ips');
+
+function barRows(rows) {
+  const max = Math.max(1, ...rows.map((r) => r.value));
+  return rows.map((r) => {
+    const width = Math.max(1, Math.round((r.value / max) * 100));
+    return `<div class="hbar">
+      <div class="hbar-label" title="${r.label}">${r.label}</div>
+      <div class="hbar-track"><span style="width:${width}%"></span></div>
+      <div class="hbar-value">${r.text || r.value}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderTraffic(info) {
+  const t = info.totals || {};
+  document.getElementById('t-pv').textContent = (t.pv ?? 0).toLocaleString();
+  document.getElementById('t-ips').textContent = (t.ips ?? 0).toLocaleString();
+  document.getElementById('t-req').textContent = (t.requests ?? 0).toLocaleString();
+  document.getElementById('t-bytes').textContent = t.bytes_human || '—';
+  document.getElementById('t-chat').textContent = (t.chat ?? 0).toLocaleString();
+
+  const r = info.range || {};
+  document.getElementById('t-req-note').textContent = r.from
+    ? `${r.from} ~ ${r.to}` : '这段时间没有记录';
+  document.getElementById('t-bytes-note').textContent =
+    t.avg_rt ? `平均响应 ${t.avg_rt}s` : 'nginx 记的平均响应时间';
+  document.getElementById('t-chat-note').textContent = '发到 /api/chat 的次数';
+
+  const ex = info.excluded || {};
+  const parts = [`本机 ${ex.loopback || 0}`, `扫描器 ${ex.bots || 0}`, `腾讯网段 ${ex.tencent || 0}`];
+  if (!info.overseas) parts.push(`海外 ${ex.overseas || 0}`);
+  trafficHintEl.textContent = `${info.log_files || 0} 个日志文件 · 已排除：${parts.join(' · ')} · ` +
+    `算于 ${info.generated_at || ''}（60 秒内不会重算）`;
+
+  // 按天趋势
+  const days = info.per_day || [];
+  if (!days.length) {
+    trafficDaysEl.innerHTML = '<div class="hint">这段时间没有记录喵</div>';
+    trafficDaysHintEl.textContent = '';
+  } else {
+    const max = Math.max(1, ...days.map((d) => d.requests));
+    trafficDaysEl.innerHTML = days.map((d) => {
+      const h = Math.max(3, Math.round((d.requests / max) * 100));
+      return `<div class="day-col" title="${d.date}：${d.requests} 次请求 / PV ${d.pv} / ${d.ips} 个 IP / 聊天 ${d.chat}">
+        <div class="day-num">${d.requests}</div>
+        <div class="day-bar-wrap"><div class="day-bar" style="height:${h}%"></div></div>
+        <div class="day-label">${d.date.slice(5)}</div>
+      </div>`;
+    }).join('');
+    trafficDaysHintEl.textContent = '柱高按「总请求数」；鼠标停上去能看到当天的 PV / 独立 IP / 聊天数。';
+  }
+
+  // 地区分布
+  trafficRegionsEl.innerHTML = (info.regions || []).length
+    ? barRows(info.regions.map((x) => ({
+        label: x.name, value: x.count, text: `${x.count} 个 · ${x.percent}%`,
+      })))
+    : '<div class="hint">没有可统计的地区</div>';
+
+  // 热门路径
+  trafficPathsEl.innerHTML = (info.paths || []).length
+    ? barRows(info.paths.map((x) => ({ label: x.path, value: x.count, text: `${x.count} 次` })))
+    : '<div class="hint">没有记录</div>';
+
+  // 状态码
+  trafficStatusEl.innerHTML = (info.status || []).length
+    ? barRows(info.status.map((x) => ({ label: x.code, value: x.count, text: `${x.count} 次` })))
+    : '<div class="hint">没有记录</div>';
+
+  // 访问最多的 IP
+  trafficIpsEl.innerHTML = (info.top_ips || []).length
+    ? info.top_ips.map((x) => `<div class="row">
+        <div class="row-main">${x.ip}<span class="row-sub">${x.place || ''}</span></div>
+        <div class="row-num">${x.count}</div>
+      </div>`).join('')
+    : '<div class="hint">没有记录</div>';
+}
+
+async function loadTraffic() {
+  if (panelView.hidden || trafficBusy) return;
+  trafficBusy = true;
+  trafficHintEl.textContent = '正在扫日志…（第一次可能要两三秒）';
+  document.querySelectorAll('#traffic-range button').forEach((b) => {
+    b.classList.toggle('on', Number(b.dataset.days) === trafficDays);
+  });
+  try {
+    const info = await api(`/api/admin/traffic?days=${trafficDays}&overseas=${trafficOverseas ? 1 : 0}`);
+    trafficBusy = false;
+    if (!info.ok) {
+      trafficHintEl.textContent = info.error || '算不出来喵';
+      return;
+    }
+    renderTraffic(info);
+  } catch (err) {
+    trafficBusy = false;
+    if (err.status === 401) showLogin(err.message);
+    else trafficHintEl.textContent = `读不到流量：${err.message}`;
+  }
 }
 
 /* ---------------- 表情包库 ---------------- */
@@ -1246,6 +1360,18 @@ resetPromptEl.addEventListener('click', async () => {
     guard(err);
   }
 });
+
+document.querySelectorAll('#traffic-range button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    trafficDays = Number(btn.dataset.days) || 7;
+    loadTraffic();
+  });
+});
+document.getElementById('traffic-overseas').addEventListener('change', (ev) => {
+  trafficOverseas = ev.target.checked;
+  loadTraffic();
+});
+document.getElementById('traffic-refresh').addEventListener('click', loadTraffic);
 
 stickerUploadEl.addEventListener('click', uploadSticker);
 stickerImportEl.addEventListener('click', importZip);

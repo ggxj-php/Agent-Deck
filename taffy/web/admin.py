@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from .. import settings
 from ..config import ADMIN_PASSWORD_PREFIX, CONTEXT_COMPRESS_AT, EMBED_DIM
 from ..kb import stats as kb_stats
-from . import sysinfo, update
+from . import sysinfo, traffic, update
 
 router = APIRouter()
 
@@ -225,6 +225,20 @@ def sysinfo_state(request: Request):
     """服务器状态：CPU / 内存 / 磁盘 / 本进程占多少。仪表盘每隔几秒来拉一次。"""
     _require(request)
     return sysinfo.snapshot()
+
+
+# ---------- 访问日志 / 流量 ----------
+
+@router.get("/api/admin/traffic")
+def traffic_state(request: Request, days: int = 7, overseas: int = 0):
+    """访问日志统计：页面访问 / 独立 IP / 地区分布 / 热门路径 / 状态码。
+
+    口径和命令行版 /root/taffy-traffic.py 一样：排掉本机、扫描器、腾讯网段，
+    默认再排掉海外 IP（只要真实国内访客）。overseas=1 就全算上。
+    结果在模块里缓存 60 秒，重复点不会反复扫日志。
+    """
+    _require(request)
+    return traffic.snapshot(days=days, overseas=bool(overseas))
 
 
 # ---------- 检查更新 ----------
