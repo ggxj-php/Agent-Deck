@@ -697,18 +697,53 @@ function renderIpDetail(d) {
   const g = d.geo || {};
   const place = [g.country, g.region, g.city].filter(Boolean).join(' ');
   const rows = [];
-  rows.push(`<div class="ip-meta">${place || '归属未知'}${g.isp ? ' · ' + g.isp : ''}` +
-    `${g.as ? ' · ' + g.as : ''}${g.idc ? ' · <b class="ip-flag">疑似机房</b>' : ''}</div>`);
-  rows.push(`<div class="ip-meta">${d.first} ~ ${d.last}，共 <b>${d.count}</b> 次请求</div>`);
+
+  // 归属
+  rows.push(`<div class="ip-meta">${place || '归属未知'}` +
+    `${g.isp ? ' · ' + g.isp : ''}${g.as ? ' · ' + g.as : ''}` +
+    `${g.idc ? ' · <b class="ip-flag">机房/云主机</b>' : ''}</div>`);
+
+  // 规模 + 频率
+  rows.push(`<div class="ip-meta">${d.first} ~ ${d.last}，共 <b>${d.count}</b> 次请求` +
+    (d.rate_per_min ? ` · 平均 <b>${d.rate_per_min}</b> 次/分钟` : '') + '</div>');
+
+  // 行为特征：这几个数字最能说明问题
+  const rawHost = d.raw_host || 0;
+  const appHits = d.app_hits || 0;
+  const sensN = (d.sensitive || []).length;
+  const loginN = (d.login || []).reduce((s, x) => s + x.count, 0);
+  rows.push('<div class="ip-block"><div class="ip-label">行为特征</div>' +
+    `<span class="ip-chip ${rawHost ? 'warn' : ''}">裸连 IP ${rawHost} 次</span>` +
+    `<span class="ip-chip ${appHits ? '' : 'warn'}">加载前端资源 ${appHits} 次</span>` +
+    `<span class="ip-chip ${sensN ? 'warn' : ''}">敏感路径 ${sensN} 个</span>` +
+    `<span class="ip-chip ${loginN ? 'warn' : ''}">登录接口 ${loginN} 次</span>` +
+    '</div>');
+
+  // 敏感路径 + 状态码（判断有没有得手的关键）
+  if (sensN) {
+    rows.push('<div class="ip-block"><div class="ip-label">敏感路径命中（路径 × 次数 → 状态码）</div>' +
+      d.sensitive.map((h) => `<span class="ip-chip warn">${h.path} ×${h.count} → ` +
+        h.statuses.map(([c, n]) => `${c}×${n}`).join(' ') + '</span>').join('') + '</div>');
+  }
+  if (loginN) {
+    rows.push('<div class="ip-block"><div class="ip-label">登录接口调用</div>' +
+      d.login.map((h) => `<span class="ip-chip warn">${h.path} ×${h.count} → ` +
+        h.statuses.map(([c, n]) => `${c}×${n}`).join(' ') + '</span>').join('') + '</div>');
+  }
+
+  // 状态码 / 路径 / UA
   rows.push('<div class="ip-block"><div class="ip-label">状态码</div>' +
     d.statuses.map(([c, n]) => `<span class="ip-chip">${c} × ${n}</span>`).join('') + '</div>');
   rows.push('<div class="ip-block"><div class="ip-label">访问路径</div>' +
-    d.paths.slice(0, 8).map(([p, n]) => `<span class="ip-chip">${p} × ${n}</span>`).join('') + '</div>');
+    d.paths.slice(0, 10).map(([p, n]) => `<span class="ip-chip">${p} × ${n}</span>`).join('') + '</div>');
   rows.push('<div class="ip-block"><div class="ip-label">User-Agent</div>' +
     d.uas.map(([ua, n]) => `<span class="ip-chip">${n}× ${ua}</span>`).join('') + '</div>');
+
+  // 时间线
   rows.push('<div class="ip-block"><div class="ip-label">时间线（前 ' + d.samples.length + ' 条）</div>' +
     '<pre class="ip-timeline">' + d.samples.map((s) =>
       `${s.t}  ${s.status}  ${s.path}`).join('\n') + '</pre></div>');
+
   ipModalDetailEl.innerHTML = rows.join('');
 }
 

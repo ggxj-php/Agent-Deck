@@ -655,10 +655,43 @@ def ip_detail(ip, days=7, sample=40):
     uas = Counter((r["ua"] or "-") for r in recs)
     hosts = Counter((r["host"] or "-") for r in recs)
 
+    # 敏感路径 / 登录接口：带各自的状态码，方便判断「有没有得手」
+    def _hits(pred):
+        out = []
+        for path, cnt in paths.most_common():
+            if not pred(path):
+                continue
+            st = Counter(r["status"] for r in recs if r["url"].split("?")[0] == path)
+            # 响应体大小：判断「200 是真的给了东西，还是失败也返回 200」的关键
+            sz = Counter(
+                f'{r["status"]}:{r["bytes"]}'
+                for r in recs if r["url"].split("?")[0] == path
+            )
+            out.append({
+                "path": path,
+                "count": cnt,
+                "statuses": st.most_common(4),
+                "sizes": sz.most_common(4),
+            })
+        return out[:8]
+
+    sensitive = _hits(lambda p: bool(SENSITIVE_HINTS.search(p)))
+    login = _hits(lambda p: any(p.lower().startswith(h) for h in LOGIN_HINTS))
+    raw_host = sum(1 for r in recs
+                   if (r["host"] or "")[:1].isdigit() and "taffy" not in (r["host"] or ""))
+    app_hits = sum(1 for r in recs if r["url"].split("?")[0].startswith(APP_HINTS))
+    span = max((recs[-1]["ts"] - recs[0]["ts"]).total_seconds(), 1)
+    rate = round(len(recs) / (span / 60.0), 2)
+
     return {
         "ok": True,
         "ip": ip,
         "days": days,
+        "sensitive": sensitive,
+        "login": login,
+        "raw_host": raw_host,
+        "app_hits": app_hits,
+        "rate_per_min": rate,
         "geo": {
             "country": geo.get("country") or "",
             "region": geo.get("region") or "",

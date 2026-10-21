@@ -1919,3 +1919,9 @@ sup, sub { font-size: 0.72em; line-height: 0; }
   color: #c62828;
   border-color: transparent;
 }
+
+/* 明细里的警示 chip */
+.ip-chip.warn {
+  background: #ffe9e9;
+  color: #c62828;
+}

@@ -251,14 +251,20 @@ _ip_cache_lock = threading.Lock()
 IP_ANALYSIS_TTL = 1800
 
 _IP_SYSTEM_PROMPT = (
-    "你是网站运维安全分析师。根据给定的访问日志判断这个 IP 是什么角色。\n"
-    "严格按下面三行输出，不要客套、不要多余的话：\n"
+    "你是网站运维安全分析师。根据给定的访问日志，写一份**具体**的行为分析。\n"
+    "必须引用日志里真实出现的路径、次数、状态码、时间，不许编造。\n"
+    "严格按下面格式输出（每项一行，标题后用中文冒号）：\n"
     "角色：<真实访客 / 搜索引擎爬虫 / 漏洞扫描器 / 账号爆破 / 内容采集器 / "
     "云厂商探测 / 网络空间测绘 / 其他>\n"
-    "依据：<一两句，必须引用日志里的具体证据>\n"
-    "建议：<一句话：放行 / 观察 / 封禁>\n"
-    "依据必须只来自给定的日志数据，不许编造日志里没有的路径或行为；"
-    "数据不足就直接说「证据不足」。"
+    "结论：<风险等级 高危/中危/低危，加一句为什么>\n"
+    "具体在干什么：<把行为按时间顺序还原成 2~4 句，带上路径和次数，"
+    "比如「先探 /x 3 次、再连打 /y 16 次」>\n"
+    "有没有得手：<综合状态码 + 响应体大小判断。注意 HTTP 200 不等于成功："
+    "很多接口失败也返回 200（例如登录失败会返回 {\"success\":false}，只有几十字节），"
+    "真正的成功响应体通常大得多。敏感文件被读走会返回 2xx 且体积明显偏大。"
+    "数据不足以判断就直说「无法确定」，不要猜>\n"
+    "建议：<一句话：放行 / 观察 / 封禁，加简短理由>\n"
+    "总字数控制在 250 字以内，不要客套。"
 )
 
 
@@ -272,10 +278,28 @@ def _ip_prompt(d):
     g = d["geo"]
     lines = [
         f"IP：{d['ip']}",
-        f"归属：{g['country']} {g['region']} {g['city']} / {g['isp']} / {g['as']}",
-        f"时间窗：{d['first']} ~ {d['last']}，共 {d['count']} 次请求",
+        f"归属：{g['country']} {g['region']} {g['city']} / {g['isp']} / {g['as']}"
+        + ("（机房/云主机）" if g.get("idc") else ""),
+        f"时间窗：{d['first']} ~ {d['last']}，共 {d['count']} 次请求，"
+        f"平均 {d.get('rate_per_min', 0)} 次/分钟",
+        f"裸连服务器 IP（Host 头是 IP 不是域名）：{d.get('raw_host', 0)} 次",
+        f"加载前端资源（/static 等）：{d.get('app_hits', 0)} 次（真人打开页面必然有）",
         "状态码：" + "、".join(f"{c}×{n}" for c, n in d["statuses"]),
         "访问路径：" + "、".join(f"{p}×{n}" for p, n in d["paths"]),
+    ]
+    if d.get("sensitive"):
+        lines.append("敏感路径命中（路径 次数 状态码）：")
+        for h in d["sensitive"]:
+            st = "、".join(f"{c}×{n}" for c, n in h["statuses"])
+            sz = "、".join(f"{s.split(':')[0]}→{s.split(':')[1]}B×{n}" for s, n in (h.get("sizes") or []))
+            lines.append(f"  {h['path']} ×{h['count']}  → {st}   响应体: {sz}")
+    if d.get("login"):
+        lines.append("登录接口调用（路径 次数 状态码 响应体大小）：")
+        for h in d["login"]:
+            st = "、".join(f"{c}×{n}" for c, n in h["statuses"])
+            sz = "、".join(f"{s.split(':')[0]}→{s.split(':')[1]}B×{n}" for s, n in (h.get("sizes") or []))
+            lines.append(f"  {h['path']} ×{h['count']}  → {st}   响应体: {sz}")
+    lines += [
         "User-Agent：" + " | ".join(ua for ua, _ in d["uas"]),
         "请求时间线（时间 状态码 路径）：",
     ]
@@ -313,7 +337,7 @@ def ip_analyze(req: IpAnalyzeRequest, request: Request):
     text = llm.complete(
         [{"role": "system", "content": _IP_SYSTEM_PROMPT},
          {"role": "user", "content": _ip_prompt(detail)}],
-        max_tokens=900, thinking=False,
+        max_tokens=1200, thinking=False,
     )
     text = (text or "").strip() or "模型没给出分析结果"
     with _ip_cache_lock:
