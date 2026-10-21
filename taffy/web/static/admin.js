@@ -1,3 +1,15 @@
+/* 兜底：万一脚本某一行抛异常，别让人卡在「看看钥匙喵…」——
+   至少把登录框放出来，而不是白屏干瞪眼。 */
+window.addEventListener('error', () => {
+  const login = document.getElementById('login-view');
+  const panel = document.getElementById('panel-view');
+  const status = document.getElementById('status');
+  if (login && panel && panel.hidden) {
+    login.hidden = false;
+    if (status) status.textContent = '脚本出了点问题，先登录试试';
+  }
+});
+
 'use strict';
 
 /* 后台管理前端：登录 -> 左侧导航切面板。
@@ -833,8 +845,10 @@ async function toggleBan() {
   }
 }
 
-document.getElementById('ip-modal-ban').addEventListener('click', toggleBan);
-document.getElementById('traffic-blacklist').addEventListener('click', async (ev) => {
+const ipModalBanEl = document.getElementById('ip-modal-ban');
+if (ipModalBanEl) ipModalBanEl.addEventListener('click', toggleBan);
+const trafficBlacklistEl = document.getElementById('traffic-blacklist');
+if (trafficBlacklistEl) trafficBlacklistEl.addEventListener('click', async (ev) => {
   const btn = ev.target.closest ? ev.target.closest('[data-unban]') : null;
   if (!btn) return;
   const ip = btn.dataset.unban;
