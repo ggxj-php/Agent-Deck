@@ -559,6 +559,7 @@ async function refreshSysinfo() {
 
 let trafficDays = 7;
 let trafficOverseas = false;
+let trafficScanners = true;   // 是否过滤扫描器（默认过滤）
 let trafficBusy = false;
 
 const trafficHintEl = document.getElementById('traffic-hint');
@@ -599,6 +600,7 @@ function renderTraffic(info) {
   const ex = info.excluded || {};
   const parts = [`本机 ${ex.loopback || 0}`, `扫描器 ${ex.bots || 0} 次 / ${ex.bot_ips || 0} 个 IP`, `机房/云 ${ex.idc || 0}`, `腾讯网段 ${ex.tencent || 0}`];
   if (!info.overseas) parts.push(`海外 ${ex.overseas || 0}`);
+  if (!info.scanners) parts.unshift('（扫描器没过滤）');
   trafficHintEl.textContent = `${info.log_files || 0} 个日志文件 · 已排除：${parts.join(' · ')} · ` +
     `算于 ${info.generated_at || ''}（60 秒内不会重算）`;
 
@@ -924,7 +926,8 @@ async function loadTraffic() {
     b.classList.toggle('on', Number(b.dataset.days) === trafficDays);
   });
   try {
-    const info = await api(`/api/admin/traffic?days=${trafficDays}&overseas=${trafficOverseas ? 1 : 0}`);
+    const info = await api(`/api/admin/traffic?days=${trafficDays}` +
+      `&overseas=${trafficOverseas ? 1 : 0}&scanners=${trafficScanners ? 1 : 0}`);
     trafficBusy = false;
     if (!info.ok) {
       trafficHintEl.textContent = info.error || '算不出来喵';
@@ -1648,6 +1651,10 @@ document.querySelectorAll('#traffic-range button').forEach((btn) => {
     trafficDays = Number(btn.dataset.days) || 7;
     loadTraffic();
   });
+});
+document.getElementById('traffic-scanners').addEventListener('change', (ev) => {
+  trafficScanners = ev.target.checked;
+  loadTraffic();
 });
 document.getElementById('traffic-overseas').addEventListener('change', (ev) => {
   trafficOverseas = ev.target.checked;

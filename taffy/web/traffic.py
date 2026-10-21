@@ -418,7 +418,7 @@ def _human(n):
 
 # ---------------- 主逻辑 ----------------
 
-def _compute(days, overseas):
+def _compute(days, overseas, scanners=True):
     files = _log_files(days)
     if not files:
         return {"ok": False, "error": "找不到 nginx 访问日志（要 root 才能读）"}
@@ -444,7 +444,7 @@ def _compute(days, overseas):
         if ip in LOOPBACK:
             continue
         base = r["url"].split("?")[0]
-        if _is_bot(r["ua"], base):
+        if scanners and _is_bot(r["ua"], base):
             scanner_ips.add(ip)
             continue
         if base.startswith(APP_HINTS):
@@ -456,9 +456,10 @@ def _compute(days, overseas):
     # 行为判定：一个真访客打开页面，浏览器必然会去拉 /static/* 的 js、css 和 /api/* 的接口。
     # 只抓了首页、/logo.png、/robots.txt 这种「表面路径」的，就是扫描器 / 测绘器
     # （Onyphe、Shodan 这类就是这么整站摸一遍的）。
-    for ip in candidate:
-        if ip not in app_ips:
-            scanner_ips.add(ip)
+    if scanners:
+        for ip in candidate:
+            if ip not in app_ips:
+                scanner_ips.add(ip)
 
     geo = _fill_geo(candidate)
 
@@ -551,6 +552,7 @@ def _compute(days, overseas):
         "generated_at": datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "days": days,
         "overseas": bool(overseas),
+        "scanners": bool(scanners),
         "range": {
             "from": first_ts.strftime("%Y-%m-%d") if first_ts else "",
             "to": last_ts.strftime("%Y-%m-%d") if last_ts else "",
@@ -597,10 +599,10 @@ def _compute(days, overseas):
     }
 
 
-def snapshot(days=7, overseas=False):
+def snapshot(days=7, overseas=False, scanners=True):
     """给后台接口用：带 60 秒缓存 + 单线程扫描。"""
     days = max(0, min(int(days or 0), 90))
-    key = (days, bool(overseas))
+    key = (days, bool(overseas), bool(scanners))
     now = time.time()
     cached = _cached.get(key)
     if cached and now - cached[0] < _CACHE_TTL:
@@ -615,7 +617,7 @@ def snapshot(days=7, overseas=False):
         again = _cached.get(key)
         if again and time.time() - again[0] < _CACHE_TTL:
             return again[1]
-        payload = _compute(days, overseas)
+        payload = _compute(days, overseas, scanners)
         _cached[key] = (time.time(), payload)
         return payload
     finally:
