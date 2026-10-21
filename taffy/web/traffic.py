@@ -675,7 +675,7 @@ def ip_detail(ip, days=7, sample=40):
             })
         return out[:8]
 
-    sensitive = _hits(lambda p: bool(SENSITIVE_HINTS.search(p)))
+    sensitive = _hits(is_sensitive_path)
     login = _hits(lambda p: any(p.lower().startswith(h) for h in LOGIN_HINTS))
     raw_host = sum(1 for r in recs
                    if (r["host"] or "")[:1].isdigit() and "taffy" not in (r["host"] or ""))
@@ -725,11 +725,23 @@ def ip_detail(ip, days=7, sample=40):
 SENSITIVE_HINTS = re.compile(
     r"/\.(?:env|git|svn|hg|aws|ssh|DS_Store|auth\.json|azure-pipelines|gitlab-ci|htaccess|htpasswd)|"
     r"wp-(?:login|admin|content|includes|json)|xmlrpc\.php|phpmyadmin|cgi-bin|actuator|"
-    r"telescope|druid|solr|manager/html|config\.json|docker-compose|vendor/|backup|\.sql|"
+    r"telescope|druid|solr|manager/html|config\.json|docker-compose|^/vendor/|^/backup|\.sql|"
     r"Dockerfile|eval-stdin|composer\.json|\.yml$|\.yaml$|\.bak$|\.old$|\.zip$|\.tar|\.tar\.gz|"
     r"/1\.sql|/\.well-known/\.\.|phpinfo|info\.php|\.php$|\.asp$|\.jsp$|server-status",
     re.I,
 )
+
+def is_sensitive_path(path):
+    """是不是扫描器才会探的敏感路径。
+
+    注意：/static/ 下的前端资源（js/css/图片）一律不算——
+    之前 vendor/ 没锚定根路径，/static/vendor/marked.min.js 这种正常文件
+    也被当成敏感路径，把真访客的分数刷上去了。
+    """
+    if not path or path.startswith("/static/"):
+        return False
+    return bool(SENSITIVE_HINTS.search(path))
+
 
 LOGIN_HINTS = (
     "/api/user/login", "/admin/auth/login", "/api/admin/login", "/login",
@@ -740,7 +752,7 @@ LOGIN_HINTS = (
 RISK_MIN_SCORE = 20
 
 
-def risk_candidates(days=7, limit=20):
+def risk_candidates(days=7, limit=30):
     """从日志里按启发式挑出最可疑的一批 IP，交给模型做终审。
 
     为什么要粗筛：全量日志喂给模型又贵又没必要。这里先用规则打分，
@@ -772,7 +784,7 @@ def risk_candidates(days=7, limit=20):
         d["status"][r["status"]] += 1
         d["uas"][(r["ua"] or "-")[:90]] += 1
         d["hosts"][r["host"] or "-"] += 1
-        if SENSITIVE_HINTS.search(base):
+        if is_sensitive_path(base):
             d["sens"] += 1
         if any(base.lower().startswith(h) for h in LOGIN_HINTS):
             d["login"] += 1
@@ -796,7 +808,8 @@ def risk_candidates(days=7, limit=20):
 
         score = 0
         score += min(d["sens"], 12) * 12           # 探敏感路径，权重最高
-        score += min(d["login"], 10) * 10          # 撞登录
+        score += min(d["login"], 10) * 25          # 撞登录：主动攻击，权重给高
+        score += 80 if d["login"] >= 10 else 0     # 十次以上 = 持续性爆破
         score += min(d["rawhost"], 6) * 6          # 裸连服务器 IP
         score += min(d["garbage"], 5) * 8          # 畸形请求
         score += 20 if d["deny"] >= 5 else 0       # 401/403 风暴

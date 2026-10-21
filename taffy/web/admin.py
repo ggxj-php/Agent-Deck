@@ -426,7 +426,7 @@ def risk_scan(req: RiskScanRequest, request: Request):
         if hit and now - hit[0] < RISK_ANALYSIS_TTL:
             return {"ok": True, "cached": True, **hit[1]}
 
-    scan = traffic.risk_candidates(days=days, limit=20)
+    scan = traffic.risk_candidates(days=days, limit=30)
     if not scan.get("ok"):
         raise HTTPException(status_code=400, detail=scan.get("error") or "读不到日志")
     cands = scan.get("candidates") or []
