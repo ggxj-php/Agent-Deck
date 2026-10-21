@@ -61,6 +61,10 @@ BOT_PATH = re.compile(
 )
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
 
+# 真访客才会碰的路径：前端资源 / 接口 / 头像。扫描器一般只抓 HTML 表面
+# 扫描器也会抓 favicon / logo，所以只认「真前端」才有的：打包 js/css 和接口
+APP_HINTS = ("/static/", "/api/", "/avatar", "/manifest")
+
 TAFFY_PATHS = re.compile(r"^/(admin|api/(chat|context|session|ping|stickers|admin)|static/)")
 API_PATHS = re.compile(
     r"^/(v1/|dashboard|login|logout|register|setup|logo\.png|favicon\.ico|"
@@ -94,6 +98,8 @@ IDC_ASNS = {
     "55990", "136907", "38365", "137718", "135377", "137694",
     # 华数传媒（杭州，大量 IDC 段）
     "24139",
+    # 网络空间搜索引擎 / 测绘：ONYPHE 自建 ASN
+    "213412", "398324",
     # 国际云 / CDN / 托管
     "16509", "14618", "8987",          # AWS
     "15169", "396982", "19527",        # Google
@@ -135,6 +141,11 @@ IDC_WORDS = re.compile(
     r"ovh|hetzner|leaseweb|m247|choopa|contabo|scaleway|zenlayer|hostpapa|frantch|"
     r"egihosting|hosting|"
     r"alibaba|aliyun|tencent|huawei|volcano|bytedance|ucloud|kingsoft|baidu|"
+    # 网络空间搜索引擎 / 安全测绘 / 学术扫描项目（它们自带 ASN，名字里也没有 cloud）
+    r"onyphe|shodan|censys|leakix|binaryedge|zoomeye|fofa|greynoise|criminal ?ip|"
+    r"netsystemsresearch|internetmeasurement|internet measurement|expanse|"
+    r"security research|softsec|ruhr-uni-bochum|university of|"
+    r"scanner|scanning|audit-scanner|"
     r"网络中心|数据中心|云计算|云服务|机房|网络科技|信息技术|传媒网络|"
     r"internet network information center",
     re.I,
@@ -423,16 +434,27 @@ def _compute(days, overseas):
     # 扫描器经常先探一下敏感路径、再老老实实 get 首页，逐条判断会漏。
     candidate = set()
     scanner_ips = set()
+    app_ips = set()   # 真正加载过前端资源（JS/CSS/接口）的 IP，才算真访客
     for r in _iter_records(files, since):
         ip = r["ip"]
         if ip in LOOPBACK:
             continue
-        if _is_bot(r["ua"], r["url"].split("?")[0]):
+        base = r["url"].split("?")[0]
+        if _is_bot(r["ua"], base):
             scanner_ips.add(ip)
             continue
+        if base.startswith(APP_HINTS):
+            app_ips.add(ip)
         if in_tencent(ip):
             continue
         candidate.add(ip)
+
+    # 行为判定：一个真访客打开页面，浏览器必然会去拉 /static/* 的 js、css 和 /api/* 的接口。
+    # 只抓了首页、/logo.png、/robots.txt 这种「表面路径」的，就是扫描器 / 测绘器
+    # （Onyphe、Shodan 这类就是这么整站摸一遍的）。
+    for ip in candidate:
+        if ip not in app_ips:
+            scanner_ips.add(ip)
 
     geo = _fill_geo(candidate)
 
