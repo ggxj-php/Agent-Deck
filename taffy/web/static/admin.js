@@ -799,6 +799,89 @@ function initIpSearch() {
 }
 initIpSearch();
 
+/* AI 风险分析：规则粗筛 + 模型终审 */
+
+const RISK_LABEL = { high: '高危', medium: '中危', low: '低危' };
+let riskBusy = false;
+
+function renderRiskList(data) {
+  const list = document.getElementById('risk-list');
+  if (!list) return;
+  const items = (data && data.items) || [];
+  if (!items.length) {
+    list.innerHTML = '<div class="hint">这段时间没有可疑 IP</div>';
+    return;
+  }
+  list.innerHTML = items.map((it) => `<div class="row clickable risk-row" role="button"
+      tabindex="0" data-ip="${it.ip}">
+      <div class="row-main">
+        <span class="risk-badge ${it.risk}">${RISK_LABEL[it.risk] || it.risk}</span>
+        <span class="risk-ip">${it.ip}</span>
+        <span class="row-sub">${it.role || ''}${it.place ? ' · ' + it.place.split(' ').slice(-2).join(' ') : ''}</span>
+        <div class="risk-reason">${it.reason || ''}</div>
+      </div>
+      <button type="button" class="mini" data-ban="${it.ip}">封禁</button>
+    </div>`).join('');
+}
+
+async function runRiskScan() {
+  if (riskBusy) return;
+  const btn = document.getElementById('risk-scan-btn');
+  const hint = document.getElementById('risk-hint');
+  if (!btn || !hint) return;
+  riskBusy = true;
+  btn.disabled = true;
+  btn.textContent = '分析中…';
+  hint.textContent = '先扫日志粗筛，再让模型判定，大概 5~10 秒';
+  try {
+    const r = await api('/api/admin/risk-scan', { days: trafficDays });
+    renderRiskList(r);
+    hint.textContent = `扫了 ${r.total_scanned || 0} 个 IP，挑出 ${(r.items || []).length} 个可疑的` +
+      (r.cached ? '（30 分钟内的缓存结果）' : '');
+  } catch (err) {
+    hint.textContent = `分析失败：${err.message}`;
+  } finally {
+    riskBusy = false;
+    btn.disabled = false;
+    btn.textContent = '重新分析';
+  }
+}
+
+async function banFromList(btn) {
+  const ip = btn.dataset.ban;
+  if (!ip) return;
+  btn.disabled = true;
+  btn.textContent = '封禁中…';
+  try {
+    const r = await api('/api/admin/blacklist', { ip, action: 'add', reason: 'AI 风险分析' });
+    banList = r.bans || [];
+    renderBlacklist();
+    btn.textContent = '已封';
+    btn.classList.add('done');
+  } catch (err) {
+    btn.textContent = '失败';
+    btn.disabled = false;
+  }
+}
+
+const riskScanBtnEl = document.getElementById('risk-scan-btn');
+if (riskScanBtnEl) riskScanBtnEl.addEventListener('click', runRiskScan);
+
+const riskListEl = document.getElementById('risk-list');
+if (riskListEl) {
+  riskListEl.addEventListener('click', (ev) => {
+    const banBtn = ev.target.closest ? ev.target.closest('[data-ban]') : null;
+    if (banBtn) { ev.stopPropagation(); banFromList(banBtn); return; }
+    const row = ev.target.closest ? ev.target.closest('.row.clickable') : null;
+    if (row && row.dataset.ip) openIpModal(row.dataset.ip);
+  });
+  riskListEl.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    const row = ev.target.closest ? ev.target.closest('.row.clickable') : null;
+    if (row && row.dataset.ip) { ev.preventDefault(); openIpModal(row.dataset.ip); }
+  });
+}
+
 /* IP 黑名单：封禁 / 解封（后端写 UFW） */
 
 let banList = [];

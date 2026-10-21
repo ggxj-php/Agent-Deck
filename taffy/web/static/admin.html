@@ -247,6 +247,16 @@
         </div>
 
         <div class="card">
+          <h2>AI 风险分析</h2>
+          <p class="hint">按当前时间范围扫全部日志：先按规则粗筛可疑 IP，再让模型判定风险等级。30 分钟内不重复调模型。</p>
+          <div class="risk-tools">
+            <button type="button" id="risk-scan-btn" class="ghost">开始分析</button>
+            <span class="hint" id="risk-hint">点一下就开始</span>
+          </div>
+          <div id="risk-list" class="rows"></div>
+        </div>
+
+        <div class="card">
           <h2>IP 黑名单</h2>
           <p class="hint">封禁会写进 UFW（所有端口都拦，服务器重启也还在），只支持公网 IPv4。本机 / 内网 / 你自己当前的 IP 会被拒绝。</p>
           <div id="traffic-blacklist" class="rows"></div>

@@ -684,3 +684,114 @@ def ip_detail(ip, days=7, sample=40):
             for r in recs[:sample]
         ],
     }
+
+
+# ---------------- 高风险 IP 候选（给「AI 风险分析」粗筛用） ----------------
+
+# 扫描器 / 攻击者最爱探的路径
+SENSITIVE_HINTS = re.compile(
+    r"/\.(?:env|git|svn|hg|aws|ssh|DS_Store|auth\.json|azure-pipelines|gitlab-ci|htaccess|htpasswd)|"
+    r"wp-(?:login|admin|content|includes|json)|xmlrpc\.php|phpmyadmin|cgi-bin|actuator|"
+    r"telescope|druid|solr|manager/html|config\.json|docker-compose|vendor/|backup|\.sql|"
+    r"Dockerfile|eval-stdin|composer\.json|\.yml$|\.yaml$|\.bak$|\.old$|\.zip$|\.tar|\.tar\.gz|"
+    r"/1\.sql|/\.well-known/\.\.|phpinfo|info\.php|\.php$|\.asp$|\.jsp$|server-status",
+    re.I,
+)
+
+LOGIN_HINTS = (
+    "/api/user/login", "/admin/auth/login", "/api/admin/login", "/login",
+    "/user/login", "/api/login", "/admin/login", "/signin",
+)
+
+# 算「高危」的最低分（低于这个不入候选，免得把正常访客塞给模型）
+RISK_MIN_SCORE = 20
+
+
+def risk_candidates(days=7, limit=20):
+    """从日志里按启发式挑出最可疑的一批 IP，交给模型做终审。
+
+    为什么要粗筛：全量日志喂给模型又贵又没必要。这里先用规则打分，
+    只把真正可疑的（探敏感路径 / 撞登录 / 量特别大 / 裸连 / 扫描器特征）
+    挑出来，通常几十个里取二十个。
+    """
+    files = _log_files(days)
+    if not files:
+        return {"ok": False, "error": "找不到 nginx 访问日志"}
+
+    since = None
+    if days:
+        since = (datetime.now(LOCAL_TZ) - timedelta(days=days - 1)).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+
+    per = defaultdict(lambda: {
+        "n": 0, "sens": 0, "login": 0, "deny": 0, "rawhost": 0, "garbage": 0,
+        "paths": Counter(), "status": Counter(), "uas": Counter(), "hosts": Counter(),
+    })
+
+    for r in _iter_records(files, since):
+        ip = r["ip"]
+        if ip in LOOPBACK:
+            continue
+        base = r["url"].split("?")[0]
+        d = per[ip]
+        d["n"] += 1
+        d["paths"][base] += 1
+        d["status"][r["status"]] += 1
+        d["uas"][(r["ua"] or "-")[:90]] += 1
+        d["hosts"][r["host"] or "-"] += 1
+        if SENSITIVE_HINTS.search(base):
+            d["sens"] += 1
+        if any(base.lower().startswith(h) for h in LOGIN_HINTS):
+            d["login"] += 1
+        if r["status"] in ("401", "403", "444"):
+            d["deny"] += 1
+        host = r["host"] or ""
+        if host and host[0].isdigit() and "taffy" not in host:
+            d["rawhost"] += 1
+        # 非 ASCII 路径 = 畸形/二进制请求（扫描器特征）
+        if any(ord(ch) < 32 or ord(ch) > 126 for ch in base):
+            d["garbage"] += 1
+
+    geo = _load_geo()
+    banned = blacklist.banned_ips()
+    cands = []
+
+    for ip, d in per.items():
+        info = geo.get(ip) or {}
+        ua = (d["uas"].most_common(1) or [("-", 1)])[0][0]
+        static_hits = sum(c for p, c in d["paths"].items() if p.startswith("/static/"))
+
+        score = 0
+        score += min(d["sens"], 12) * 12           # 探敏感路径，权重最高
+        score += min(d["login"], 10) * 10          # 撞登录
+        score += min(d["rawhost"], 6) * 6          # 裸连服务器 IP
+        score += min(d["garbage"], 5) * 8          # 畸形请求
+        score += 20 if d["deny"] >= 5 else 0       # 401/403 风暴
+        score += 25 if _is_bot(ua, "") else 0      # UA 就是扫描器
+        score += 25 if static_hits == 0 and d["n"] >= 3 else 0   # 从没加载前端
+        score += 15 if _is_idc(info) else 0        # 机房 / 云主机
+        score += min(d["n"] // 20, 10) * 2         # 量大
+        if score < RISK_MIN_SCORE:
+            continue
+
+        cands.append({
+            "ip": ip,
+            "score": score,
+            "requests": d["n"],
+            "place": _geo_place(info),
+            "isp": info.get("isp") or "",
+            "as": info.get("as") or "",
+            "idc": _is_idc(info),
+            "banned": ip in banned,
+            "paths": d["paths"].most_common(6),
+            "statuses": d["status"].most_common(5),
+            "ua": ua,
+            "rawhost": d["rawhost"],
+            "sensitive": d["sens"],
+            "login": d["login"],
+            "garbage": d["garbage"],
+            "static_hits": static_hits,
+        })
+
+    cands.sort(key=lambda x: -x["score"])
+    return {"ok": True, "total_scanned": len(per), "candidates": cands[:limit]}

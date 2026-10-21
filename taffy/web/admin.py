@@ -10,6 +10,7 @@ UTC+8 算——服务器时钟是 UTC 也不会差一天。口令只在内存里
 """
 import hashlib
 import hmac
+import json
 import os
 import secrets
 import threading
@@ -318,6 +319,125 @@ def ip_analyze(req: IpAnalyzeRequest, request: Request):
     with _ip_cache_lock:
         _ip_cache[key] = (time.time(), text)
     return {"ok": True, "analysis": text, "cached": False, "detail": detail}
+
+
+# ---------- 全量日志 AI 风险分析 ----------
+
+_risk_cache = {}
+_risk_cache_lock = threading.Lock()
+RISK_ANALYSIS_TTL = 1800
+
+_RISK_SYSTEM_PROMPT = (
+    "你是网站安全分析师。给你一批从 nginx 访问日志里按规则粗筛出来的可疑 IP，"
+    "请逐个判断风险。\n"
+    "严格只输出 JSON 数组，不要任何解释、不要 Markdown 代码块：\n"
+    '[{"ip":"1.2.3.4","risk":"high|medium|low","role":"不超过8个字","reason":"不超过40个字"}]\n'
+    "要求：\n"
+    "1. risk=high 表示正在主动攻击（撞库爆破、漏洞利用、路径穿越）；\n"
+    "   medium 表示扫描探测（找敏感文件、摸端口）；low 表示可疑但危害小。\n"
+    "2. 必须覆盖给出的每一个 IP，顺序照原样。\n"
+    "3. 依据只能来自给定数据，不许编造。"
+)
+
+
+def _risk_prompt(cands):
+    lines = [
+        "格式：IP | 归属/ISP | 请求数 | 敏感路径命中 | 登录接口 | 裸连次数 | 状态码 | 路径 | UA",
+        "",
+    ]
+    for c in cands:
+        paths = "、".join(f"{p}×{n}" for p, n in c["paths"][:5])
+        status = "、".join(f"{s}×{n}" for s, n in c["statuses"][:4])
+        lines.append(
+            f"{c['ip']} | {c['place'] or '未知'} / {c['isp'][:40]} | {c['requests']} | "
+            f"{c['sensitive']} | {c['login']} | {c['rawhost']} | {status} | {paths} | {c['ua'][:70]}"
+        )
+    return "\n".join(lines)
+
+
+def _parse_risk_json(text):
+    """把模型返回的 JSON 抠出来；被包了 ```json 也认。"""
+    if not text:
+        return []
+    s = text.strip()
+    if s.startswith("```"):
+        # 去掉围栏
+        s = s.split("\n", 1)[-1] if "\n" in s else s
+        if s.endswith("```"):
+            s = s[:-3]
+    start = s.find("[")
+    end = s.rfind("]")
+    if start < 0 or end <= start:
+        return []
+    try:
+        data = json.loads(s[start:end + 1])
+    except ValueError:
+        return []
+    if not isinstance(data, list):
+        return []
+    out = []
+    for item in data:
+        if isinstance(item, dict) and item.get("ip"):
+            out.append({
+                "ip": str(item.get("ip")).strip(),
+                "risk": str(item.get("risk") or "medium").strip().lower(),
+                "role": str(item.get("role") or "").strip()[:20],
+                "reason": str(item.get("reason") or "").strip()[:80],
+            })
+    return out
+
+
+class RiskScanRequest(BaseModel):
+    days: int = 7
+
+
+@router.post("/api/admin/risk-scan")
+def risk_scan(req: RiskScanRequest, request: Request):
+    """全量日志粗筛 + AI 终审：找出高危 IP，按风险排好序给前端。"""
+    _require(request)
+    days = max(1, min(int(req.days or 7), 90))
+    now = time.time()
+    with _risk_cache_lock:
+        hit = _risk_cache.get(days)
+        if hit and now - hit[0] < RISK_ANALYSIS_TTL:
+            return {"ok": True, "cached": True, **hit[1]}
+
+    scan = traffic.risk_candidates(days=days, limit=20)
+    if not scan.get("ok"):
+        raise HTTPException(status_code=400, detail=scan.get("error") or "读不到日志")
+    cands = scan.get("candidates") or []
+    if not cands:
+        return {"ok": True, "cached": False, "total_scanned": scan.get("total_scanned", 0),
+                "items": [], "note": "这段时间没有可疑 IP"}
+
+    text = llm.complete(
+        [{"role": "system", "content": _RISK_SYSTEM_PROMPT},
+         {"role": "user", "content": _risk_prompt(cands)}],
+        max_tokens=1600, thinking=False,
+    )
+    judged = {j["ip"]: j for j in _parse_risk_json(text)}
+
+    # 模型没覆盖到的，按打分兜底标 medium，绝不留空
+    items = []
+    for c in cands:
+        j = judged.get(c["ip"]) or {}
+        items.append({
+            **c,
+            "risk": j.get("risk") or "medium",
+            "role": j.get("role") or "",
+            "reason": j.get("reason") or "模型未给出，按规则判定",
+        })
+    order = {"high": 0, "medium": 1, "low": 2}
+    items.sort(key=lambda x: (order.get(x["risk"], 1), -x["score"]))
+
+    payload = {
+        "total_scanned": scan.get("total_scanned", 0),
+        "items": items,
+        "raw_model_output": text,
+    }
+    with _risk_cache_lock:
+        _risk_cache[days] = (time.time(), payload)
+    return {"ok": True, "cached": False, **payload}
 
 
 # ---------- IP 黑名单 ----------
