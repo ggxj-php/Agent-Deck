@@ -1210,6 +1210,25 @@ body.admin .card .sticker-del {
   overflow-wrap: anywhere;
 }
 
+/* 文件行（知识库 / 工作区）：文件名和大小·日期上下两行，右边一个小按钮。
+   长文件名能完整显示，不用被截成一截。 */
+.file-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.file-main .row-name {
+  display: block;
+  max-width: none;
+  line-height: 1.5;
+}
+
+.file-main .row-meta {
+  display: block;
+  margin-top: 2px;
+  flex: none;
+}
+
 .row-meta {
   flex: 1;
   min-width: 0;
@@ -1675,14 +1694,19 @@ sup, sub { font-size: 0.72em; line-height: 0; }
   font-variant-numeric: tabular-nums;
 }
 
-/* 文字行（Top IP） */
-.rows {
+/* 文字行（Top IP / 黑名单 / 风险列表）
+   ⚠️ 必须限定作用域！后台的知识库、工作区列表也用 .row/.rows 这套同名类，
+   写成全局规则会把它们顶成 grid 布局——文件名挤一列、大小和删除按钮掉到第二行
+   （踩过一次，截图反馈的就是这个）。 */
+#traffic-ips, #traffic-blacklist, #risk-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.row {
+#traffic-ips .row,
+#traffic-blacklist .row,
+#risk-list .row {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
@@ -1691,7 +1715,9 @@ sup, sub { font-size: 0.72em; line-height: 0; }
   border-bottom: 1px dashed var(--line);
 }
 
-.row:last-child { border-bottom: 0; }
+#traffic-ips .row:last-child,
+#traffic-blacklist .row:last-child,
+#risk-list .row:last-child { border-bottom: 0; }
 
 .row-main {
   overflow: hidden;
@@ -1971,5 +1997,5 @@ sup, sub { font-size: 0.72em; line-height: 0; }
     padding: 2px 8px;
     font-size: 11px;
   }
-  .row-name { max-width: 52%; }
+
 }

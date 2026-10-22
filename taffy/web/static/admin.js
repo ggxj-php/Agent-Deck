@@ -1221,7 +1221,9 @@ function wsRow(item) {
   name.textContent = item.name;
   const meta = el('span', 'row-meta');
   meta.textContent = `${item.dir ? '目录' : fmtSize(item.size)} · ${fmtTime(item.mtime)}`;
-  row.append(icon, name, meta);
+  const main = el('div', 'file-main');
+  main.append(name, meta);
+  row.append(icon, main);
 
   if (item.dir) {
     row.classList.add('clickable');
@@ -1344,7 +1346,9 @@ function knRow(item) {
   const meta = el('span', 'row-meta');
   meta.textContent = `${fmtSize(item.size)} · ${fmtTime(item.mtime)}` +
     (item.supported ? '' : ' · 这格式进不了索引');
-  row.append(icon, name, meta);
+  const main = el('div', 'file-main');
+  main.append(name, meta);
+  row.append(icon, main);
 
   const del = el('button', 'row-btn danger');
   del.type = 'button';
