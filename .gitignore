@@ -27,3 +27,7 @@ knowledge/
 
 # 身份卡（人设包）：部署数据，仓库里只带自动生成的默认卡
 personas/
+
+# 覆盖率数据，别提交
+.coverage
+.coverage.*
