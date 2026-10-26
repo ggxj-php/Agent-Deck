@@ -884,16 +884,36 @@ function renderSessionList() {
     del.addEventListener('click', async (event) => {
       event.stopPropagation();
       if (!window.confirm(`删掉「${item.title || '新会话'}」喵？删了就回不来了`)) return;
+      // 记住它在列表里的位置，删完跳到「附近」的那条去，而不是新建一个
+      const index = sessions.findIndex((row) => row.id === item.id);
+      const wasCurrent = item.id === sessionId;
       const resp = await fetch(`/api/sessions/${item.id}`, { method: 'DELETE' });
-      if (!resp.ok) return;
-      if (item.id === sessionId) {
-        sessionId = null;
-        messagesEl.innerHTML = '';
+      if (!resp.ok) {
+        statusEl.textContent = `删不掉喵（HTTP ${resp.status}）`;
+        return;
       }
       await loadSessions();
-      if (!sessionId) {
+      if (!wasCurrent) {
+        // 删的不是当前会话：列表刷新一下就行
+        closeSidebar();
+        return;
+      }
+      if (sessions.length) {
+        // 优先接原来位置的下一条，没有就退到上一条
+        const target = sessions[Math.min(Math.max(index, 0), sessions.length - 1)];
+        if (target) {
+          await switchSession(target.id);
+          return;
+        }
+      }
+      // 一条都不剩了：这时才需要新建一个
+      sessionId = null;
+      messagesEl.innerHTML = '';
+      try {
         await ensureSession();
         welcome();
+      } catch (err) {
+        statusEl.textContent = '建会话失败：' + ((err && err.message) || '未知原因');
       }
       closeSidebar();
     });
