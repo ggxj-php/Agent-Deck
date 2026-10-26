@@ -74,7 +74,7 @@ Taffy-Agent/
 │           ├── login.html   # 登录 / 邀请码注册页
 │           ├── stickers/    # 塔菲表情包（png / jpg / gif / webp 都认，gif 会动）
 │           └── vendor/      # marked / highlight.js / DOMPurify
-├── knowledge/               # 知识库原始文档，Agent 只读（已随仓库提供）
+├── knowledge/               # 知识库原始文档，Agent 只读（**自己放，仓库里不带**，已 gitignore）
 ├── .cache/                  # 知识库索引缓存，可随时删掉重建
 └── workspace/               # 沙箱根目录，Agent 只能在这里动文件
 ```
@@ -623,16 +623,11 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 
 把文档丢进项目根目录的 `knowledge/`（子目录也认），Agent 就能查到。
 
-仓库里已经带了一份知识库（约 117MB），也可以自己再往里加：
-
-| 目录 | 内容 |
-|---|---|
-| `books/` | 教材 PDF / Markdown：算法（[Algorithms-JeffE](file:///f:/新建文件夹/Taffy-Agent/knowledge/books/Algorithms-JeffE.pdf)、[CPH](file:///f:/新建文件夹/Taffy-Agent/knowledge/books/CompetitiveProgrammersHandbook.pdf)）、数据结构（[OpenDataStructures C++/Python](file:///f:/新建文件夹/Taffy-Agent/knowledge/books/OpenDataStructures-cpp.pdf)）、[计算机组成原理](file:///f:/新建文件夹/Taffy-Agent/knowledge/books/ComputerOrganization-Tarnoff.pdf)、[嵌入式系统](file:///f:/新建文件夹/Taffy-Agent/knowledge/books/EmbeddedSystems-LeeSeshia.pdf)、[物联网](file:///f:/新建文件夹/Taffy-Agent/knowledge/books/IoT-EnablingThingsToTalk.pdf)、[STM32 单片机](file:///f:/新建文件夹/Taffy-Agent/knowledge/books/Microcontrollers-STM32F103.md) |
-| `books/` 数字取证 | [数字取证教材（UOU）](file:///f:/新建文件夹/Taffy-Agent/knowledge/books/DigitalForensics-UOU.pdf)、[NIST SP 800-86 取证技术融入应急响应](file:///f:/新建文件夹/Taffy-Agent/knowledge/books/NIST-SP800-86-ForensicTechniques.pdf)、[NIST SP 800-101r1 移动设备取证](file:///f:/新建文件夹/Taffy-Agent/knowledge/books/NIST-SP800-101r1-MobileDeviceForensics.pdf)、[NIJ 数字证据检验指南](file:///f:/新建文件夹/Taffy-Agent/knowledge/books/NIJ-ForensicExaminationOfDigitalEvidence.pdf)、论文：[DFRWS 内存取证（Go 恶意样本）](file:///f:/新建文件夹/Taffy-Agent/knowledge/books/DFRWS2026-MemoryForensics-GoMalware.pdf)、[DFRWS Deepfake 取证](file:///f:/新建文件夹/Taffy-Agent/knowledge/books/DFRWS2026-DeepfakePolicing.pdf) |
-| `hello-algo/` | 《Hello 算法》中文教程分章 Markdown |
-| `leetcode/` | LeetCode 题解（按题号分段） |
-| `oi-wiki/` | OI Wiki 各专题 |
-| `luogu/` | 洛谷题解 |
+> **仓库里不带任何知识库文档，得自己配。**
+> 把你自己的资料（PDF / DOCX / Markdown / TXT / HTML）放进 `knowledge/`，
+> 想怎么分子目录都行（比如 `books/`、`notes/`、`leetcode/`）。
+> 放完重启服务（或在后台「知识库文档」里上传），索引会自动重建。
+> 也可以整个目录留空不配——不配知识库照样能聊，只是 `search_knowledge` 查不到东西。
 
 `books/` 下的英文教材篇幅大，同一个词在书里出现得多，容易把中文语料挤下去，**原查询那一路**的得分统一乘 0.5 降权（见 `KB_SOURCE_WEIGHTS`）；英文检索和向量那两路不掺这个系数——英文教材本来就该靠那两路去找。
 
@@ -664,11 +659,11 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 「英文检索词」那一路不用向量模型也能解决这件事：查之前先让模型把问题写成一行英文关键词（走聊天那套连接，模型名可以在后台单独指定，留空就跟聊天模型一样），再拿这行英文去查一遍。实测：
 
 ```
-「内存取证里易失性数据该怎么采集」 -> 8/8 全是 NIST SP 800-86 / DigitalForensics-UOU 取证教材
+「内存取证里易失性数据该怎么采集」 -> 8/8 都是取证教材里讲 volatile data 的段落
 「数字取证的证据链怎么保管」       -> 8/8 取证教材
-「物联网参考架构分成哪几层」       -> 8/8 IoT-EnablingThingsToTalk
-「STM32 的 GPIO 怎么配置」         -> 5/5 Microcontrollers-STM32F103
-「动态规划背包问题怎么做」         -> 5/5 hello-algo 动态规划章节
+「物联网参考架构分成哪几层」       -> 8/8 物联网教材
+「STM32 的 GPIO 怎么配置」         -> 5/5 单片机文档
+「动态规划背包问题怎么做」         -> 5/5 算法书动态规划章节
 ```
 
 这一路**只在英文内容里找**（按块判语言，中文字符占字母两成以上就算中文块）：中文资料里混着不少英文术语（`data`、`structure`、`memory` 这种），不挡掉的话同一段内容会在两路里各得一次分，反倒把真正的英文教材挤下去。
@@ -783,37 +778,8 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 
 本项目**代码**以 [MIT 许可证](file:///f:/新建文件夹/Taffy-Agent/LICENSE)发布，随便用、随便改、商用也行，保留版权声明和许可证文本就好。
 
-`knowledge/` 下的文档是**第三方作品，不在 MIT 的覆盖范围内**，各自的授权见下面「版权声明」一节。
-
-## 版权声明
-
-**`knowledge/` 下的文档全部是第三方作品**，版权归各自的作者 / 出版社 / 社区所有，不属于本项目，本项目也不对其主张任何权利。收录目的仅为本地检索与个人学习，能不能再分发、能不能商用，一律以原出处和自己的授权为准。
-
-| 资料 | 作者 / 来源 | 授权（据文件内声明或上游仓库） |
-|---|---|---|
-| `books/Algorithms-JeffE.pdf` | Jeff Erickson | CC BY 4.0 |
-| `books/CompetitiveProgrammersHandbook.pdf` | Antti Laaksonen（2018-07-03 草稿版，CSES 免费书） | CC BY-NC-SA |
-| `books/OpenDataStructures-*.pdf` | Pat Morin | 书正文版权归作者 / 出版社；配套源码为 CC BY |
-| `books/ComputerOrganization-Tarnoff.pdf` | David L. Tarnoff | **保留所有权利**（All rights reserved） |
-| `books/EmbeddedSystems-LeeSeshia.pdf` | Lee & Seshia | CC BY-NC-ND 4.0 |
-| `books/IoT-EnablingThingsToTalk.pdf` | Springer，2013 开放获取 | CC BY-NC |
-| `books/Microcontrollers-STM32F103.md` | 野火电子（EmbedFire）官方教程整理 | 版权归野火电子 |
-| `books/DigitalForensics-UOU.pdf` | Jeetendra Pande、Ajay Prasad，Uttarakhand Open University 2016 | CC BY-SA 4.0 |
-| `books/NIST-SP800-86-ForensicTechniques.pdf` | NIST（美国国家标准与技术研究院） | 美国政府作品，公有领域 |
-| `books/NIST-SP800-101r1-MobileDeviceForensics.pdf` | NIST | 美国政府作品，公有领域 |
-| `books/NIJ-ForensicExaminationOfDigitalEvidence.pdf` | 美国司法部 NIJ（NCJ 199408） | 美国政府作品，公有领域 |
-| `books/DFRWS2026-MemoryForensics-GoMalware.pdf` | DFRWS USA 2026，Hala Ali / Andrew Case / Irfan Ahmed | 文件为 Elsevier 投稿预印本，内部未声明许可；DFRWS 官网公开提供 |
-| `books/DFRWS2026-DeepfakePolicing.pdf` | DFRWS EU 2026，Áine MacDermott | CC BY-NC-ND（Elsevier 开放获取） |
-| `hello-algo/` | 靳宇栋（krahets）《Hello 算法》 | CC BY-NC-SA 4.0 |
-| `leetcode/` | doocs/leetcode 社区 | CC BY-SA 4.0；题目本身归 LeetCode |
-| `oi-wiki/` | OI Wiki 社区 | CC BY-SA 4.0（个别页面另有署名） |
-| `luogu/` | 洛谷（luogu.com.cn）题解 | 版权归洛谷及原题解作者 |
-
-注意几点：
-
-- 上表是**各项资料自身的授权**，不是本项目的授权。带 **NC** 的都禁止商用，所以整仓库不能当商用素材用；带 **SA / ND** 的还有「相同方式共享」「禁止演绎」的约束。
-- `ComputerOrganization-Tarnoff.pdf` 书内版权页写的是 All rights reserved，是这里面限制最严的一本，随仓库公开只为方便个人学习检索，请不要再分发。
-- 权利人若认为收录不妥，提 Issue 或联系仓库作者，会立刻移除。
+**仓库里不包含任何第三方文档**：`knowledge/` 是自己配的（已 gitignore），
+你往里放的东西版权和授权都跟本项目无关，请自行确认能不能用、能不能再分发。
 
 ## 人设提示词
 

@@ -4,6 +4,10 @@
 #       -v "$PWD/workspace:/app/workspace" -v "$PWD/knowledge:/app/knowledge" \
 #       taffy-agent
 #
+# 容器里以非 root（uid 10001）运行，所以宿主机上要挂进去的目录得让它能写：
+#   sudo chown -R 10001:10001 workspace knowledge .cache sessions
+# （用 docker named volume 的话不用管，Docker 会按镜像里的属主建目录）
+#
 # 想让它能跑 run_code 的 C/C++ / Java / Node：
 #   docker build --build-arg WITH_TOOLCHAINS=1 -t taffy-agent:full .
 # （镜像会大 300MB 左右，只跑 Python 的话不用开）
@@ -32,8 +36,15 @@ RUN python -m pip install --upgrade pip && pip install -r requirements.txt
 
 COPY . .
 
+# 非 root 运行：容器里只跑应用，万一哪天被逃逸出去，拿到的也只是普通用户权限。
+# 建个固定 uid（10001）方便宿主机上的目录授权；给 /app 的写权限是为了 .cache / workspace。
+RUN useradd --create-home --shell /usr/sbin/nologin --uid 10001 taffy \
+    && mkdir -p workspace knowledge .cache sessions \
+    && chown -R taffy:taffy /app
+
+USER taffy
+
 # 运行时数据目录（建议挂 volume，容器删了数据还在）
-RUN mkdir -p workspace knowledge .cache sessions
 VOLUME ["/app/workspace", "/app/knowledge", "/app/.cache", "/app/sessions"]
 
 EXPOSE 8000

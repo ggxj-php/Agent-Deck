@@ -20,3 +20,7 @@ workspace/
 
 # 虚拟环境，不进仓库
 .venv/
+
+
+# 知识库文档：自己放，仓库里不带
+knowledge/
