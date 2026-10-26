@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from .. import auth, captcha, context, db, settings, store, uploads
 from .. import persona as persona_mod
 from ..config import CONTEXT_COMPRESS_AT
-from ..core import TaffyAgent
+from ..core import DeckAgent
 from ..kb import warmup
 from ..tools import render as render_tool
 from . import stickers
@@ -506,7 +506,7 @@ class ChatRequest(BaseModel):
 def chat(req: ChatRequest, request: Request):
     """收一条消息，把 agent 的事件流原样转成 SSE 返回。
 
-    这里**不再有常驻的 agent**：每个请求现从库里读历史、建一个 TaffyAgent、跑完写回去。
+    这里**不再有常驻的 agent**：每个请求现从库里读历史、建一个 DeckAgent、跑完写回去。
     """
     user = _user_of(request)
     sess = store.get(user["id"], req.session_id)
@@ -520,7 +520,7 @@ def chat(req: ChatRequest, request: Request):
         # 同一个会话串行处理，避免两条消息交叉写乱历史
         with lock:
             history = store.load_messages(req.session_id)
-            agent = TaffyAgent(messages=history, cut_off=bool(sess["cut_off"]), owner=owner_id)
+            agent = DeckAgent(messages=history, cut_off=bool(sess["cut_off"]), owner=owner_id)
             is_first = not history
             try:
                 for event in agent.ask_stream(req.message, req.image, req.thinking, req.images):

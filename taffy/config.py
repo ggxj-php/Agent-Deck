@@ -201,9 +201,9 @@ SERVICE_NAME = os.environ.get("TAFFY_SERVICE_NAME", "").strip() or "taffy-agent"
 # 换仓库就把这两个（或者 .env 里的 GITEE_URL / GITHUB_URL）改掉。
 GIT_MIRRORS = {
     "gitee": os.environ.get("GITEE_URL", "").strip()
-             or "https://gitee.com/ggxj-php/Taffy-Agent.git",
+             or "https://gitee.com/ggxj-php/Agent-Deck.git",
     "github": os.environ.get("GITHUB_URL", "").strip()
-              or "https://github.com/ggxj-php/Taffy-Agent.git",
+              or "https://github.com/ggxj-php/Agent-Deck.git",
 }
 
 # 输入这些词就退出对话

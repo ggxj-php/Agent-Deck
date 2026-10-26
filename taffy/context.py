@@ -1,6 +1,6 @@
 """对话上下文的用量估算 + 自动压缩。
 
-网页版聊天是「一个会话一个 TaffyAgent，历史全留在内存里、每轮都整段发给模型」，
+网页版聊天是「一个会话一个 DeckAgent，历史全留在内存里、每轮都整段发给模型」，
 聊久了会出两个问题：内存一直涨，而且迟早把模型的上下文窗口撑爆——超了模型直接 400，
 那一轮就废了，之后每轮都废。这里管两件事：
 
@@ -177,7 +177,7 @@ def _summarize(text):
 def compress_if_needed(messages, limit=None, keep_recent=CONTEXT_KEEP_RECENT):
     """用到窗口的 CONTEXT_COMPRESS_AT 就把旧历史压成摘要，返回压缩信息；没压返回 None。
 
-    直接改 messages（就地替换成压缩后的列表），因为会话历史是 TaffyAgent 实例持有的。
+    直接改 messages（就地替换成压缩后的列表），因为会话历史是 DeckAgent 实例持有的。
     摘要那一步失败就原样留着不动，返回 None，让这一轮照常发出去。
     """
     limit = int(limit or settings.context_limit() or 0)

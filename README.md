@@ -1,4 +1,4 @@
-# Taffy Agent
+# Agent Deck
 
 一个迷你 Agent，人设是「永雏塔菲」。它不只是聊天——能联网搜资料、打开网页读原文，也能在沙箱里读写文件、编译运行代码，写完自己跑一遍验证，跑不通自己改。
 
@@ -11,7 +11,7 @@
 ## 目录结构
 
 ```
-Taffy-Agent/
+Agent-Deck/
 ├── agent.py                 # 终端入口：python agent.py
 ├── requirements.txt         # 运行依赖（范围写法）
 ├── requirements.lock.txt    # 线上跑通的精确版本（复现部署用）
@@ -30,7 +30,7 @@ Taffy-Agent/
 │   ├── settings.py          # 后台可改的配置（模型、key、接口地址、上下文上限、系统提示词），覆盖 .env
 │   ├── sandbox.py           # 工作区沙箱：路径越界检查
 │   ├── llm.py               # 模型接入层
-│   ├── core.py              # TaffyAgent：对话历史 + 工具循环（每轮从库里灌历史，不常驻）
+│   ├── core.py              # DeckAgent：对话历史 + 工具循环（每轮从库里灌历史，不常驻）
 │   ├── db.py                # SQLite：用户 / 登录态 / 会话 / 消息 四张表 + 迁移
 │   ├── auth.py              # 账号：bcrypt 密码、邀请码、登录 token、默认管理员（也能当命令行用）
 │   ├── persona.py           # 身份卡（人设包）：名字/称呼/欢迎语/提示词/表情包，后台可建卡切换
@@ -352,7 +352,7 @@ python -m taffy.web
 
 塔菲的「人设」就是系统提示词——每个新会话历史里的第一条。点开这张卡能**整段改**：
 
-- 框里显示的是**当前生效**的那份：没改过就是 [config.py](file:///f:/新建文件夹/Taffy-Agent/taffy/config.py) 里的 `SYSTEM_PROMPT`（内置 25 条），改过就是你改的那份。
+- 框里显示的是**当前生效**的那份：没改过就是 [config.py](taffy/config.py) 里的 `SYSTEM_PROMPT`（内置 25 条），改过就是你改的那份。
 - **保存后新开的会话立刻生效，不用重启服务**。已经在聊的会话还留着旧的（第一条消息在开会话时就定下来了），想让它换人设就点聊天页右上角的「新会话」。
 - 改过的存在 `admin.json` 里（不进 git），所以**更新代码不会把它冲掉**；点「恢复内置的」就回到 `config.py` 那份（二次确认，别点错）。
 - 上限 40000 字（`settings.PROMPT_LIMIT`），超了直接拒绝——`admin.json` 每次都是整份读写，塞个几兆进去会把后台拖慢。
@@ -489,7 +489,7 @@ DW 1,2,3       DS 4
 .MODEL SMALL
 .STACK 100H
 DATA SEGMENT
-    MSG DB 'Hello, Taffy!$'
+    MSG DB 'Hello, Deck!$'
 DATA ENDS
 CODE SEGMENT
     ASSUME CS:CODE, DS:@DATA
@@ -575,9 +575,9 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 
 | 语言 | 机制 | 拦什么 |
 |---|---|---|
-| `.py` | [_pyguard.py](file:///f:/新建文件夹/Taffy-Agent/taffy/tools/_pyguard.py) 审计钩子（`sys.addaudithook`） | 读写 workspace 外的文件、联网、起进程、`ctypes` 后门；钩子装了就摘不掉 |
+| `.py` | [_pyguard.py](taffy/tools/_pyguard.py) 审计钩子（`sys.addaudithook`） | 读写 workspace 外的文件、联网、起进程、`ctypes` 后门；钩子装了就摘不掉 |
 | `.js` | Node 权限模型 `--permission --allow-fs-read/write=<workspace>` | 文件读写锁死在 workspace；不给 `--allow-child-process` / `--allow-worker` / `--allow-addons`，这些就用不了 |
-| `.c` / `.cpp` / `.java` | [_codescan.py](file:///f:/新建文件夹/Taffy-Agent/taffy/tools/_codescan.py) 跑前静态审查 | 危险头文件（`windows.h` 等）、危险调用（`system`、`Runtime.exec`、`require('net')`…）、绝对路径和 `..` 路径字符串 |
+| `.c` / `.cpp` / `.java` | [_codescan.py](taffy/tools/_codescan.py) 跑前静态审查 | 危险头文件（`windows.h` 等）、危险调用（`system`、`Runtime.exec`、`require('net')`…）、绝对路径和 `..` 路径字符串 |
 
 另外**子进程环境变量会被过滤**：名字里含 `KEY` / `TOKEN` / `SECRET` / `PASSWORD` / `AUTH` 的一律抹掉，免得生成的代码把 `.env` 里的 API Key 读出来打印到回话里。
 
@@ -694,7 +694,7 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 
 这一路**只在英文内容里找**（按块判语言，中文字符占字母两成以上就算中文块）：中文资料里混着不少英文术语（`data`、`structure`、`memory` 这种），不挡掉的话同一段内容会在两路里各得一次分，反倒把真正的英文教材挤下去。
 
-另外还有两层便宜的兜底：一张中英术语表（[lexicon.py](file:///f:/新建文件夹/Taffy-Agent/taffy/kb/lexicon.py)，原查询那一路会自动补上对应英文词，想加词往 `TERMS` 里添一行）和上面说的英文词干还原。
+另外还有两层便宜的兜底：一张中英术语表（[lexicon.py](taffy/kb/lexicon.py)，原查询那一路会自动补上对应英文词，想加词往 `TERMS` 里添一行）和上面说的英文词干还原。
 
 **翻译这一路的开销**：每问一个问题多一次接口调用（只输出一行的短请求，几百毫秒到几秒，看用的是哪个模型，带思考的模型会慢一点）；同一个问题再问走进程内缓存，不再请求。翻译失败（没配 key / 接口挂了 / 模型回了中文）就当这一路不存在，只用原查询，绝不影响检索。
 
@@ -706,12 +706,12 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 
 #### 块长会跟着模型的「单条输入上限」自动收口
 
-分块本来是按**字数**切的（`KB_CHUNK_SIZE = 500` 字、重叠 80 字，见 [config.py](file:///f:/新建文件夹/Taffy-Agent/taffy/config.py#L64)），跟向量模型能吃多长原本**毫无关系**。可中文 500 字差不多 400~600 token，而英文 500 字符才 ~120 token——碰上小窗口的向量模型（bge-small-zh 512、一些本地模型 256 / 128），中文块就会超。超了两种下场：
+分块本来是按**字数**切的（`KB_CHUNK_SIZE = 500` 字、重叠 80 字，见 [config.py](taffy/config.py#L64)），跟向量模型能吃多长原本**毫无关系**。可中文 500 字差不多 400~600 token，而英文 500 字符才 ~120 token——碰上小窗口的向量模型（bge-small-zh 512、一些本地模型 256 / 128），中文块就会超。超了两种下场：
 
 - **接口 400**：`kb/index.py` 接住后会把**整个向量那一路关掉**（不是只跳过那一块），检索退回纯词匹配；
 - **接口静默截断**（很多服务商这么干）：拿到的是前半段的向量，**块的尾巴永远搜不到，还一声不响**——这个最难查。
 
-所以建索引时会先确定一个「单条输入上限」，再按它把块收口（[kb/embed.py](file:///f:/新建文件夹/Taffy-Agent/taffy/kb/embed.py)）：
+所以建索引时会先确定一个「单条输入上限」，再按它把块收口（[kb/embed.py](taffy/kb/embed.py)）：
 
 - **后台「向量模型」卡里可以自己填**（token 数），填了就直接用；
 - **留空就是自动探测**：先发一条约 900 token 的文本探顶档——过得去（绝大多数 8K 窗口的模型都过得去，因为块最长才 ~580 token）就直接收工，块长**一点不变**；过不去就往下按 512 / 384 / 256 / 192 / 128 找。判断"截没截断"的办法是**再发一条三倍长的，比它自己报的 `usage.prompt_tokens`**：涨了说明没截断，不涨（或三倍那条直接报太长）说明它把输入掐住了——那就再在中间**二分 3 次**，找「它确实收下的最大那个数」，而不是保守地只取第一个数（实测某 512 上限的模型：只取第一个数会算成 352 白切小三分之一，二分后是 440）；
@@ -802,14 +802,14 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 
 ## 许可（License）
 
-本项目**代码**以 [MIT 许可证](file:///f:/新建文件夹/Taffy-Agent/LICENSE)发布，随便用、随便改、商用也行，保留版权声明和许可证文本就好。
+本项目**代码**以 [MIT 许可证](LICENSE)发布，随便用、随便改、商用也行，保留版权声明和许可证文本就好。
 
 **仓库里不包含任何第三方文档**：`knowledge/` 是自己配的（已 gitignore），
 你往里放的东西版权和授权都跟本项目无关，请自行确认能不能用、能不能再分发。
 
 ## 人设提示词
 
-在 [config.py](file:///f:/新建文件夹/Taffy-Agent/taffy/config.py) 的 `SYSTEM_PROMPT`，一共 25 条。**不用改代码也能整段改**：后台「人设 → 系统提示词」那张卡（见 [系统提示词（人设）](#系统提示词人设)），存下来新会话就生效。除了说话风格，几条硬规矩是：
+在 [config.py](taffy/config.py) 的 `SYSTEM_PROMPT`，一共 25 条。**不用改代码也能整段改**：后台「人设 → 系统提示词」那张卡（见 [系统提示词（人设）](#系统提示词人设)），存下来新会话就生效。除了说话风格，几条硬规矩是：
 
 - 代码必须完整写进回答里（workspace 只是缓存，不是交付物），跑通后删掉临时文件；
 - 需求落在她会的那几个方向（含写代码 / 调试 / 排错 / 选型）时，先 `search_knowledge` 查知识库里有没有现成的方案、题解、模板、教材写法，有就参考着来并标出处，实在沾不上边才从零想；

@@ -219,7 +219,7 @@ def _sendable(messages):
     ]
 
 
-class TaffyAgent:
+class DeckAgent:
     """一个塔菲会话。对话历史存在实例里，所以同一个实例能记住上下文。"""
 
     def __init__(self, messages=None, cut_off=False, owner=None):

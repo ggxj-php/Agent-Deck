@@ -98,7 +98,7 @@ Key 填新的就覆盖，页面上只显示尾巴，留空表示不改。
 ### 新机器 checklist
 
 ```bash
-git clone <你的仓库> && cd Taffy-Agent
+git clone <你的仓库> && cd Agent-Deck
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
 cp .env.example .env      # 没有就自己写一个，见 README「配置」
 echo "TAFFY_ADMIN_PASSWORD=你的密码" >> .env
