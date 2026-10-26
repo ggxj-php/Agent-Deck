@@ -219,6 +219,9 @@ const el = (tag, cls) => {
    代码块和行内代码一律原样保留。 */
 
 const MATH_WORDS = {
+  // 分隔 / 括号类（表格、条件概率里很常见）
+  mid: '|', vert: '|', lvert: '|', rvert: '|', Vert: '‖', backslash: '\\',
+  lbrace: '{', rbrace: '}', langle: '⟨', rangle: '⟩',
   // 运算符
   times: '×', cdot: '·', div: '÷', pm: '±', mp: '∓', ast: '∗', star: '⋆',
   oplus: '⊕', otimes: '⊗', bullet: '•',
@@ -311,6 +314,13 @@ function convertLatex(src) {
     const ch = src[i];
 
     if (ch === '\\') {
+      // \{ \} \% \& \_ \# 这类是「转义成字面量」，直接输出后面的字符
+      const esc = src[i + 1];
+      if (esc && '{}%&_#'.includes(esc)) {
+        out += esc;
+        i += 2;
+        continue;
+      }
       const m = /^\\([A-Za-z]+|[,;:! ])/.exec(src.slice(i));
       if (!m) { out += ch; i++; continue; }
       const name = m[1];
@@ -347,7 +357,10 @@ function convertLatex(src) {
 
       // \text{...} 这类只取里面的文字
       if (name === 'text' || name === 'mathrm' || name === 'mathbf' || name === 'mathit' ||
-          name === 'mathsf' || name === 'mathtt' || name === 'operatorname' || name === 'mathcal') {
+          name === 'mathsf' || name === 'mathtt' || name === 'operatorname' || name === 'mathcal' ||
+          name === 'textbf' || name === 'textit' || name === 'textrm' || name === 'textsf' ||
+          name === 'texttt' || name === 'textnormal' || name === 'boxed' ||
+          name === 'overline' || name === 'underline') {
         const a = readArg(src, i);
         if (a) { out += convertLatex(a[0]); i = a[1]; continue; }
       }
@@ -425,7 +438,17 @@ function restoreLinks(text, bag) {
   return text.replace(/\u0001(\d+)\u0001/g, (m, n) => bag[Number(n)] || m);
 }
 
+function normalizeHeadings(text) {
+  // 模型常在表情包 / 公式块后面直接跟「## 第 12 页」，没有空行 → markdown 不认标题，
+  // 页面上就露出「## 」两个字。这里给标题行前面补空行。
+  return text
+    .replace(/([^\n])\n(#{1,6}\s)/g, '$1\n\n$2')
+    .replace(/(@@sticker:\d+@@)[ \t]*(#{1,6}\s)/g, '$1\n\n$2')
+    .replace(/(\$\$[^$]*\$\$)\s*(#{1,6}\s)/g, '$1\n\n$2');
+}
+
 function mathifyText(seg) {
+  seg = normalizeHeadings(seg);
   const bag = [];
   let out = protectLinks(seg, bag);
 
@@ -437,7 +460,11 @@ function mathifyText(seg) {
 
   // 行内公式：只认看起来真是数学的（避免把 "$5" 这种金额吃掉）
   out = out.replace(/\$([^$\n]+?)\$/g, (m, e) => {
-    if (!/[\\^_{}=]/.test(e)) return m;
+    // 表头 / 表格里经常是 $0$、$1/3$ 这种很短的式子，光看有没有 ^_= 会漏；
+    // 规则：带反斜杠或 ^_= 的一定是公式；否则只要「不含中文、不含空格单词」也当公式
+    const looksMath = /[\\^_{}=<>]/.test(e)
+      || (/^[\s0-9a-zA-Z()+\-*/.,|]+$/.test(e) && /[0-9]/.test(e));
+    if (!looksMath) return m;
     return convertLatex(e);
   });
   out = out.replace(/\\\(([\s\S]+?)\\\)/g, (m, e) => convertLatex(e));
