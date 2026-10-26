@@ -90,7 +90,8 @@ def memory():
     used = total - available
     swap_total = info.get("SwapTotal", 0)
     swap_free = info.get("SwapFree", 0)
-    to_mb = lambda kb: round(kb / 1024)
+    def to_mb(kb):
+        return round(kb / 1024)
     return {
         "total_mb": to_mb(total),
         "used_mb": to_mb(used),
@@ -107,7 +108,8 @@ def disk():
         usage = shutil.disk_usage(PROJECT_ROOT)
     except OSError:
         return None
-    to_mb = lambda n: round(n / 1024 / 1024)
+    def to_mb(n):
+        return round(n / 1024 / 1024)
     return {
         "total_mb": to_mb(usage.total),
         "used_mb": to_mb(usage.used),

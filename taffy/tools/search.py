@@ -26,8 +26,7 @@ import lxml.etree
 import lxml.html
 import requests
 
-from ..config import (SEARCH_CACHE_TTL, SEARCH_COOLDOWN, SEARCH_MIN_INTERVAL,
-                      SEARCH_PROXY)
+from ..config import SEARCH_CACHE_TTL, SEARCH_COOLDOWN, SEARCH_MIN_INTERVAL, SEARCH_PROXY
 
 SPECS = [
     {

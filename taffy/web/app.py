@@ -18,11 +18,12 @@ from pydantic import BaseModel
 from .. import settings
 from ..config import CONTEXT_COMPRESS_AT
 from ..core import TaffyAgent
-from ..tools import render as render_tool
 from ..kb import warmup
+from ..tools import render as render_tool
 from . import sessions_store, stickers
 from .admin import router as admin_router
 from .content import router as content_router
+
 
 def _sse_payload(event):
     """把事件编成 SSE 的 data 段，顺手清掉没法 utf-8 编码的字符。

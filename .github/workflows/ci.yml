@@ -41,9 +41,8 @@ jobs:
         continue-on-error: true
 
   lint:
-    name: ruff（不阻塞合并）
+    name: ruff
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

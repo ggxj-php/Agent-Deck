@@ -8,7 +8,7 @@ import ast
 import decimal
 import math
 import re
-from decimal import Decimal, localcontext, ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR
+from decimal import ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, Decimal, localcontext
 
 DEFAULT_PRECISION = 50
 MAX_PRECISION = 1000

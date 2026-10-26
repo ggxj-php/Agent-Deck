@@ -8,8 +8,7 @@ import re
 import sys
 
 from . import context, settings, uploads
-from .config import (EXIT_WORDS, MAX_ROUNDS, RESUME_INSTRUCTION, RESUME_WORDS,
-                       STICKER_LIMIT)
+from .config import EXIT_WORDS, MAX_ROUNDS, RESUME_INSTRUCTION, RESUME_WORDS, STICKER_LIMIT
 from .llm import stream_chat
 from .tools import TOOLS, execute
 from .tools.sticker import MOODS

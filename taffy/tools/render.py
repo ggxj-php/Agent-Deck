@@ -22,8 +22,7 @@ import uuid
 
 from lxml import html as lxml_html
 
-from ..config import (PROJECT_ROOT, RENDER_AUDIT_ENABLED, RENDER_LIMIT,
-                      RENDER_MAX_BYTES, RENDER_TTL)
+from ..config import PROJECT_ROOT, RENDER_AUDIT_ENABLED, RENDER_LIMIT, RENDER_MAX_BYTES, RENDER_TTL
 
 # 产物单独取走后要带的 CSP。sandbox 指令是关键：即使有人把 /api/artifact/xx
 # 直接丢进新标签页打开，文档也跑在不透明源里，碰不到本站的 cookie 和 localStorage。

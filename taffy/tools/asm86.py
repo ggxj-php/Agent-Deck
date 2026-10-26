@@ -670,7 +670,6 @@ def _assemble(source):
     first_code = None      # (段下标, 偏移)
     entry_name = ""
     line_no = 0
-    max_line = 0
 
     def ensure_segment():
         nonlocal implicit, current
@@ -697,7 +696,6 @@ def _assemble(source):
 
     for raw in source.splitlines():
         line_no += 1
-        max_line = line_no
         line = _strip_comment(raw).strip()
         if not line:
             continue

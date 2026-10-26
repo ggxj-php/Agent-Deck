@@ -12,7 +12,7 @@ import shutil
 import tempfile
 import threading
 
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from ..config import KNOWLEDGE_DIR, SESSIONS_DIR
