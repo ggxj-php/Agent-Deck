@@ -24,7 +24,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import auth, context, db, settings, store, uploads
+from .. import auth, captcha, context, db, settings, store, uploads
 from ..config import CONTEXT_COMPRESS_AT
 from ..core import TaffyAgent
 from ..kb import warmup
@@ -81,6 +81,7 @@ class _Limiter:
 
 _login_limiter = _Limiter(10 * 60, 10)     # 10 分钟内最多试 10 次
 _register_limiter = _Limiter(3600, 5)      # 1 小时最多注册 5 个（按 IP）
+_captcha_limiter = _Limiter(10 * 60, 40)   # 10 分钟最多刷 40 张验证码（按 IP）
 
 
 # ---------------- 每会话的串行锁 ----------------
@@ -104,7 +105,7 @@ def _session_lock(session_id):
 # 这些路径不需要登录：登录页、静态资源、后台（后台自己校验口令）、探活
 PUBLIC_PREFIXES = (
     "/static/", "/admin", "/api/admin",
-    "/api/auth/login", "/api/auth/register",
+    "/api/auth/login", "/api/auth/register", "/api/auth/captcha",
     "/api/ping", "/api/stickers", "/favicon.ico",
 )
 PUBLIC_EXACT = {"/login"}
@@ -216,6 +217,19 @@ class AuthRequest(BaseModel):
     name: str = ""
     password: str = ""
     invite: str = ""
+    # 只有注册要填：图形验证码的 id 和用户看到的答案
+    captcha_id: str = ""
+    captcha: str = ""
+
+
+@app.get("/api/auth/captcha")
+def get_captcha(request: Request):
+    """发一张图形验证码。注册前要先拿到它，不然注册接口一律拒绝。"""
+    ip = _client_ip(request)
+    if not _captcha_limiter.ok(ip):
+        raise HTTPException(status_code=429, detail="验证码刷太多次了喵，过一会儿再试")
+    ident, data_url = captcha.new_data_url(ip)
+    return {"id": ident, "image": data_url, "ttl": captcha.TTL}
 
 
 @app.post("/api/auth/register")
@@ -223,6 +237,9 @@ def register(req: AuthRequest, request: Request):
     ip = _client_ip(request)
     if not _register_limiter.ok(ip):
         raise HTTPException(status_code=429, detail="注册太频繁了喵，过一会儿再试")
+    ok, why = captcha.verify(req.captcha_id, req.captcha)
+    if not ok:
+        raise HTTPException(status_code=400, detail=why)
     user, err = auth.register(req.name, req.password, req.invite)
     if err:
         raise HTTPException(status_code=400, detail=err)

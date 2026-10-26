@@ -20,23 +20,47 @@
     <button type="button" class="auth-tab" id="tab-register" role="tab">用邀请码注册</button>
   </div>
 
-  <form id="auth-form" class="auth-form" autocomplete="on">
+  <!-- 登录：只有用户名 + 密码，完全不涉及邀请码 -->
+  <form id="login-form" class="auth-form" autocomplete="on">
     <label class="auth-field">
       <span>用户名</span>
-      <input id="f-name" name="username" type="text" autocomplete="username"
+      <input id="login-name" name="username" type="text" autocomplete="username"
              minlength="3" maxlength="20" required placeholder="3~20 个字">
     </label>
     <label class="auth-field">
       <span>密码</span>
-      <input id="f-password" name="password" type="password" autocomplete="current-password"
+      <input id="login-password" name="password" type="password"
+             autocomplete="current-password" minlength="8" required placeholder="至少 8 位">
+    </label>
+    <button type="submit" class="auth-submit" id="login-submit">登录</button>
+  </form>
+
+  <!-- 注册：用户名 + 密码 + 邀请码 + 图形验证码 -->
+  <form id="register-form" class="auth-form" autocomplete="off" hidden>
+    <label class="auth-field">
+      <span>用户名</span>
+      <input id="reg-name" type="text" minlength="3" maxlength="20" required
+             placeholder="3~20 个字">
+    </label>
+    <label class="auth-field">
+      <span>密码</span>
+      <input id="reg-password" type="password" autocomplete="new-password"
              minlength="8" required placeholder="至少 8 位">
     </label>
-    <label class="auth-field" id="invite-field" hidden>
+    <label class="auth-field">
       <span>邀请码</span>
-      <input id="f-invite" name="invite" type="text" maxlength="16"
+      <input id="reg-invite" type="text" maxlength="16" required
              placeholder="找已经在用的雏草姬要一个">
     </label>
-    <button type="submit" class="auth-submit" id="auth-submit">登录</button>
+    <label class="auth-field">
+      <span>图形验证码（点图换一张）</span>
+      <div class="auth-captcha">
+        <input id="reg-captcha" type="text" maxlength="6" required
+               autocomplete="off" placeholder="图里的 4 个字">
+        <img id="captcha-img" alt="图形验证码" title="点一下换一张">
+      </div>
+    </label>
+    <button type="submit" class="auth-submit" id="reg-submit">注册并登录</button>
   </form>
 
   <p class="auth-msg" id="auth-msg" hidden></p>
@@ -46,17 +70,16 @@
 (function () {
   'use strict';
 
-  const formEl = document.getElementById('auth-form');
   const tabLoginEl = document.getElementById('tab-login');
   const tabRegisterEl = document.getElementById('tab-register');
-  const inviteFieldEl = document.getElementById('invite-field');
-  const inviteEl = document.getElementById('f-invite');
-  const nameEl = document.getElementById('f-name');
-  const passwordEl = document.getElementById('f-password');
-  const submitEl = document.getElementById('auth-submit');
+  const loginFormEl = document.getElementById('login-form');
+  const registerFormEl = document.getElementById('register-form');
+  const loginSubmitEl = document.getElementById('login-submit');
+  const regSubmitEl = document.getElementById('reg-submit');
+  const captchaImgEl = document.getElementById('captcha-img');
   const msgEl = document.getElementById('auth-msg');
 
-  let mode = 'login';
+  let captchaId = '';
 
   function showMsg(text, ok) {
     msgEl.hidden = !text;
@@ -64,41 +87,42 @@
     msgEl.classList.toggle('ok', Boolean(ok));
   }
 
-  function setMode(next) {
-    mode = next;
-    const isLogin = next === 'login';
-    tabLoginEl.classList.toggle('on', isLogin);
-    tabRegisterEl.classList.toggle('on', !isLogin);
-    inviteFieldEl.hidden = isLogin;
-    inviteEl.required = !isLogin;
-    submitEl.textContent = isLogin ? '登录' : '注册并登录';
-    passwordEl.autocomplete = isLogin ? 'current-password' : 'new-password';
+  function setMode(register) {
+    tabLoginEl.classList.toggle('on', !register);
+    tabRegisterEl.classList.toggle('on', register);
+    loginFormEl.hidden = register;
+    registerFormEl.hidden = !register;
     showMsg('');
+    if (register) {
+      refreshCaptcha();
+      document.getElementById('reg-name').focus();
+    } else {
+      document.getElementById('login-name').focus();
+    }
   }
 
-  tabLoginEl.addEventListener('click', () => setMode('login'));
-  tabRegisterEl.addEventListener('click', () => setMode('register'));
+  async function refreshCaptcha() {
+    try {
+      const resp = await fetch('/api/auth/captcha', { cache: 'no-store' });
+      if (!resp.ok) throw new Error('验证码服务忙');
+      const data = await resp.json();
+      captchaId = data.id;
+      captchaImgEl.src = data.image;
+      document.getElementById('reg-captcha').value = '';
+    } catch (err) {
+      captchaId = '';
+      showMsg('验证码加载失败，点图重试喵');
+    }
+  }
 
-  formEl.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    if (submitEl.disabled) return;
-    const payload = {
-      name: nameEl.value.trim(),
-      password: passwordEl.value,
-      invite: mode === 'register' ? inviteEl.value.trim() : '',
-    };
-    if (!payload.name || !payload.password) {
-      showMsg('用户名和密码都得填喵');
-      return;
-    }
-    if (mode === 'register' && !payload.invite) {
-      showMsg('要填邀请码喵');
-      return;
-    }
-    submitEl.disabled = true;
+  tabLoginEl.addEventListener('click', () => setMode(false));
+  tabRegisterEl.addEventListener('click', () => setMode(true));
+  captchaImgEl.addEventListener('click', refreshCaptcha);
+
+  async function post(url, payload, button) {
+    button.disabled = true;
     showMsg('');
     try {
-      const url = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
       const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -108,16 +132,55 @@
       try { data = await resp.json(); } catch (err) { data = null; }
       if (!resp.ok) {
         showMsg((data && data.detail) || ('失败了喵（' + resp.status + '）'));
-        submitEl.disabled = false;
-        return;
+        button.disabled = false;
+        return false;
       }
-      showMsg(mode === 'login' ? '登录成功，跳转中…' : '注册成功，跳转中…', true);
       const next = new URLSearchParams(location.search).get('next') || '/';
       location.replace(next.startsWith('/') ? next : '/');
+      return true;
     } catch (err) {
       showMsg('连不上服务器喵：' + (err && err.message ? err.message : err));
-      submitEl.disabled = false;
+      button.disabled = false;
+      return false;
     }
+  }
+
+  // 登录：只发用户名和密码，没有邀请码
+  loginFormEl.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const name = document.getElementById('login-name').value.trim();
+    const password = document.getElementById('login-password').value;
+    if (!name || !password) {
+      showMsg('用户名和密码都得填喵');
+      return;
+    }
+    post('/api/auth/login', { name, password }, loginSubmitEl);
+  });
+
+  // 注册：邀请码 + 图形验证码都要
+  registerFormEl.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const name = document.getElementById('reg-name').value.trim();
+    const password = document.getElementById('reg-password').value;
+    const invite = document.getElementById('reg-invite').value.trim();
+    const captcha = document.getElementById('reg-captcha').value.trim();
+    if (!name || !password) {
+      showMsg('用户名和密码都得填喵');
+      return;
+    }
+    if (!invite) {
+      showMsg('要填邀请码喵');
+      return;
+    }
+    if (!captcha) {
+      showMsg('要填图形验证码喵');
+      return;
+    }
+    post('/api/auth/register',
+      { name, password, invite, captcha_id: captchaId, captcha },
+      regSubmitEl).then((ok) => {
+        if (!ok) refreshCaptcha();   // 验证码一次一用，失败了换一张
+      });
   });
 
   // 已经是登录状态就直接进聊天页
@@ -125,7 +188,7 @@
     .then((resp) => { if (resp.ok) location.replace('/'); })
     .catch(() => {});
 
-  nameEl.focus();
+  document.getElementById('login-name').focus();
 })();
 </script>
 </body>

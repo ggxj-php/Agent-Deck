@@ -2084,8 +2084,14 @@ sup, sub { font-size: 0.72em; line-height: 0; }
 }
 
 .auth-form { display: flex; flex-direction: column; gap: 12px; text-align: left; }
+/* 登录 / 注册是两张独立的表单，切换时靠 hidden；.auth-form 自己带 display:flex，
+   所以必须再声明一次「隐藏时不显示」 */
+.auth-form[hidden] { display: none; }
 
+/* 注意：.auth-field 自己有 display:flex，会把 HTML 的 [hidden] 属性盖掉，
+   所以这里必须单独声明一次「隐藏时不显示」——否则登录页也会冒出邀请码输入框 */
 .auth-field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: #8a7680; }
+.auth-field[hidden] { display: none; }
 
 .auth-field input {
   border: 1px solid var(--line, #f0d9e6);
@@ -2382,3 +2388,34 @@ sup, sub { font-size: 0.72em; line-height: 0; }
 .user-op:hover { border-color: #f0b9d5; color: #d63f86; }
 .user-op:disabled { opacity: 0.45; cursor: default; }
 .user-op.danger { color: #c0392b; border-color: #f5cdd2; }
+
+/* 注册时的图形验证码 */
+.auth-captcha {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.auth-captcha input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line, #f0d9e6);
+  border-radius: 11px;
+  padding: 11px 12px;
+  font-size: 15px;
+  outline: none;
+  background: #fffafc;
+  letter-spacing: 2px;
+}
+
+.auth-captcha input:focus { border-color: #f39ac6; background: #fff; }
+
+.auth-captcha img {
+  width: 132px;
+  height: 46px;
+  border-radius: 10px;
+  border: 1px solid var(--line, #f0d9e6);
+  background: #fff;
+  cursor: pointer;
+  flex: none;
+}
