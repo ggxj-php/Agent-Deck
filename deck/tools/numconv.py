@@ -16,17 +16,10 @@ SPECS = [
         "function": {
             "name": "number_convert",
             "description": (
-                "进制 / 补码 / IEEE754 / 位运算换算，用 op 选算哪一样。\n"
-                "op=base：进制互转。给 value（数写成 0x / 0b / 0o 前缀或者十进制），"
-                "可选 from_base（不带前缀时按几进制读，可以是 2/8/10/16 或者 hex/bin/oct/dec），"
-                "bits 默认 16，会按这个位宽给出补码位型。\n"
-                "op=twos：补码换算。value 写十进制就是编码（给 bits 位宽，默认 16）；"
-                "value 写成 0b/0x 或纯二进制串就当位型，解出它的有符号值。\n"
-                "op=float：IEEE754。value 写十进制小数就编码成浮点位型，"
-                "写 0x / 0b 就按位型解码成小数；precision 选 32（默认）或 64。\n"
-                "op=bits：位运算。给 a，operation 选 and / or / xor / not / shl / shr / "
-                "set / clear / toggle / test（也可以用 & | ^ ~ << >> 写），b 是第二个操作数，"
-                "set/clear/toggle/test 时 b 是第几位（从 0 数起），shl/shr 时 b 是移几位。"
+                "进制 / 补码 / IEEE754 / 位运算换算，用 op 选："
+                "base 进制互转（value 可带 0x/0b/0o，from_base 指定无前缀时的进制，bits 默认 16 会给补码位型）、"
+                "twos 补码换算、float IEEE754 编解码（precision 32 默认或 64）、"
+                "bits 位运算（and/or/xor/not/shl/shr/set/clear/toggle/test，也可用符号写）。"
             ),
             "parameters": {
                 "type": "object",

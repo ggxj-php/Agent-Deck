@@ -205,6 +205,45 @@ def _rehydrate(messages, max_images=3, window=2):
     return messages
 
 
+# 只保留最近几轮工具调用的原文，更早的压缩掉：
+# 工具参数里可能有整段 HTML（画图）/ 搜索结果，工具结果里可能是一整页正文，
+# 这些每轮都重发给模型，长会话一下就把上下文撑到几万 token、首字越来越慢。
+TRIM_KEEP_TOOL = 2
+
+
+def _trim_history(messages):
+    """发给模型前，把较早的工具参数 / 工具结果压缩成占位。库里仍存全文。"""
+    keep = set()
+    seen = 0
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].get("role") == "tool":
+            seen += 1
+            if seen <= TRIM_KEEP_TOOL:
+                keep.add(i)
+    out = []
+    for i, msg in enumerate(messages):
+        role = msg.get("role")
+        if role == "tool" and i not in keep:
+            content = str(msg.get("content") or "")
+            if len(content) > 200:
+                msg = dict(msg)
+                msg["content"] = content[:160] + "\n…（较早的工具结果已省略）"
+        elif role == "assistant" and msg.get("tool_calls") and i not in keep:
+            calls = []
+            for call in msg["tool_calls"]:
+                call = dict(call)
+                fn = dict(call.get("function") or {})
+                args = str(fn.get("arguments") or "")
+                if len(args) > 200:
+                    fn["arguments"] = '{"_omitted": true}'
+                call["function"] = fn
+                calls.append(call)
+            msg = dict(msg)
+            msg["tool_calls"] = calls
+        out.append(msg)
+    return out
+
+
 _PLAIN_STICKER = re.compile(r"\[\s*sticker\s*:\s*([a-zA-Z_]+)\s*\]", re.I)
 
 
@@ -360,7 +399,7 @@ class DeckAgent:
                 picked = []          # 这一轮发出去的表情包（心情, 文件名）
                 try:
                     for kind, payload in stream_chat(
-                        _sendable(_rehydrate(self.messages)), active_specs(), model,
+                        _sendable(_trim_history(_rehydrate(self.messages))), active_specs(), model,
                         api_key=api_key, base_url=base_url, thinking=think,
                     ):
                         if kind == "message":

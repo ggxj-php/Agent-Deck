@@ -26,18 +26,11 @@ SPECS = [
         "function": {
             "name": "asm_sim",
             "description": (
-                "在自带的小型 16 位 CPU 模拟器上跑一段汇编，返回执行步数、寄存器、标志位和"
-                "改过的内存，trace=true 时还给逐步执行过程。讲计算机组成、指令周期、"
-                "寄存器/内存/标志位怎么动的时候用这个，比嘴上讲清楚。"
-                "硬件模型：寄存器 R0~R7，标志位 Z/N/C/V，内存 256 个字（指令和数据共用），"
-                "所有数值按 16 位回绕。"
-                "指令集：LI Rd,imm 立即数；MOV Rd,Rs；LOAD Rd,addr 读内存；STORE Rs,addr 写内存；"
-                "ADD/SUB/MUL/AND/OR/XOR Rd,Ra,Rb；ADDI/SUBI Rd,Ra,imm；NOT Rd,Ra；"
-                "SHL/SHR Rd,Ra,imm；INC/DEC Rd；CMP Ra,Rb（更新 Z/N/C/V）；"
-                "JMP/JZ/JNZ/JC/JNC/JGT/JLT 标签；HALT；NOP。"
-                "数据用 DW 1,2,3 和 DS 4（预留 4 个零字）。"
-                "写法：一行一条，';' 或 '#' 后是注释，'loop:' 定义标签，数支持十进制和 0x/0b/0o 前缀，"
-                "负数按 16 位补码存。算术指令会更新 Z/N/C/V（JGT/JLT 按有符号比较看 N 和 V）。"
+                "在自带的 16 位 CPU 模拟器上跑一段汇编，返回执行步数、寄存器、标志位和改过的内存，"
+                "trace=true 时给逐步执行过程。讲指令周期 / 寄存器 / 内存 / 标志位怎么动时用它。"
+                "模型：R0~R7、标志 Z/N/C/V、内存 256 字、16 位回绕。"
+                "指令：LI/MOV/LOAD/STORE/ADD/SUB/MUL/AND/OR/XOR/ADDI/SUBI/NOT/SHL/SHR/INC/DEC/CMP/"
+                "JMP/JZ/JNZ/JC/JNC/JGT/JLT/HALT/NOP，数据用 DW/DS。"
             ),
             "parameters": {
                 "type": "object",

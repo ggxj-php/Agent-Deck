@@ -1856,16 +1856,11 @@ SPECS = [
         "function": {
             "name": "asm86",
             "description": (
-                "跑一段 8086 / 8088 实模式汇编（自带汇编器 + CPU 仿真 + 最小 DOS 中断），"
-                "返回程序输出、寄存器、标志位、内存变化，trace=true 时给逐步执行过程。"
-                "8086 和 8088 指令集完全一样，cpu 参数只影响报告的总线周期估算。"
-                "认 MASM 常见写法：SEGMENT/ENDS、ASSUME、PROC/ENDP、DATA 和 @DATA、"
-                "DB/DW/DUP、OFFSET、BYTE PTR/WORD PTR、段超越前缀，也认不带段的裸程序。"
-                "指令覆盖 MOV/XCHG/LEA/PUSH/POP、加减乘除、逻辑、移位循环、条件跳转、"
-                "LOOP、CALL/RET、字符串操作（含 REP）、INT 21H（09H 打印字符串、02H 打印"
-                "字符、01H/0AH 读键盘、4CH 退出）和 INT 10H 0EH。"
-                "讲 8086/8088 指令、寻址方式、标志位怎么变、这段汇编跑出来什么结果的时候"
-                "用它，比嘴上讲清楚。程序要读键盘时把想敲的字符放 stdin 参数里。"
+                "跑一段 8086 / 8088 实模式汇编：自带汇编器 + CPU 仿真 + 最小 DOS 中断，"
+                "返回程序输出、寄存器、标志位、内存变化；trace=true 时给逐步执行过程。"
+                "认 MASM 常见写法（SEGMENT/ENDS、ASSUME、PROC/ENDP、DB/DW/DUP、OFFSET 等），"
+                "含常用指令、条件跳转、CALL/RET、字符串操作和 INT 21H / INT 10H 常用功能。"
+                "讲指令、寻址方式、标志位怎么变，或要看这段汇编跑出什么结果时用它；程序要读键盘就把字符放 stdin。"
             ),
             "parameters": {
                 "type": "object",

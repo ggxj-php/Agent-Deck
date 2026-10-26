@@ -12,17 +12,13 @@ SPECS = [
         "function": {
             "name": "mcu_calc",
             "description": (
-                "单片机/嵌入式外设参数计算器，用 op 选算哪一样，参数按需给。\n"
-                "op=uart：串口波特率分频。给 f_cpu、baud，oversampling 默认 16（8 为 8 倍过采样）。"
-                "返回 USARTDIV、BRR 整数/小数部分、实际波特率与误差（超 2% 提示），另给 AVR 风格 UBRR。\n"
-                "op=timer：给 f_cpu、prescaler，再给 arr 算周期和频率；给 period_us（微秒）或 freq_hz 反推 arr。\n"
-                "op=adc：给 bits（默认 12）、vref（默认 3.3），再给 value（原始码值）算电压；给 voltage 反推码值。\n"
-                "op=divider：电阻分压。给 vin、r1、r2 算 vout；给 vout 反推 r2。\n"
-                "op=pwm：给 f_cpu、prescaler、arr，再给 ccr 算占空比；给 duty_pct 反推 ccr。\n"
-                "op=i2c：给 addr7（7 位）或 addr8（8 位读写地址），互相换算。\n"
-                "op=crc：给 data、algo。algo 可选 crc8 / crc16-modbus / crc16-ccitt / crc16-xmodem / "
-                "crc32 / sum8 / xor8 / lrc；data_format=text（默认，按字符串字节）或 hex（按十六进制字节）。\n"
-                "op=rc：给 resistance（欧姆）、capacitance（法拉）算时间常数和充到 63%/95%/99% 的时间。"
+                "单片机 / 嵌入式外设参数计算器，用 op 选算哪一样（参数按 op 给）："
+                "uart 串口波特率分频（f_cpu/baud，oversampling 默认 16）、"
+                "timer 定时器周期与 ARR（f_cpu/prescaler，给 arr 或 period_us 反推）、"
+                "adc 码值↔电压（bits 默认 12、vref 默认 3.3）、"
+                "divider 电阻分压、pwm 占空比、i2c 7↔8 位地址、"
+                "crc 校验和（crc8 / crc16-modbus / crc16-ccitt / crc16-xmodem 等）、rc RC 时间常数。"
+                "返回中间值、实际值与误差（波特率误差超 2% 会提示）。"
             ),
             "parameters": {
                 "type": "object",

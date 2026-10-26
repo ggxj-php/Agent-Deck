@@ -18,7 +18,7 @@ SPECS = [
         "type": "function",
         "function": {
             "name": "run_code",
-            "description": "编译并运行 workspace 里已有的代码文件，返回程序输出（含报错）。支持 .py / .js / .java / .cpp / .c，.java 和 C/C++ 会先编译再运行。运行目录固定为 workspace 根目录。所有语言都套了安全护栏：读写 workspace 以外的文件、联网、起进程、调用能操系统的库或命令都会被拦下并报错，路径只能写相对 workspace 的相对路径、不许用 .. 往上跑。所以代码就老老实实做纯计算，用什么库之前先想想它会不会碰文件或者网络。C/C++ 编译器是 TDM-GCC 4.9.2，只支持到 C++11：写 C++ 别用 C++14/17 的语法和标准库（没有 std::filesystem、没有结构化绑定、没有 auto 返回型别推导的简写），拿不准就用最基本的写法。",
+            "description": "编译并运行 workspace 里已有的代码文件，返回程序输出（含报错）。支持 .py / .js / .java / .cpp / .c；.java 和 C/C++ 会先编译再运行。只能读写 workspace（相对路径、不许用 ..），联网 / 起进程 / 碰系统路径都会被拦。C/C++ 是 TDM-GCC 4.9.2，只到 C++11：别用 C++14/17 的语法和标准库。",
             "parameters": {
                 "type": "object",
                 "properties": {
