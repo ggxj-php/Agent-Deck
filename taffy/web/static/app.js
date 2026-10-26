@@ -790,16 +790,31 @@ function prettyArgs(raw) {
 
 async function ensureSession(force) {
   if (!force && sessionId) return sessionId;
-  const resp = await fetch('/api/sessions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: '{}',
-  });
-  if (!resp.ok) throw new Error('开新会话失败');
-  const data = await resp.json();
-  sessionId = data.session.id;
-  await loadSessions();
-  return sessionId;
+  // 服务正在重启的那几秒 nginx 会回 502/503/504，等 1.5 秒重试一次，
+  // 不然用户点「新会话」正好撞上重启就会莫名其妙失败一次。
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const resp = await fetch('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (!data || !data.session || !data.session.id) {
+        throw new Error('服务返回的会话 id 不对');
+      }
+      sessionId = data.session.id;
+      await loadSessions();
+      return sessionId;
+    }
+    if ([502, 503, 504].includes(resp.status) && attempt === 0) {
+      statusEl.textContent = '服务刚重启，等一秒再试喵…';
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      continue;
+    }
+    throw new Error(`HTTP ${resp.status}`);
+  }
+  throw new Error('重试之后还是不行');
 }
 
 /* ---------------- 侧边栏：用户 / 会话列表 ---------------- */
@@ -888,30 +903,37 @@ function renderSessionList() {
 }
 
 async function switchSession(id) {
-  if (busy) return;
-  if (id === sessionId) {
+  // 塔菲正在回话的时候切会话会让两段流搅在一起，先拦一下并说明原因
+  if (busy) {
+    statusEl.textContent = '塔菲还在回话喵，等这一轮说完再切会话';
     closeSidebar();
     return;
   }
+  // 就算点的是当前会话也要重画一次：万一页面被某次失败清空了，点一下能救回来
+  closeSidebar();
   try {
     const resp = await fetch(`/api/sessions/${id}/messages`, { cache: 'no-store' });
-    if (!resp.ok) return;
+    if (!resp.ok) {
+      statusEl.textContent = `切不过去喵（HTTP ${resp.status}），刷新一下试试`;
+      return;
+    }
     const data = await resp.json();
     sessionId = id;
+    sessionStorage.setItem(STORAGE_KEY, sessionId);
     messagesEl.innerHTML = '';
-    const items = data.history || [];
+    const items = (data && data.history) || [];
     if (items.length) {
       renderHistory(items);
     } else {
-      welcome();
+      welcome();            // 空会话也得有开场白，不然一片空白
     }
     paintContext(data.context);
-    sessionStorage.setItem(STORAGE_KEY, sessionId);
     renderSessionList();
     updateToBottom();
     scrollToBottom();
-  } finally {
-    closeSidebar();
+    statusEl.textContent = '在线喵';
+  } catch (err) {
+    statusEl.textContent = '切不过去喵：' + ((err && err.message) || '未知原因');
   }
   inputEl.focus();
 }
@@ -927,8 +949,9 @@ sideNewEl.addEventListener('click', async () => {
     await ensureSession(true);
     welcome();
     loadSessions();
+    statusEl.textContent = '在线喵';
   } catch (err) {
-    statusEl.textContent = '开新会话失败';
+    statusEl.textContent = '开新会话失败：' + ((err && err.message) || '未知原因');
   }
   closeSidebar();
   inputEl.focus();
@@ -1428,8 +1451,9 @@ newChatEl.addEventListener('click', async () => {
     await ensureSession(true);
     welcome();
     refreshContext();
+    statusEl.textContent = '在线喵';
   } catch (err) {
-    statusEl.textContent = '开新会话失败';
+    statusEl.textContent = '开新会话失败：' + ((err && err.message) || '未知原因');
   }
   inputEl.focus();
 });
