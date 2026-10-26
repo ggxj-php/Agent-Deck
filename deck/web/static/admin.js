@@ -490,20 +490,29 @@ async function load(message) {
 /* 向量那一路的总开关：勾上 = 开。状态分三种——没设过（跟配置走）、明确开着、明确关着 */
 /* 服务端内置联网搜索开关：**先确认端点支持才显示**——
    不支持就整个藏起来，避免用户开了以为生效、其实还是老路子。 */
+const WEB_SEARCH_MODE_LABEL = {
+  inline: '模型自带搜索（enable_search）',
+  tools_api: '官方搜索接口（POST /tools/search）',
+  none: '不支持',
+};
+
 function renderWebSearch(info) {
   const probe = info.probe || {};
   const supported = Boolean(probe.supported);
+  const mode = info.mode || (supported ? 'inline' : 'none');
   webSearchBoxEl.hidden = !supported;
   if (!supported) {
     webSearchToggleEl.checked = false;
     webSearchToggleEl.disabled = true;
-    webSearchHintEl.textContent = `服务端不支持模型内置联网搜索（${probe.reason || '没检测过'}），所以这个开关不显示。`;
+    webSearchHintEl.textContent =
+      `服务端不支持模型内置联网搜索（${probe.reason || '没检测过'}），所以这个开关不显示。`;
     return;
   }
   webSearchToggleEl.disabled = false;
   webSearchToggleEl.checked = Boolean(info.enabled);
-  webSearchHintEl.textContent = `${probe.reason || ''}` +
-    ' 开着 = 直接让模型自己联网（快）；关掉 = 用本站的网页搜索 / 抓取（慢一点但可控）。';
+  webSearchHintEl.textContent =
+    `探测到的方式：${WEB_SEARCH_MODE_LABEL[mode] || mode}。${probe.reason || ''} ` +
+    '开着 = 走服务端搜索（快）；关掉 = 用本站抓搜索结果页 + 抓正文（慢一点但可控）。';
 }
 
 webSearchToggleEl.addEventListener('change', async () => {

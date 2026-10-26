@@ -362,11 +362,16 @@ def set_embed_enabled(value):
 
 
 # ---------- 服务端内置联网搜索（模型自带 web search）----------
-# DeepSeek v4.1-flash / 阿里百炼那套支持 enable_search：平台自己去搜，把结果塞进上下文，
-# 不用我们再抓网页（能快好几秒）。但「接口没报错」不等于真支持——有些中转会静默忽略
-# 未知参数，所以这里靠「带搜索后 prompt_tokens 明显变大」来判定。
+# 两种主流实现，自动探测用哪种：
+#   1) inline   —— 请求里带 enable_search:true，平台自己搜完把结果塞进上下文
+#                  （阿里百炼 / Qwen 兼容模式这套）
+#   2) tools_api —— 独立的搜索接口 POST {base}/tools/search
+#                  body {query, count, need_content}，返回 {results:[{title,url,summary}]}
+#                  （DeepSeek 官方这套）
+# 都不支持就退回本站的「抓搜索结果页 + 抓正文」老路子。
 _WEB_SEARCH_PROBE = {"key": None, "ts": 0.0, "result": None}
 _WEB_SEARCH_TTL = 1800
+_PROBE_QUERY = "今天北京天气怎么样？"
 
 
 def model_web_search():
@@ -388,12 +393,56 @@ def set_model_web_search(value):
     return model_web_search()
 
 
-def web_search_probe(force=False):
-    """探测当前端点/模型支不支持内置联网搜索。
+def _probe_inline(requests_mod, url, headers, model):
+    """探测 enable_search：判定「带搜索后 prompt_tokens 是否明显变大」。"""
+    messages = [{"role": "user", "content": _PROBE_QUERY}]
 
-    判定不是「接口返回 200」，而是「带 enable_search 之后 prompt_tokens 明显变大」：
-    支持的话平台会把搜到的网页塞进上下文，token 数会暴涨；不支持时参数被静默忽略、
-    token 几乎不变，只看 200 会误判。
+    def prompt_tokens(extra):
+        body = {"model": model, "messages": messages, "max_tokens": 1}
+        body.update(extra)
+        resp = requests_mod.post(url, headers=headers, json=body, timeout=40)
+        if resp.status_code != 200:
+            return None, resp.text[:200]
+        return (resp.json().get("usage") or {}).get("prompt_tokens"), ""
+
+    plain, err_plain = prompt_tokens({})
+    searched, err_search = prompt_tokens({"enable_search": True})
+    if plain is None or searched is None:
+        detail = (err_search or err_plain or "").replace("\n", " ")
+        return False, f"enable_search 不被接受（{detail[:100]}）"
+    if searched - plain >= 200:
+        return True, f"inline：带搜索后上下文 {plain} → {searched} tokens"
+    return False, f"inline 无效（{plain} → {searched} tokens，结果没注入）"
+
+
+def _probe_tools_api(requests_mod, base, headers):
+    """探测 DeepSeek 官方 /tools/search 接口。"""
+    url = base.rstrip("/") + "/tools/search"
+    try:
+        resp = requests_mod.post(
+            url, headers=headers,
+            json={"query": _PROBE_QUERY, "count": 1, "need_content": False},
+            timeout=40,
+        )
+    except Exception as exc:                # noqa: BLE001
+        return False, f"tools/search 连不上（{type(exc).__name__}）"
+    if resp.status_code == 404:
+        return False, "tools/search 不存在（404）"
+    if resp.status_code != 200:
+        return False, f"tools/search 返回 HTTP {resp.status_code}"
+    try:
+        data = resp.json()
+    except Exception:                       # noqa: BLE001
+        return False, "tools/search 返回的不是 JSON"
+    if isinstance(data.get("results"), list):
+        return True, f"tools_api：官方搜索接口可用（{len(data['results'])} 条）"
+    return False, "tools/search 返回里没有 results"
+
+
+def web_search_probe(force=False):
+    """探测当前端点支持哪种内置联网搜索。返回 {supported, mode, reason, checked_at}。
+
+    mode: inline（enable_search）/ tools_api（官方 /tools/search）/ none
     """
     import time
 
@@ -405,52 +454,52 @@ def web_search_probe(force=False):
             and now - _WEB_SEARCH_PROBE["ts"] < _WEB_SEARCH_TTL):
         return cached
 
-    result = {"supported": False, "reason": "没检测过", "checked_at": int(now)}
+    result = {"supported": False, "mode": "none", "reason": "没检测过",
+              "checked_at": int(now)}
     key = chat_key()
     if key and base:
         try:
             import requests
 
-            url = base.rstrip("/") + "/chat/completions"
             headers = {"Authorization": f"Bearer {key}"}
-            # 探测问句要「真的需要联网」的那种：问「回一个字：好」平台根本不会去搜，
-            # 会误判成不支持。
-            messages = [{"role": "user", "content": "今天北京天气怎么样？"}]
-
-            def prompt_tokens(extra):
-                body = {"model": model, "messages": messages, "max_tokens": 1}
-                body.update(extra)
-                resp = requests.post(url, headers=headers, json=body, timeout=40)
-                if resp.status_code != 200:
-                    return None, resp.text[:200]
-                return (resp.json().get("usage") or {}).get("prompt_tokens"), ""
-
-            plain, err_plain = prompt_tokens({})
-            searched, err_search = prompt_tokens({"enable_search": True})
-            if plain is None or searched is None:
-                detail = (err_search or err_plain or "").replace("\n", " ")
-                result = {"supported": False,
-                          "reason": f"接口不接受 enable_search（{detail[:120]}）",
-                          "checked_at": int(now)}
-            elif searched - plain >= 200:
-                result = {"supported": True,
-                          "reason": f"支持：带搜索后上下文 {plain} → {searched} tokens",
+            url = base.rstrip("/") + "/chat/completions"
+            ok_inline, why_inline = _probe_inline(requests, url, headers, model)
+            if ok_inline:
+                result = {"supported": True, "mode": "inline", "reason": why_inline,
                           "checked_at": int(now)}
             else:
-                result = {"supported": False,
-                          "reason": (f"参数被接受但搜索结果没注入（{plain} → {searched} tokens），"
-                                     "可能是假支持"),
-                          "checked_at": int(now)}
-        except Exception as exc:                   # noqa: BLE001
-            result = {"supported": False,
+                ok_api, why_api = _probe_tools_api(requests, base, headers)
+                if ok_api:
+                    result = {"supported": True, "mode": "tools_api", "reason": why_api,
+                              "checked_at": int(now)}
+                else:
+                    result = {"supported": False, "mode": "none",
+                              "reason": f"{why_inline}；{why_api}",
+                              "checked_at": int(now)}
+        except Exception as exc:            # noqa: BLE001
+            result = {"supported": False, "mode": "none",
                       "reason": f"检测失败：{type(exc).__name__}", "checked_at": int(now)}
     _WEB_SEARCH_PROBE.update({"key": cache_key, "ts": now, "result": result})
     return result
 
 
+def web_search_mode():
+    """现在走哪种联网搜索：inline / tools_api / none（开关关着也是 none）。"""
+    if not model_web_search():
+        return "none"
+    probe = web_search_probe()
+    return probe.get("mode") or ("inline" if probe.get("supported") else "none")
+
+
 def web_search_active():
-    """现在到底走不走内置搜索：开关开着 + 端点确实支持。"""
-    return model_web_search() and bool(web_search_probe().get("supported"))
+    """开关开着 + 端点确实支持（任一模式）。"""
+    return web_search_mode() != "none"
+
+
+def web_search_official_api():
+    """DeepSeek 官方搜索接口地址（tools_api 模式用）。"""
+    base = chat_base_url()
+    return base.rstrip("/") + "/tools/search" if base else ""
 
 
 def update_embed(model, base_url, key):

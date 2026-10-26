@@ -881,7 +881,12 @@ def say_hi(name: str) -> str:
 
 后台「模型与接口 → 用服务端内置的联网搜索」开关，控制**是让模型自己上网（enable_search）**，还是用本站的网页搜索 / 抓取（`web_search` + `open_url`）。
 
-- **默认开**：请求里带 `enable_search: true`，平台自己去搜、把结果塞进上下文；同时把自家的 `web_search` / `open_url` 从工具清单里摘掉（模型不用再多绕几轮），回答更快。
+- **两种实现自动探测**：
+  - `inline`：请求里带 `enable_search: true`，平台自己搜完把结果塞进上下文（阿里百炼 / Qwen 兼容模式）；
+  - `tools_api`：独立搜索接口 `POST {base}/tools/search`，body `{query, count, need_content}`，
+    返回 `{results:[{title,url,summary,content}]}`（DeepSeek 官方那套）——
+    `web_search` 会改成直接调它，一次请求拿结果 + 正文，不用再抓搜索结果页。
+- **默认开**：探测到能用就用上面两种之一（探测到哪种就用哪种）；同时把自家的 `web_search` / `open_url` 从工具清单里摘掉（模型不用再多绕几轮），回答更快。
 - **关掉**：回到原来的路子（本地抓搜索结果页 + 抓正文），可控但慢几秒。
 - **先探测再显示**：后台打开时会先探测端点到底支不支持——用「带/不带 enable_search 时 prompt_tokens 差多少」判定（真支持时平台会把搜索结果塞进上下文，token 会暴涨几千；有些中转会静默忽略未知参数，只看 HTTP 200 会误判）。不支持就**不显示这个开关**，避免开了以为生效、其实还是老路子。
 

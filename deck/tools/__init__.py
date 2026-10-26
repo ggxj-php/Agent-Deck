@@ -144,7 +144,7 @@ def active_specs():
     specs = [spec for spec in TOOLS if group_of(spec["function"]["name"]) in groups]
     try:
         from .. import settings
-        if settings.web_search_active():
+        if settings.web_search_mode() == "inline":
             # 走服务端内置搜索时，把自家的网页搜索 / 抓取工具摘掉：
             # 模型已经有搜索结果了，再给它这两个工具只会多绕几轮
             specs = [s for s in specs

@@ -200,9 +200,13 @@ def build_prompt():
     parts = [part for part in (core, persona_part) if part]
     text = "\n\n".join(parts) + _unavailable_tools_note()
     try:
-        if settings.web_search_active():
+        mode = settings.web_search_mode()
+        if mode == "inline":
             text += ("\n\n【联网搜索已由服务端内置开启：搜到的网页会自动附在你的上下文里，"
                      "直接拿来回答就行，不用调用 web_search / open_url。】")
+        elif mode == "tools_api":
+            text += ("\n\n【web_search 已接官方搜索接口（又快又干净）：要查资料直接调用它，"
+                     "一般不用再 open_url；一次提问最多搜 1~2 次。】")
     except Exception:                        # noqa: BLE001
         pass
     return text

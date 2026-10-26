@@ -66,6 +66,7 @@ def _state():
         # 服务端内置联网搜索：开关 + 探测结果（前端据此决定显不显示那个开关）
         "web_search": {
             "enabled": settings.model_web_search(),
+            "mode": settings.web_search_mode(),
             "probe": settings.web_search_probe(),
         },
         # 检索翻译那一路的连接：留空就跟聊天那套一样，所以键和地址都说清楚它们是哪来的
@@ -121,6 +122,7 @@ def web_search_save(req: WebSearchRequest, request: Request):
     enabled = settings.set_model_web_search(bool(req.enabled))
     probe = settings.web_search_probe(force=enabled)
     return {"ok": True, "enabled": enabled, "probe": probe,
+            "mode": settings.web_search_mode(),
             "active": settings.web_search_active()}
 
 
