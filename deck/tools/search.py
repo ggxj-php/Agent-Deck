@@ -12,6 +12,7 @@ open_url 负责把网页正文抓回来，只认 http/https，本机和内网地
 <meta refresh>、JS 里的 location 跳转都会一路跟下去（每跳都重新校验地址），
 正文抓不到时还会试着从页面内嵌的 JSON 里捞。全是跨平台的纯 Python 实现。
 """
+import base64
 import html
 import ipaddress
 import json
@@ -19,6 +20,7 @@ import re
 import socket
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 import charset_normalizer
@@ -33,7 +35,11 @@ SPECS = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "联网搜索资料，返回标题、链接和摘要",
+            "description": (
+                "联网搜索资料，返回标题、链接、摘要，并**自动附上最相关两条的正文摘录**。"
+                "拿到这些一般就够回答了，不用再 open_url 打开同样的链接；"
+                "一个提问最多搜 1~2 次，关键词不合适就换词，别反复搜同一串。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -56,7 +62,8 @@ SPECS = [
             "name": "open_url",
             "description": (
                 "打开一个 http/https 链接，把网页正文抓回来读。"
-                "用户甩过来一个网址、或者搜索/知识库结果里有想细看的页面时用这个。"
+                "只在「确实要看原文细节」时用：web_search 的返回里已经带了前两条正文摘录，"
+                "别再用它打开同样的链接；一次提问最多开 1 个网址。"
                 "返回的是网页正文纯文本；打不开、或者不是网页（图片、压缩包之类）会直接说明。"
             ),
             "parameters": {
@@ -81,6 +88,93 @@ SEARCH_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
+
+
+# ---- 提速参数（都是实测调出来的）----
+SEARCH_TIMEOUT = 5          # 单家搜索引擎的请求超时（原来 20s，太宽）
+SEARCH_BUDGET = 4.5         # web_search 整体预算：到点就用已经拿到的结果
+SEARCH_FAIL_COOLDOWN = 600  # 连不上的引擎歇 10 分钟再试
+ENRICH_COUNT = 2            # 搜索后自动抓前几条的正文
+ENRICH_TIMEOUT = 4          # 抓正文的总时限（连接+下载一起算）
+ENRICH_CHARS = 1200         # 每条正文最多带回这么多字
+ENRICH_BYTES = 64 * 1024    # 摘录只下 64KB，够抠正文了
+FETCH_TIMEOUT = 6           # open_url 每一跳的超时
+FETCH_DEADLINE = 12         # open_url 一次调用的总时限（含所有跳转）
+MAX_BYTES = 200 * 1024      # open_url 最多下 200KB（正文本来只回 6000 字，下 2MB 纯浪费）
+URL_CACHE_TTL = 600         # 同一个网址 10 分钟内不重复抓
+_URL_CACHE = {}
+
+# 全局共享会话：复用 TCP/TLS 连接，别每次请求都重新握手（每次能省 0.2~0.5s）
+_FETCH_SESSION = requests.Session()
+_FETCH_ADAPTER = requests.adapters.HTTPAdapter(
+    pool_connections=8, pool_maxsize=8, max_retries=0)
+_FETCH_SESSION.mount("http://", _FETCH_ADAPTER)
+_FETCH_SESSION.mount("https://", _FETCH_ADAPTER)
+
+
+def _url_cache_key(url, limit):
+    return (url, int(limit))
+
+
+def _url_cached(url, limit):
+    with _STATE_LOCK:
+        hit = _URL_CACHE.get(_url_cache_key(url, limit))
+        if not hit:
+            return None
+        expires, text = hit
+        if expires < time.monotonic():
+            _URL_CACHE.pop(_url_cache_key(url, limit), None)
+            return None
+        return text
+
+
+def _url_remember(url, limit, text):
+    with _STATE_LOCK:
+        if len(_URL_CACHE) > 100:
+            _URL_CACHE.clear()
+        _URL_CACHE[_url_cache_key(url, limit)] = (time.monotonic() + URL_CACHE_TTL, text)
+
+
+def _quick_text(url, limit=ENRICH_CHARS, timeout=ENRICH_TIMEOUT):
+    """轻量抓一页正文（搜索完自动补摘要用）：复用 open_url 的跳转/解包能力，
+    但预算压到几秒，拿不到就返回空串（不拖慢整体）。"""
+    try:
+        text = open_url(url, max_chars=limit, budget=timeout,
+                        hop_timeout=min(4.0, timeout))
+    except Exception:
+        return ""
+    if not text or len(text) < 80:
+        return ""
+    # open_url 失败时会返回中文说明，别当正文带出去
+    if text.startswith(("打不开", "这个链接", "没给网址", "读这个链接")):
+        return ""
+    return text
+
+
+def _enrich(results, count=ENRICH_COUNT):
+    """并发抓前 count 条结果的正文摘录，塞进 r["text"]。抓不到就跳过。"""
+    picked = [
+        r for r in (results or [])[:count]
+        if r.get("url") and not any(k in r["url"] for k in ("ai.so.com", "/search/so", "so.com/s?"))
+    ]
+    if not picked:
+        return results
+    pool = ThreadPoolExecutor(max_workers=len(picked))
+    try:
+        futures = {pool.submit(_quick_text, r["url"]): r for r in picked}
+        for future in as_completed(futures, timeout=ENRICH_TIMEOUT + 1):
+            item = futures[future]
+            try:
+                text = future.result()
+            except Exception:
+                text = ""
+            if text:
+                item["text"] = text
+    except TimeoutError:
+        pass                    # 慢的站点不等了，有多少用多少
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    return results
 
 
 SCRIPT_BLOCK_RE = re.compile(r"(?is)<(script|style)\b.*?</\1>")
@@ -249,6 +343,27 @@ _DDG_DESC_RE = re.compile(
 )
 
 
+def _unwrap_redirect(url: str) -> str:
+    """把常见的中转链接解开，少跟一跳（360 / 百度没法解，只能跟）。"""
+    try:
+        parts = urlsplit(url)
+        host = (parts.netloc or "").lower()
+        qs = parse_qs(parts.query)
+        if "duckduckgo.com" in host and qs.get("uddg"):
+            return qs["uddg"][0]
+        if "bing.com" in host and qs.get("u"):
+            raw = qs["u"][0]
+            if raw.startswith("a1"):
+                raw = raw[2:]
+            padding = "=" * (-len(raw) % 4)
+            target = base64.urlsafe_b64decode(raw + padding).decode("utf-8", "ignore")
+            if target.startswith("http"):
+                return target
+    except Exception:
+        pass
+    return url
+
+
 def _unwrap_ddg(url: str) -> str:
     """DDG 的链接是 //duckduckgo.com/l/?uddg=<真实地址> 这种包装，拆回真实地址。"""
     if "uddg=" not in url:
@@ -278,34 +393,19 @@ def _parse_ddg(page: str):
 # 必应挪到 360 后面：它对中文长句会把查询拆散，返回的其实是某个更短词的结果——
 # 「数据结构的定义」给一堆讲「数据」的页面，「数字取证 内存取证 volatility」给讲
 # 「数字」的页面。它排在前面的时候，只要百度一被风控，用户拿到的就是这种跑偏结果。
+# 引擎列表（香港服务器实测结果，2026-10）：
+#   360 搜索   0.7s  4 条结果  ✅ 主力
+#   百度       10s+  只回 1.5KB 验证页，抠不到结果 ❌ 删
+#   必应       ConnectionError（香港出口连不上）        ❌ 删
+#   DuckDuckGo ConnectionError（香港出口连不上）        ❌ 删
+# 以后要加引擎，直接往这个元组里塞；web_search 会并发跑、按命中率挑。
 ENGINES = (
-    {
-        "name": "百度",
-        "url": "https://www.baidu.com/s",
-        "param": "wd",
-        "home": "https://www.baidu.com/",
-        "parse": _parse_baidu,
-    },
     {
         "name": "360 搜索",
         "url": "https://www.so.com/s",
         "param": "q",
         "home": "https://www.so.com/",
         "parse": _parse_360,
-    },
-    {
-        "name": "必应",
-        "url": "https://www.bing.com/search",
-        "param": "q",
-        "home": "https://cn.bing.com/",
-        "parse": _parse_bing,
-    },
-    {
-        "name": "DuckDuckGo",
-        "url": "https://html.duckduckgo.com/html/",
-        "param": "q",
-        "home": "https://duckduckgo.com/",
-        "parse": _parse_ddg,
     },
 )
 
@@ -342,11 +442,14 @@ def _relevance(results, keyword: str) -> int:
 
 
 def _render(results) -> str:
-    """把结果列表拼成给模型看的正文。"""
-    return "\n\n".join(
-        f"{i}. {r['title']}\n   {r['url']}\n   {r['snippet']}"
-        for i, r in enumerate(results, 1)
-    )
+    """把结果列表拼成给模型看的正文（带正文摘录时一并给出）。"""
+    parts = []
+    for i, r in enumerate(results, 1):
+        part = f"{i}. {r['title']}\n   {r['url']}\n   {r['snippet']}"
+        if r.get("text"):
+            part += f"\n   正文摘录：{r['text']}"
+        parts.append(part)
+    return "\n\n".join(parts)
 
 
 # ---------------- 别把引擎惹毛 ----------------
@@ -390,7 +493,7 @@ def _warm_up(engine, state):
     state["warmed"] = True
     try:
         state["session"].get(
-            engine["home"], headers=SEARCH_HEADERS, proxies=_proxies(), timeout=10
+            engine["home"], headers=SEARCH_HEADERS, proxies=_proxies(), timeout=4
         )
     except Exception:
         pass
@@ -452,6 +555,8 @@ def _try_engine(engine, keyword: str, limit: int):
     """
     state = _state(engine)
     now = time.monotonic()
+    if now < state.get("fail_until", 0.0):
+        return [], f'{engine["name"]}连不上（稍后自动重试）', 0
     if now < state["blocked_until"]:
         left = int(state["blocked_until"] - now)
         return [], f'{engine["name"]}还在冷却（{left} 秒后再试）', 0
@@ -468,9 +573,10 @@ def _try_engine(engine, keyword: str, limit: int):
             params={engine["param"]: keyword},
             headers=headers,
             proxies=_proxies(),
-            timeout=20,
+            timeout=SEARCH_TIMEOUT,
         )
     except Exception as e:
+        state["fail_until"] = time.monotonic() + SEARCH_FAIL_COOLDOWN
         return [], f'{engine["name"]}连不上（{type(e).__name__}）', 0
     if resp.status_code != 200:
         return [], f'{engine["name"]}返回 HTTP {resp.status_code}', 0
@@ -491,49 +597,27 @@ def _try_engine(engine, keyword: str, limit: int):
     return results, "", _relevance(results, keyword)
 
 
-def web_search(keyword: str, max_results: int = 5) -> str:
-    """依次尝试多个搜索引擎，第一个抠到「和查询对得上」的结果的就用它。
+def _finish(keyword, total, notes, candidates, key):
+    """从候选里挑一份：命中率高的优先（同分取先到的），全跑偏就用最接近的。"""
+    good = [c for c in candidates if c[0] > 0]
+    if good:
+        good.sort(key=lambda c: (-c[0], c[1]))
+        hits, _, engine, results = good[0]
+        _enrich(results)
+        trail = [f"结果来自{engine['name']}"] + notes
+        body = _render(results) + "\n\n（" + "；".join(trail) + "）"
+        _remember(key, body)
+        return body
 
-    单靠一家的话，被风控挡一下或者对方换个模板就整个没结果了，所以多挂几家兜底。
-    但兜底不能只看「有没有结果」——答非所问的结果比没结果更糟，所以还要比对查询
-    特征词，跑偏的换下一家；实在没有对得上的，才把最不跑偏的那份带上警告返回。
-
-    风控是按频率触发的，所以这里还做了三件事：同引擎请求之间限速、被挡的引擎冷却
-    一段时间不再碰、同一个查询短时间内直接复用上次结果。每家的失败原因都会一起
-    带回去，方便看出是网络不通、被挡了还是模板变了。
-    """
-    limit = max(1, min(max_results, 10))
-    key = (keyword, limit)
-    cached = _cached(key)
-    if cached is not None:
-        return cached
-
-    total = len(_query_terms(keyword)) or 1
-    notes = []
-    off_topic = None
-
-    for engine in ENGINES:
-        results, note, hits = _try_engine(engine, keyword, limit)
-        if not results:
-            notes.append(note)
-            continue
-        if hits * 2 >= total:
-            trail = [f"结果来自{engine['name']}"] + notes
-            body = _render(results) + "\n\n（" + "；".join(trail) + "）"
-            _remember(key, body)
-            return body
-        # 有结果但明显不是这个查询的：留一份当兜底，先看看下一家
-        notes.append(f'{engine["name"]}把查询理解偏了（只有 {hits}/{total} 个关键词对得上）')
-        if off_topic is None:
-            off_topic = (engine["name"], results, hits)
-
-    if off_topic is not None:
-        name, results, hits = off_topic
+    off = [c for c in candidates if c[3]]
+    if off:
+        off.sort(key=lambda c: c[1])
+        _, _, engine, results = off[0]
+        _enrich(results)
         return (
             _render(results)
-            + f"\n\n（没找到和「{keyword}」对得上的结果。上面这些是{name}返回的，"
-              f"只对上了 {hits}/{total} 个关键词，答的很可能不是你要问的——"
-              "换个说法再搜一次试试）"
+            + f"\n\n（没找到和「{keyword}」对得上的结果。上面这些是{engine['name']}返回的，"
+              "答的很可能不是你要问的——换个说法再搜一次试试）"
         )
 
     detail = "；".join(notes)
@@ -545,6 +629,64 @@ def web_search(keyword: str, max_results: int = 5) -> str:
     return f"没搜到「{keyword}」的结果（{detail}）"
 
 
+def web_search(keyword: str, max_results: int = 5) -> str:
+    """跑搜索引擎拿结果，并自动补上最相关几条的正文摘录。
+
+    - 只有一家引擎（现在就是 360）时直接跑，耗时 ≈ 一次请求 + 抓两条摘录；
+    - 以后加了多家引擎会自动并发，总耗时≈最快一家（有预算兜底，不等慢的）；
+    - 抓到结果后并发补前两条的正文摘录，模型一般就不用再 open_url 了
+      （open_url 实测 12~21 秒，那一步才是真慢）。
+    """
+    limit = max(1, min(max_results, 10))
+    key = (keyword, limit)
+    cached = _cached(key)
+    if cached is not None:
+        return cached
+
+    total = len(_query_terms(keyword)) or 1
+    notes = []
+    candidates = []          # [(hits, 到达顺序, engine, results)]
+
+    if len(ENGINES) == 1:
+        engine = ENGINES[0]
+        results, note, hits = _try_engine(engine, keyword, limit)
+        if results:
+            candidates.append((hits if hits * 2 >= total else 0, 1, engine, results))
+        elif note:
+            notes.append(note)
+        return _finish(keyword, total, notes, candidates, key)
+
+    order = 0
+    pool = ThreadPoolExecutor(max_workers=max(1, len(ENGINES)))
+    try:
+        futures = {pool.submit(_try_engine, engine, keyword, limit): engine for engine in ENGINES}
+        deadline = time.monotonic() + SEARCH_BUDGET
+        for future in as_completed(futures, timeout=SEARCH_BUDGET):
+            engine = futures[future]
+            order += 1
+            try:
+                results, note, hits = future.result()
+            except Exception as exc:            # noqa: BLE001
+                results, note, hits = [], f'{engine["name"]}出错（{type(exc).__name__}）', 0
+            if not results:
+                if note:
+                    notes.append(note)
+                continue
+            if hits * 2 >= total:
+                candidates.append((hits, order, engine, results))
+                if time.monotonic() >= deadline - 0.2:
+                    break
+            else:
+                notes.append(f'{engine["name"]}把查询理解偏了（只有 {hits}/{total} 个关键词对得上）')
+                candidates.append((0, order, engine, results))
+    except TimeoutError:
+        notes.append(f"有引擎 {SEARCH_BUDGET:g} 秒没返回，先用已有的结果")
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    return _finish(keyword, total, notes, candidates, key)
+
+
 # ---------------- 打开链接 ----------------
 
 FETCH_HEADERS = {
@@ -553,9 +695,8 @@ FETCH_HEADERS = {
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
 
-MAX_BYTES = 2 * 1024 * 1024   # 最多下 2MB，免得被超长页面拖死
 MAX_CHARS = 6000              # 正文最多回这么多字，再长就截断
-MAX_REDIRECTS = 8             # 最多跟 8 跳，每一跳都重新查一遍地址
+MAX_REDIRECTS = 4             # 最多跟 4 跳（原来 8 跳，实测 360 跳转链能拖到 20s）
 BOUNCE_MAX_BYTES = 32 * 1024  # 中转页都很小，超过这个大小就不当成中转页
 BOUNCE_MAX_TEXT = 500         # 中转页的可见文字很少，多了就说明是正经网页
 MIN_TEXT = 200                # 正文少于这么多字，就怀疑是 JS 动态渲染出来的
@@ -763,7 +904,8 @@ def _html_to_text(markup: str) -> str:
     return BLANK_RE.sub("\n\n", out).strip()
 
 
-def open_url(url: str, max_chars: int = MAX_CHARS) -> str:
+def open_url(url: str, max_chars: int = MAX_CHARS, budget: float = FETCH_DEADLINE,
+             hop_timeout: float = FETCH_TIMEOUT) -> str:
     """打开一个网址，把网页正文抓回来。
 
     会一路跟着跳转走：HTTP 3xx、页面里的 <meta refresh>、JS 的 location 赋值都认。
@@ -773,10 +915,21 @@ def open_url(url: str, max_chars: int = MAX_CHARS) -> str:
     if not url:
         return "没给网址"
 
-    session = requests.Session()   # 带上 Cookie，有些站点靠它才肯放行
+    cached = _url_cached(url, max_chars)
+    if cached is not None:
+        return cached
+
+    original_url = url
+    url = _unwrap_redirect(url)
+    session = _FETCH_SESSION        # 复用连接，省 DNS/TLS 握手
     visited = []
+    deadline = time.monotonic() + budget
 
     for _ in range(MAX_REDIRECTS + 1):
+        left = deadline - time.monotonic()
+        if left <= 0.5:
+            return (f"这个链接太慢了：{budget:g} 秒内还没走到正文"
+                    "（跳转太多或者对方站很慢），先别看了，换个来源试试")
         bad = _check_url(url)
         if bad:
             if not visited:
@@ -787,7 +940,8 @@ def open_url(url: str, max_chars: int = MAX_CHARS) -> str:
         if visited:
             headers["Referer"] = visited[-1]
         try:
-            resp = session.get(url, headers=headers, timeout=20,
+            resp = session.get(url, headers=headers,
+                               timeout=max(1.0, min(hop_timeout, left)),
                                stream=True, allow_redirects=False)
         except Exception as e:
             return f"打不开这个链接：{e}"
@@ -802,7 +956,7 @@ def open_url(url: str, max_chars: int = MAX_CHARS) -> str:
                 for chunk in resp.iter_content(8192):
                     chunks.append(chunk)
                     total += len(chunk)
-                    if total >= MAX_BYTES:
+                    if total >= MAX_BYTES or time.monotonic() > deadline:
                         break
             except Exception as e:
                 return f"读这个链接的时候断了：{e}"
@@ -853,8 +1007,11 @@ def open_url(url: str, max_chars: int = MAX_CHARS) -> str:
         if len(text) > max_chars:
             text = text[:max_chars] + "\n\n……（正文太长，助手先看到这儿）"
         elif cut:
-            text += "\n\n……（网页太大，只下了前 2MB）"
-        return text + fallback
+            text += f"\n\n……（网页太大，只下了前 {MAX_BYTES // 1024}KB）"
+        result = text + fallback
+        _url_remember(original_url, max_chars, result)
+        _url_remember(url, max_chars, result)
+        return result
 
     return f"这个链接跳了 {MAX_REDIRECTS} 次还没走到正经页面，助手不跟了"
 
