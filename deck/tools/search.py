@@ -94,8 +94,8 @@ SEARCH_HEADERS = {
 SEARCH_TIMEOUT = 5          # 单家搜索引擎的请求超时（原来 20s，太宽）
 SEARCH_BUDGET = 4.5         # web_search 整体预算：到点就用已经拿到的结果
 SEARCH_FAIL_COOLDOWN = 600  # 连不上的引擎歇 10 分钟再试
-ENRICH_COUNT = 2            # 搜索后自动抓前几条的正文
-ENRICH_TIMEOUT = 4          # 抓正文的总时限（连接+下载一起算）
+ENRICH_COUNT = 1            # 只抓最相关那 1 条的正文（2 条只多花时间）
+ENRICH_TIMEOUT = 2          # 抓正文的总时限（连接+下载一起算）：抓不到就直接用摘要，不让用户等
 ENRICH_CHARS = 1200         # 每条正文最多带回这么多字
 ENRICH_BYTES = 64 * 1024    # 摘录只下 64KB，够抠正文了
 FETCH_TIMEOUT = 6           # open_url 每一跳的超时
@@ -162,7 +162,7 @@ def _enrich(results, count=ENRICH_COUNT):
     pool = ThreadPoolExecutor(max_workers=len(picked))
     try:
         futures = {pool.submit(_quick_text, r["url"]): r for r in picked}
-        for future in as_completed(futures, timeout=ENRICH_TIMEOUT + 1):
+        for future in as_completed(futures, timeout=ENRICH_TIMEOUT + 0.5):
             item = futures[future]
             try:
                 text = future.result()
@@ -493,7 +493,7 @@ def _warm_up(engine, state):
     state["warmed"] = True
     try:
         state["session"].get(
-            engine["home"], headers=SEARCH_HEADERS, proxies=_proxies(), timeout=4
+            engine["home"], headers=SEARCH_HEADERS, proxies=_proxies(), timeout=2
         )
     except Exception:
         pass
@@ -605,6 +605,10 @@ def _finish(keyword, total, notes, candidates, key):
         hits, _, engine, results = good[0]
         _enrich(results)
         trail = [f"结果来自{engine['name']}"] + notes
+        if any(r.get("text") for r in results):
+            trail.append("已附最相关一条的正文摘录，够用就别再 open_url")
+        else:
+            trail.append("这条只拿到引擎摘要（正文没抓到，可能被限流），够用就直接回答，别硬等")
         body = _render(results) + "\n\n（" + "；".join(trail) + "）"
         _remember(key, body)
         return body
