@@ -83,6 +83,8 @@ def _load():
         "prompt": str(raw.get("prompt") or ""),
         # 当前用的人设 id（见 persona.py）。空 = 用默认人设
         "persona": str(raw.get("persona") or ""),
+        # 共享约束提示词（所有身份卡共用）。空 = 用 config.CORE_PROMPT
+        "core_prompt": str(raw.get("core_prompt") or ""),
         # 开启的工具分组；None = 没配过（= 全开）
         "tool_groups": (raw.get("tool_groups")
                         if isinstance(raw.get("tool_groups"), list) else None),
@@ -103,6 +105,24 @@ def _write(data):
     with os.fdopen(fd, "w", encoding="utf-8") as fp:
         json.dump(data, fp, ensure_ascii=False, indent=2)
     os.replace(tmp, SETTINGS_PATH)
+
+
+# ---------- 共享约束 ----------
+
+def core_prompt():
+    """共享约束提示词：后台改过就用改过的，否则用 config.py 内置那份。"""
+    return _load()["core_prompt"]
+
+
+def set_core_prompt(text):
+    text = (text or "").strip()
+    if len(text) > PROMPT_LIMIT:
+        raise ValueError(f"太长了喵，最多 {PROMPT_LIMIT} 个字")
+    with _lock:
+        data = _load()
+        data["core_prompt"] = text
+        _write(data)
+    return text
 
 
 # ---------- 工具分组 ----------
@@ -442,7 +462,7 @@ def system_prompt():
     from . import persona
 
     try:
-        return persona.system_prompt()
+        return persona.build_prompt()
     except Exception:                    # noqa: BLE001
         return prompt_text() or SYSTEM_PROMPT
 

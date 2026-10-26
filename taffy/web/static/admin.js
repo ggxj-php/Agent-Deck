@@ -294,6 +294,7 @@ function showView(name) {
 }
 
 const VIEW_HOOKS = {
+  'core-prompt': loadCorePrompt,
   config: loadConfig,
   tools: loadTools,
   personas: loadPersonas,
@@ -1971,6 +1972,7 @@ function personaFormEls() {
     placeholder: document.getElementById('persona-placeholder'),
     online: document.getElementById('persona-online'),
     thinking: document.getElementById('persona-thinking'),
+    theme: document.getElementById('persona-theme'),
     prompt: document.getElementById('persona-prompt'),
   };
 }
@@ -1978,7 +1980,10 @@ function personaFormEls() {
 function resetPersonaForm() {
   editingPersona = '';
   const els = personaFormEls();
-  Object.values(els).forEach((el) => { if (el) el.value = ''; });
+  Object.values(els).forEach((el) => {
+    if (!el) return;
+    el.value = el.type === 'color' ? '#ffb7d5' : '';
+  });
   if (els.id) els.id.disabled = false;
   document.getElementById('persona-form-title').textContent = '新建身份卡';
   document.getElementById('persona-save').textContent = '创建';
@@ -2014,6 +2019,7 @@ function renderPersonas(currentId) {
     ops.append(
       userOp(isCurrent ? '已启用' : '启用', () => activatePersona(item), isCurrent),
       userOp('编辑', () => editPersona(item), false),
+      userOp('导出', () => exportPersona(item), false),
       userOp('删掉', () => removePersona(item), isCurrent, true),
     );
     tr.appendChild(ops);
@@ -2045,6 +2051,7 @@ async function editPersona(item) {
     els.placeholder.value = detail.placeholder || '';
     els.online.value = detail.status_online || '';
     els.thinking.value = detail.status_thinking || '';
+    if (els.theme) els.theme.value = detail.theme || '#ffb7d5';
     els.prompt.value = detail.prompt || '';
     document.getElementById('persona-form-title').textContent = `编辑「${detail.name || detail.id}」`;
     document.getElementById('persona-save').textContent = '保存修改';
@@ -2077,6 +2084,7 @@ async function savePersona() {
     placeholder: els.placeholder.value.trim(),
     status_online: els.online.value.trim(),
     status_thinking: els.thinking.value.trim(),
+    theme: els.theme ? els.theme.value : '',
     prompt: els.prompt.value,
   };
   if (!payload.name) {
@@ -2225,3 +2233,85 @@ async function loadConfig() {
     }
   }
 }
+
+/* ---------------- 共享约束提示词 ---------------- */
+
+function corePromptMsg(text, ok) {
+  const node = document.getElementById('core-prompt-msg');
+  if (!node) return;
+  node.hidden = !text;
+  node.textContent = text || '';
+  node.classList.toggle('ok', Boolean(ok));
+}
+
+async function loadCorePrompt() {
+  try {
+    const data = await api('/api/admin/core-prompt');
+    const textarea = document.getElementById('core-prompt-text');
+    if (textarea) textarea.value = data.text || '';
+    const state = document.getElementById('core-prompt-state');
+    if (state) {
+      state.textContent = data.custom
+        ? `正在用后台改过的版本（上限 ${data.limit} 字）`
+        : '当前是内置默认版本（没改过）';
+    }
+    corePromptMsg('');
+  } catch (err) {
+    corePromptMsg(err && err.message ? err.message : '共享约束拉不到', false);
+  }
+}
+
+async function saveCorePrompt() {
+  const textarea = document.getElementById('core-prompt-text');
+  try {
+    await api('/api/admin/core-prompt', { text: textarea.value }, 'POST');
+    await loadCorePrompt();
+    corePromptMsg('存好了喵，新会话立刻生效', true);
+  } catch (err) {
+    corePromptMsg(err && err.message ? err.message : '存不下来喵', false);
+  }
+}
+
+document.getElementById('core-prompt-save').addEventListener('click', saveCorePrompt);
+document.getElementById('core-prompt-reset').addEventListener('click', async () => {
+  try {
+    const data = await api('/api/admin/core-prompt');
+    document.getElementById('core-prompt-text').value = data.default || '';
+    corePromptMsg('已经填回默认版本，点保存才生效', true);
+  } catch (err) {
+    corePromptMsg('恢复不了喵', false);
+  }
+});
+
+/* ---------------- 身份卡导入 / 导出 ---------------- */
+
+function exportPersona(item) {
+  window.open(`/api/admin/personas/${encodeURIComponent(item.id)}/export`, '_blank');
+}
+
+document.getElementById('persona-import-btn').addEventListener('click', () => {
+  document.getElementById('persona-import-file').click();
+});
+
+document.getElementById('persona-import-file').addEventListener('change', async (event) => {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  try {
+    const resp = await fetch('/api/admin/personas/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/zip' },
+      body: file,
+    });
+    let data = null;
+    try { data = await resp.json(); } catch (err) { data = null; }
+    if (!resp.ok) {
+      personaMsg((data && data.detail) || ('导入失败（' + resp.status + '）'), false);
+      return;
+    }
+    await loadPersonas();
+    personaMsg(`已经导入身份卡「${data.id}」（${data.files} 个文件），点「启用」就能用`, true);
+  } catch (err) {
+    personaMsg('导入失败喵：' + (err && err.message ? err.message : err), false);
+  }
+});

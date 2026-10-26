@@ -73,6 +73,9 @@
           <button type="button" class="nav-item" data-view="personas" title="身份卡">
             <span class="nav-text">身份卡</span>
           </button>
+          <button type="button" class="nav-item" data-view="core-prompt" title="共享约束">
+            <span class="nav-text">共享约束</span>
+          </button>
           <button type="button" class="nav-item" data-view="prompt" title="系统提示词">
             <span class="nav-text">系统提示词</span>
           </button>
@@ -379,6 +382,28 @@
         </div>
       </section>
 
+      <!-- ---------- 共享约束 ---------- -->
+      <section class="view" data-view="core-prompt" hidden>
+        <div class="card">
+          <h2>共享约束（所有身份卡共用）</h2>
+          <p class="hint">
+            这一段是**换身份卡也不会变**的硬规矩：工具怎么用、安全边界、输出格式、防注入。<br>
+            身份卡（下一页）只负责「你是谁、什么语气」。关掉的工具组会自动在末尾补一句
+            「当前不可用的工具」，不用你手改。<br>
+            <b>留空 = 用内置默认那份</b>（改坏了可以点「恢复默认」再保存）。
+          </p>
+          <label class="persona-prompt-label">共享约束
+            <textarea id="core-prompt-text" rows="16"></textarea>
+          </label>
+          <p class="hint" id="core-prompt-msg" hidden></p>
+          <div class="row-buttons">
+            <button type="button" id="core-prompt-save">保存</button>
+            <button type="button" id="core-prompt-reset" class="ghost">恢复默认</button>
+          </div>
+          <p class="hint" id="core-prompt-state"></p>
+        </div>
+      </section>
+
       <!-- ---------- 身份卡（人设） ---------- -->
       <section class="view" data-view="personas" hidden>
         <div class="card">
@@ -396,6 +421,13 @@
               <tbody id="persona-rows"></tbody>
             </table>
           </div>
+          <p class="hint">
+            导出会把整张卡打包成 zip（persona.json + prompt.md + 表情包），换台机器导入就能用。
+          </p>
+          <div class="row-buttons">
+            <input type="file" id="persona-import-file" accept=".zip" hidden>
+            <button type="button" id="persona-import-btn" class="ghost">导入身份卡（zip）</button>
+          </div>
         </div>
 
         <div class="card">
@@ -412,6 +444,7 @@
             <label>输入框提示 <input id="persona-placeholder" placeholder="和猫猫说点什么喵…"></label>
             <label>在线文案 <input id="persona-online" placeholder="在线喵"></label>
             <label>思考文案 <input id="persona-thinking" placeholder="正在思考喵…"></label>
+            <label>主题色 <input type="color" id="persona-theme" value="#ffb7d5"></label>
           </div>
           <label class="persona-prompt-label">提示词（留空 = 用内置那份）
             <textarea id="persona-prompt" rows="10"

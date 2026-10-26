@@ -40,6 +40,10 @@ DEFAULTS = {
     "status_online": "",
     "status_thinking": "",
     "stickers": STATIC_STICKERS,
+    # 主题色（前端按这个调色）；空 = 用默认粉色
+    "theme": "#ffb7d5",
+    # 图标文件；空 = 跟着头像走
+    "icon": "",
     "prompt": "",
 }
 
@@ -111,7 +115,7 @@ def list_personas():
 
 def current_id():
     """当前用的人设 id。"""
-    from . import settings  # 延迟导入，避免循环依赖
+    from . import settings          # 延迟导入，避免循环依赖
 
     pid = safe_id(settings.persona_id())
     if pid and exists(pid):
@@ -151,8 +155,50 @@ def current():
 
 
 def system_prompt():
-    """当前人设的提示词。"""
+    """当前人设的提示词（**不含**共享约束，后台编辑身份卡时看到的就是这个）。"""
     return current().get("prompt") or SYSTEM_PROMPT
+
+
+def _unavailable_tools_note():
+    """把后台关掉的工具组写成一段提醒，免得模型以为自己还有那些工具。"""
+    try:
+        from . import tools
+
+        groups = tools.TOOL_GROUPS
+        enabled = tools.enabled_groups()
+        off = []
+        for gid, info in groups.items():
+            if gid in enabled:
+                continue
+            off.append(f"{info['label']}（" + "、".join(info["tools"]) + "）")
+        if not off:
+            return ""
+        return ("\n\n【当前不可用的工具】下面这些工具现在被后台关掉了，"
+                "你**没有**这些能力：别调用、也别假装能调，用户问起就说这组工具被关了。\n"
+                + "\n".join("- " + line for line in off))
+    except Exception:                    # noqa: BLE001
+        return ""
+
+
+def build_prompt():
+    """模型实际收到的系统提示词 = 共享约束 + 身份卡 + 不可用工具提醒。
+
+    分两层的好处：换身份卡（名字/语气/欢迎语）不会把安全约束也换掉；
+    关掉一组工具时也能在这里补一句「你现在没有这些工具」。
+    """
+    from . import settings
+    from .config import CORE_PROMPT
+
+    core = ""
+    try:
+        core = (settings.core_prompt() or "").strip()
+    except Exception:                    # noqa: BLE001
+        core = ""
+    if not core:
+        core = CORE_PROMPT
+    persona_part = (current().get("prompt") or "").strip()
+    parts = [part for part in (core, persona_part) if part]
+    return "\n\n".join(parts) + _unavailable_tools_note()
 
 
 def public(pid=None):
@@ -169,6 +215,8 @@ def public(pid=None):
         "placeholder": meta.get("placeholder") or "",
         "status_online": meta.get("status_online") or "",
         "status_thinking": meta.get("status_thinking") or "",
+        "theme": meta.get("theme") or "#ffb7d5",
+        "icon": f"/api/persona/icon?pid={pid}",
     }
 
 
@@ -182,6 +230,17 @@ def avatar_path(pid=None):
             return path
     return os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "web", "static", "avatar.jpg")
+
+
+def icon_path(pid=None):
+    """网页图标：配了 icon 用 icon，没有就跟头像一样。"""
+    meta = current() if pid is None else _meta(pid)
+    name = os.path.basename(meta.get("icon") or "")
+    if name:
+        path = os.path.join(_dir(meta["id"]), name)
+        if os.path.isfile(path):
+            return path
+    return avatar_path(pid)
 
 
 def stickers_dir(pid=None):
@@ -222,11 +281,16 @@ def save(pid, data):
     merged = dict(DEFAULTS)
     merged.update(old)
     for key in ("name", "self_name", "user_name", "welcome", "placeholder",
-                "status_online", "status_thinking", "stickers", "avatar"):
+                "status_online", "status_thinking", "stickers", "avatar",
+                "theme", "icon"):
         if key in data:
             merged[key] = _clean_text(data[key])
     if "name" in data and not merged["name"]:
         return None, "名字不能为空喵"
+    theme = str(merged.get("theme") or "").strip()
+    if theme and not re.match(r"^#[0-9a-fA-F]{6}$", theme):
+        return None, "主题色要写成 #rrggbb 这种格式喵"
+    merged["theme"] = theme or "#ffb7d5"
 
     prompt = data.get("prompt")
     if prompt is not None:

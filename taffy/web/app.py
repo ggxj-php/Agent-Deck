@@ -24,8 +24,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import auth, captcha, context, db, settings, store, uploads
-from .. import persona as persona_mod
+from .. import auth, captcha, context, db, persona as persona_mod, settings, store, uploads
 from ..config import CONTEXT_COMPRESS_AT
 from ..core import TaffyAgent
 from ..kb import warmup
@@ -325,6 +324,13 @@ def persona_info():
 def persona_avatar(pid: str = ""):
     """当前（或指定）人设的头像。"""
     path = persona_mod.avatar_path(pid or None)
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=300"})
+
+
+@app.get("/api/persona/icon")
+def persona_icon(pid: str = ""):
+    """网页图标（favicon）：跟着身份卡换。"""
+    path = persona_mod.icon_path(pid or None)
     return FileResponse(path, headers={"Cache-Control": "public, max-age=300"})
 
 

@@ -11,8 +11,13 @@ import os
 import threading
 import time
 
+import io
+import json
+import os
+import zipfile
+
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from .. import auth, capabilities, config_report, db, llm, persona, settings, store, tools
@@ -722,6 +727,8 @@ class PersonaRequest(BaseModel):
     status_online: str = ""
     status_thinking: str = ""
     stickers: str = ""
+    theme: str = ""
+    icon: str = ""
     prompt: str | None = None
 
 
@@ -835,3 +842,162 @@ def config_overview(request: Request):
         return config_report.report()
     except Exception as exc:          # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"配置总览生成失败：{exc}")
+
+
+# ---------------- 共享约束提示词 ----------------
+
+class CorePromptRequest(BaseModel):
+    text: str = ""
+
+
+def _core_payload():
+    from ..config import CORE_PROMPT
+
+    custom = settings.core_prompt()
+    return {
+        "text": custom or CORE_PROMPT,
+        "custom": bool(custom.strip()),
+        "default": CORE_PROMPT,
+        "limit": settings.PROMPT_LIMIT,
+    }
+
+
+@router.get("/api/admin/core-prompt")
+def core_prompt_state(request: Request):
+    """所有身份卡共用的硬约束。换身份卡不会动这一段。"""
+    _require(request)
+    return _core_payload()
+
+
+@router.post("/api/admin/core-prompt")
+def core_prompt_save(req: CorePromptRequest, request: Request):
+    _require(request)
+    try:
+        settings.set_core_prompt(req.text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _core_payload()
+
+
+# ---------------- 身份卡导入 / 导出 ----------------
+
+_EXPORT_SKIP = (".pyc", ".tmp")
+
+
+@router.get("/api/admin/personas/{pid}/export")
+def persona_export(pid: str, request: Request):
+    """把一张身份卡打包成 zip：persona.json + prompt.md + stickers/*。"""
+    _require(request)
+    pid = persona.safe_id(pid)
+    if not pid or not persona.exists(pid):
+        raise HTTPException(status_code=404, detail="没有这个人设喵")
+    buf = io.BytesIO()
+    base = persona._dir(pid)
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _dirs, files in os.walk(base):
+            for name in files:
+                if name.endswith(_EXPORT_SKIP):
+                    continue
+                full = os.path.join(root, name)
+                rel = os.path.relpath(full, base)
+                try:
+                    zf.write(full, rel)
+                except OSError:
+                    continue
+    data = buf.getvalue()
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="persona-{pid}.zip"',
+            "Content-Length": str(len(data)),
+        },
+    )
+
+
+MAX_IMPORT_BYTES = 50 * 1024 * 1024
+
+
+@router.post("/api/admin/personas/import")
+async def persona_import(request: Request, pid: str = ""):
+    """导入一张身份卡（zip）。
+
+    请求体直接是 zip 文件（不是 multipart），省得再引一个依赖。
+    pid 不传就按包里的 persona.json 里的 id。
+    """
+    _require(request)
+    length = int(request.headers.get("content-length") or 0)
+    if length > MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=413, detail="压缩包太大喵（上限 50MB）")
+    raw = await request.body()
+    if not raw:
+        raise HTTPException(status_code=400, detail="空文件喵")
+    if len(raw) > MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=413, detail="压缩包太大喵（上限 50MB）")
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="这不是一个 zip 包喵")
+
+    # 先找 persona.json，确定要建成的 id
+    meta = None
+    for candidate in ("persona.json", "persona/persona.json"):
+        try:
+            with zf.open(candidate) as fh:
+                loaded = json.load(fh)
+            if isinstance(loaded, dict):
+                meta = loaded
+                prefix = candidate[: len(candidate) - len("persona.json")]
+                break
+        except (KeyError, ValueError):
+            continue
+    if meta is None:
+        raise HTTPException(status_code=400, detail="包里没有 persona.json 喵")
+
+    target = persona.safe_id(pid or meta.get("id") or "")
+    if not target:
+        raise HTTPException(status_code=400, detail="id 不合法喵（小写字母开头，2~24 位）")
+    if persona.exists(target):
+        raise HTTPException(status_code=409, detail=f"身份卡 id「{target}」已经有了喵")
+
+    base = persona._dir(target)
+    os.makedirs(base, exist_ok=True)
+    extracted = 0
+    for item in zf.infolist():
+        name = item.filename.replace("\\", "/")
+        if prefix and name.startswith(prefix):
+            name = name[len(prefix):]
+        if not name or name.endswith("/") or ".." in name or name.startswith("/"):
+            continue
+        parts = name.split("/")
+        # 只允许 persona.json / prompt.md / 图片（表情包 / 头像 / 图标）
+        lower = name.lower()
+        if not (lower.endswith((".json", ".md")) or lower.endswith(persona_sticker_exts())):
+            continue
+        if parts[0].startswith("."):
+            continue
+        dest = os.path.join(base, *parts)
+        if not os.path.abspath(dest).startswith(os.path.abspath(base) + os.sep):
+            continue
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with zf.open(item) as src, open(dest, "wb") as dst:
+            dst.write(src.read(8 * 1024 * 1024))
+        extracted += 1
+    if not extracted:
+        raise HTTPException(status_code=400, detail="包里没有可导入的文件喵")
+
+    persona._cache["key"] = None
+    saved, err = persona.save(target, {})
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {"ok": True, "id": target, "files": extracted}
+
+
+def persona_sticker_exts():
+    try:
+        from .stickers import EXTS
+
+        return tuple(EXTS)
+    except Exception:                    # noqa: BLE001
+        return (".png", ".jpg", ".jpeg", ".gif", ".webp")

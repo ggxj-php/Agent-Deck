@@ -16,11 +16,49 @@ let personaInfo = null;
 const onlineText = () => (personaInfo && personaInfo.status_online) || '在线喵';
 const thinkingText = () => (personaInfo && personaInfo.status_thinking) || '正在思考喵…';
 
+/* 主题色：把一个 #rrggbb 往白 / 黑方向混，得到浅色档和深色档 */
+function mixColor(hex, target, ratio) {
+  const value = String(hex || '').replace('#', '');
+  if (value.length !== 6) return hex;
+  const num = parseInt(value, 16);
+  const base = {
+    r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255,
+  };
+  const to = target === 'white' ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 };
+  const blend = (a, b) => Math.round(a + (b - a) * ratio);
+  const out = [blend(base.r, to.r), blend(base.g, to.g), blend(base.b, to.b)];
+  return '#' + out.map((n) => n.toString(16).padStart(2, '0')).join('');
+}
+
+function applyTheme(theme) {
+  const color = /^#[0-9a-fA-F]{6}$/.test(theme || '') ? theme : '#ffb7d5';
+  const root = document.documentElement.style;
+  root.setProperty('--pink', mixColor(color, 'white', 0.25));
+  root.setProperty('--pink-dark', color);
+  root.setProperty('--pink-deep', mixColor(color, 'black', 0.3));
+  root.setProperty('--pink-pale', mixColor(color, 'white', 0.45));
+  root.setProperty('--pink-mist', mixColor(color, 'white', 0.78));
+  root.setProperty('--bg', mixColor(color, 'white', 0.93));
+  root.setProperty('--line', mixColor(color, 'white', 0.7));
+  root.setProperty('--accent', color);
+}
+
 function applyPersona(info) {
   if (!info) return;
   personaInfo = info;
   const name = info.name || '塔菲';
   document.title = `${name} · Agent`;
+  applyTheme(info.theme);
+  // 网页图标跟着身份卡换
+  if (info.icon) {
+    let link = document.querySelector('link[rel="icon"]');
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    link.href = info.icon;
+  }
   if (info.avatar) AVATAR = info.avatar;
   document.querySelectorAll('img.avatar, img.side-avatar, img.user-avatar').forEach((img) => {
     img.src = AVATAR;
