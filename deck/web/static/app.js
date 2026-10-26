@@ -884,7 +884,42 @@ function addArtifact(turn, event) {
   wrap.appendChild(frame);
   turn.bubble.appendChild(wrap);
   updateToBottom();
+
+  // iframe 是 sandbox（读不到它的 document），只能把可用宽高 post 进去让它自己等比缩放
+  fitArtifactFrame(frame);
+  frame.addEventListener('load', () => {
+    fitArtifactFrame(frame);
+    setTimeout(() => fitArtifactFrame(frame), 300);
+  });
 }
+
+/* 可视高度上限：别让一张图把整个聊天窗铺满，最多占七成 */
+function artifactMaxHeight() {
+  const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+  return Math.max(240, Math.min(820, Math.round(vh * 0.7)));
+}
+
+function fitArtifactFrame(frame) {
+  if (!frame || !frame.contentWindow) return;
+  try {
+    frame.contentWindow.postMessage({
+      type: 'taffy-artifact-fit',
+      width: frame.clientWidth || 360,
+      maxHeight: artifactMaxHeight(),
+    }, '*');
+  } catch (err) {
+    /* 发不进去就算了，产物自己会按视口兜底 */
+  }
+}
+
+// ➜ 窗口尺寸变了（横竖屏切换）重新适配一遍
+let artifactResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(artifactResizeTimer);
+  artifactResizeTimer = setTimeout(() => {
+    document.querySelectorAll('iframe.artifact-frame').forEach(fitArtifactFrame);
+  }, 200);
+});
 
 // 产物里的脚本会把自身高度报上来，据此调整 iframe 高度（最高 820px）
 window.addEventListener('message', (event) => {
@@ -894,7 +929,11 @@ window.addEventListener('message', (event) => {
   for (const frame of frames) {
     if (frame.contentWindow === event.source) {
       const height = Number(data.height) || 0;
-      if (height > 0) frame.style.height = Math.max(120, Math.min(820, height)) + 'px';
+      if (height > 0) {
+        // 上限跟着可视高度走，最多七成屏
+        const maxH = artifactMaxHeight();
+        frame.style.height = Math.max(120, Math.min(maxH, height)) + 'px';
+      }
       break;
     }
   }

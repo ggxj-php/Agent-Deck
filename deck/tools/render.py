@@ -65,23 +65,71 @@ _SUSPICIOUS = (
     ("parent-access", re.compile(r"window\s*\.\s*(parent|top|opener)", re.I)),
 )
 
-# 让 iframe 自己把高度报给父页面，父页面据此调高度。
+# 让 iframe 自己把尺寸报给父页面，并且**按比例缩放到父页面给的空间里**。
+# 为什么缩放放在 iframe 里做：iframe 是 sandbox="allow-scripts"（不带 allow-same-origin），
+# 父页面读不到它的 document，只能靠 postMessage 把可用宽高传进来。
 _RESIZE_SCRIPT = """
 (function () {
-  function report() {
+  var MAX_H = 720;          // 父页面会通过 taaffy-fit 消息覆盖
+  var MAX_W = 0;            // 0 = 用自己视口的宽度
+
+  function naturalSize() {
+    var b = document.body, d = document.documentElement;
+    return {
+      w: Math.max(b ? b.scrollWidth : 0, d ? d.scrollWidth : 0,
+                  d ? d.clientWidth : 0, b ? b.offsetWidth : 0),
+      h: Math.max(b ? b.scrollHeight : 0, d ? d.scrollHeight : 0,
+                  d ? d.clientHeight : 0, b ? b.offsetHeight : 0)
+    };
+  }
+
+  function resetTransform() {
+    if (!document.body) return;
+    document.body.style.transform = '';
+    document.body.style.transformOrigin = '';
+    document.body.style.width = '';
+  }
+
+  function report(h) {
     try {
-      var h = Math.max(
-        document.body ? document.body.scrollHeight : 0,
-        document.documentElement ? document.documentElement.scrollHeight : 0
-      );
-      if (h > 0) parent.postMessage({ type: 'taffy-artifact-height', height: h }, '*');
+      parent.postMessage({ type: 'taffy-artifact-height', height: Math.round(h) }, '*');
     } catch (e) { /* 父页面不给就算了 */ }
   }
-  report();
-  window.addEventListener('load', report);
-  setTimeout(report, 120);
-  setTimeout(report, 500);
-  window.addEventListener('resize', report);
+
+  // 按可用宽高等比缩放：画得太大就整体缩小，长宽比不变，不会被裁掉
+  function fit() {
+    if (!document.body) return;
+    resetTransform();
+    var vw = MAX_W || window.innerWidth || document.documentElement.clientWidth || 360;
+    var size = naturalSize();
+    var scale = Math.min(1, vw / Math.max(1, size.w), MAX_H / Math.max(1, size.h));
+    if (scale < 0.995) {
+      // 先按缩放后的等效宽度排版，再整体缩放，避免文字被横向挤成一条
+      document.body.style.transformOrigin = 'top left';
+      document.body.style.width = Math.ceil(vw / scale) + 'px';
+      document.body.style.transform = 'scale(' + scale + ')';
+      var again = naturalSize();
+      if (again.h > 0) {
+        report(again.h * scale);
+        return;
+      }
+    }
+    report(size.h * scale);
+  }
+
+  window.addEventListener('message', function (ev) {
+    var data = ev.data;
+    if (!data || data.type !== 'taffy-artifact-fit') return;
+    if (Number(data.maxHeight) > 0) MAX_H = Number(data.maxHeight);
+    if (Number(data.width) > 0) MAX_W = Number(data.width);
+    fit();
+  });
+
+  fit();
+  window.addEventListener('load', fit);
+  setTimeout(fit, 120);
+  setTimeout(fit, 500);
+  window.addEventListener('resize', fit);
 })();
 """
 
