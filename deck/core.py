@@ -6,6 +6,7 @@
 import json
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import context, settings, uploads
 from .config import EXIT_WORDS, MAX_ROUNDS, RESUME_INSTRUCTION, RESUME_WORDS, STICKER_LIMIT
@@ -14,8 +15,12 @@ from .tools import active_specs, execute
 from .tools.render import append_marks, strip_marks
 from .tools.sticker import MOODS, pick_sticker
 
+# 工具轮次治理：一次提问里「模型 → 工具 → 模型」的往返次数。
+# 每多一轮就多一次完整模型请求（实测 8~12 秒），所以要主动压缩。
+TOOL_ROUND_SOFT = 3     # 到 3 轮就在工具结果里提醒：够了就答，别继续硬试
+TOOL_ROUND_HARD = 5     # 到 5 轮直接收尾，把目前的结论给用户（再多也是白烧时间）
+
 # 内联图片只认 data:image/...;base64,... 这种。上限按 base64 字符串长度算，
-# 4MB 的原图编码后约 5.5MB，留点余量；再大就不收，免得一张巨图把内存顶爆。
 _IMAGE_PREFIX = "data:image/"
 _IMAGE_MAX_CHARS = 8 * 1024 * 1024
 
@@ -68,6 +73,15 @@ class _LeakGuard:
                 self.hit = True
                 text = text.replace(pat, "…（这段涉及内部设定，不展开）")
         return text
+
+
+def _safe_execute(name, call):
+    """执行一个工具调用，异常也转成工具回执（别让一条调用炸掉整轮）。"""
+    function = (call or {}).get("function") or {}
+    try:
+        return execute(name, function.get("arguments"))
+    except Exception as exc:            # noqa: BLE001
+        return {}, f"工具执行出错：{type(exc).__name__}: {exc}"
 
 
 _STICKER_MARK = re.compile(r"\[\s*sticker\s*:\s*([a-zA-Z_]+)\s*\]", re.I)
@@ -391,6 +405,7 @@ class DeckAgent:
         try:
             stickers_sent = 0
             recent_sigs = []          # 最近的工具调用签名，用来发现重复重试
+            tool_rounds = 0           # 这次提问里已经跑了几轮工具
 
             for _ in range(MAX_ROUNDS):
                 message = None
@@ -483,21 +498,60 @@ class DeckAgent:
                     (c.get("function") or {}).get("name") == "send_sticker" for c in calls
                 )
 
+                # ---- 执行工具：同一条消息里的多个调用**并发**跑 ----
+                # 实测 33% 的轮次模型会一次给 2 个调用（比如同时搜两个关键词），
+                # 串行 for 循环就是两倍等待；改成并发后总耗时≈最慢那个。
+                plans = []
+                seen_sigs = set()
                 for call in calls:
-                    function = call["function"]
-                    name = function["name"]
-                    yield {"type": "tool_start", "name": name, "arguments": function["arguments"]}
-
-                    # 护栏：同样的工具 + 同样的参数连续重复，八成是卡住了在瞎试
+                    function = call.get("function") or {}
+                    name = function.get("name")
                     signature = (name, str(function.get("arguments") or ""))
                     recent_sigs.append(signature)
                     repeated = (len(recent_sigs) >= 3
                                 and len(set(recent_sigs[-3:])) == 1)
+                    reused = signature in seen_sigs      # 同一轮里一模一样的调用
+                    seen_sigs.add(signature)
+                    plans.append({
+                        "call": call, "name": name, "signature": signature,
+                        "arguments": function.get("arguments"),
+                        "repeated": repeated, "reused": reused,
+                        "args": None, "result": None,
+                    })
 
-                    args, result = execute(name, function["arguments"])
-                    if repeated:
-                        result = (str(result) + "\n\n⚠️ 同样的调用已经连续重复 3 次了，别再重复："
-                                  "换个办法，或者直接停下来告诉用户卡在哪一步。")
+                # 先把所有 tool_start 发出去，前端立刻把所有卡片画出来
+                for plan in plans:
+                    yield {"type": "tool_start", "name": plan["name"],
+                           "arguments": plan["arguments"]}
+
+                todo = [p for p in plans if not p["reused"]]
+                if len(todo) == 1:
+                    one = todo[0]
+                    one["args"], one["result"] = _safe_execute(one["name"], one["call"])
+                elif todo:
+                    with ThreadPoolExecutor(max_workers=min(4, len(todo))) as pool:
+                        futures = {pool.submit(_safe_execute, p["name"], p["call"]): p
+                                   for p in todo}
+                        for future in as_completed(futures):
+                            item = futures[future]
+                            item["args"], item["result"] = future.result()
+
+                for plan in plans:
+                    if plan["reused"]:
+                        first = next(p for p in plans
+                                     if p["signature"] == plan["signature"] and not p["reused"])
+                        plan["args"], plan["result"] = first["args"], first["result"]
+                        plan["result"] = (str(plan["result"])
+                                          + "\n\n（同一轮里已经查过一模一样的内容，这是复用上次结果）")
+                    if plan["repeated"]:
+                        plan["result"] = (str(plan["result"]) + "\n\n⚠️ 同样的调用已经连续重复 3 次了，"
+                                          "别再重复：换个办法，或者直接停下来告诉用户卡在哪一步。")
+
+                # 按原顺序回填：产物卡片 / 表情包事件 / tool 消息
+                for plan in plans:
+                    name = plan["name"]
+                    args, result = plan["args"], plan["result"]
+                    call = plan["call"]
 
                     # 画图的产物要在前端插一张卡片，所以除了回执再单独发个事件
                     if name == "render_html":
@@ -509,9 +563,7 @@ class DeckAgent:
                             aid = payload["artifact_id"]
                             title = payload.get("title") or ""
                             yield {"type": "artifact", "id": aid, "title": title}
-                            # 把产物标记写进「刚调工具的那条 assistant」正文末尾：
-                            # 刷新后卡片才会回到原来的位置（在那段话之后、后文之前），
-                            # 而不是被统一追加到整条回复的最末尾。
+                            # 产物标记写进「刚调工具的那条 assistant」正文末尾
                             for item in reversed(self.messages):
                                 if item.get("role") == "assistant":
                                     item["content"] = append_marks(
@@ -519,8 +571,6 @@ class DeckAgent:
                                     break
 
                     if name == "send_sticker":
-                        # 一次调用可以带多张（moods 数组），逐个发出去。
-                        # 表情包不是让模型念出来的，所以走单独的 sticker 事件。
                         moods = _sticker_moods(args)
                         sent = 0
                         for mood in moods:
@@ -532,19 +582,40 @@ class DeckAgent:
                                    "name": pick_sticker(mood)}
 
                         if sent == 0:
-                            # 硬上限：这一轮已经发够了，回执改成提醒，图不再发出去
                             result = "这一轮的表情包已经发够了，不用再发了"
                             yield {"type": "tool_end", "name": name, "args": args, "result": result}
                         elif sent < len(moods):
                             result = f"（这轮最多发 {STICKER_LIMIT} 张，多出来的没发）"
+                            yield {"type": "tool_end", "name": name, "args": args, "result": result}
+                        else:
+                            yield {"type": "tool_end", "name": name, "args": args, "result": result}
                     else:
-                        yield {"type": "tool_end", "name": name, "args": args, "result": result}
+                        yield {"type": "tool_end", "name": name, "args": args or {},
+                               "result": result}
 
                     self.messages.append({
                         "role": "tool",
-                        "tool_call_id": call["id"],
+                        "tool_call_id": call.get("id"),
                         "content": result,
                     })
+
+                # ---- 压缩工具轮次 ----
+                tool_rounds += 1
+                if not sticker_only and tool_rounds >= TOOL_ROUND_SOFT:
+                    nudge = (f"\n\n⚠️ 这次提问已经连续调用工具 {tool_rounds} 轮了。"
+                             "信息够了就**直接给出最终回答**，不要再搜/再开网页；"
+                             "确实不够就先说明还差什么，别继续硬试。")
+                    for item in reversed(self.messages):
+                        if item.get("role") == "tool":
+                            item["content"] = str(item.get("content") or "") + nudge
+                            break
+                if not sticker_only and tool_rounds >= TOOL_ROUND_HARD:
+                    yield {"type": "notice",
+                           "text": f"工具已经连续跑了 {tool_rounds} 轮，先把目前的结论给你，"
+                                   "还要继续查的话再问我"}
+                    finished = True
+                    yield {"type": "done", "context": self.context_usage()}
+                    return
 
                 # 收尾：正文写完了、工具只调了表情包 → 这一轮到此为止，
                 # 不再给模型「接着说」的机会，这是治刷屏的关键一步。
