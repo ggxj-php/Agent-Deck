@@ -936,7 +936,7 @@ function stickerImg(value) {
   }
   const img = el('img', 'sticker');
   img.src = `/api/persona/sticker/${encodeURIComponent(name)}`;
-  img.alt = mood;
+  img.alt = token || 'sticker';
   img.loading = 'lazy';
   img.addEventListener('error', () => img.remove());
   return img;
@@ -971,9 +971,6 @@ function addSticker(turn, mood, name) {
   // name 是发图时就定好的文件名（后端会写进历史标记），有就用它，刷新不会变
   const token = String(name || '').trim() || safe;
   if (!token) return;
-  if (turn.stickers && turn.stickers.includes(token) === false) {
-    // 同一张图可以重复出现，这里不拦；只是保留 push 顺序
-  }
   if (!turn.stickers) turn.stickers = [];
   const index = turn.stickers.length;
   turn.stickers.push(token);
