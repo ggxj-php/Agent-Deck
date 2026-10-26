@@ -14,10 +14,26 @@ def test_站点别名():
 
 
 def test_按_Host_归类站点():
-    assert traffic.site_of({"host": "www.taffy.icu", "url": "/", "ref": ""}) == traffic.SITE_WWW
-    assert traffic.site_of({"host": "api.taffy.icu", "url": "/", "ref": ""}) == traffic.SITE_API
+    # 域名不写死在代码里，测试也用 traffic 里那对常量
+    assert traffic.site_of({"host": traffic.SITE_WWW, "url": "/", "ref": ""}) == traffic.SITE_WWW
+    assert traffic.site_of({"host": traffic.SITE_API, "url": "/", "ref": ""}) == traffic.SITE_API
     # 裸 IP / 随机 Host 头都落到默认 server（one-api）
-    assert traffic.site_of({"host": "189.24.64.47", "url": "/", "ref": ""}) == traffic.SITE_API
+    assert traffic.site_of({"host": "198.51.100.7", "url": "/", "ref": ""}) == traffic.SITE_API
+    assert traffic.site_of({"host": "random.example", "url": "/", "ref": ""}) == traffic.SITE_API
+
+
+def test_归类认得出自家域名和子域():
+    assert traffic._classify(traffic.SITE_WWW, "/") == traffic.SITE_WWW
+    assert traffic._classify(traffic.SITE_API, "/") == traffic.SITE_API
+    # 同一基础域名的子域算 WWW 站
+    assert traffic._classify("blog." + traffic.SITE_BASE, "/") == traffic.SITE_WWW
+    # 认不出来的原样返回，不硬套成本站
+    assert traffic._classify("evil.example", "/") == "evil.example"
+
+
+def test_referer_里是自家域名也能认():
+    ref = "https://" + traffic.SITE_WWW + "/chat"
+    assert traffic._classify("", "/", ref) == traffic.SITE_WWW
 
 
 def test_机房识别():

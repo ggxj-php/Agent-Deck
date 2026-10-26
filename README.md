@@ -192,11 +192,16 @@ EMBED_BATCH=64
 EMBED_WORKERS=8
 # 单次请求等几秒（默认 60。接口经常卡住就调小，让它早点失败、走重试）
 EMBED_TIMEOUT=60
+# 站点口径：后台「访问流量」按这两个域名把日志分站统计，填自己的域名
+TAFFY_SITE_WWW=www.your-domain.com
+TAFFY_SITE_API=api.your-domain.com
 ```
 
 没有 key（或没建这个文件）时，程序启动会直接报错提醒，不会静默失败。
 
 `CXX` 是可选的，只在 `run_code` 跑 `.cpp` / `.c` 时用到：填 g++ 的绝对路径就行，`.c` 会自动用同目录的 `gcc`。不填就按 PATH 里的 `g++` 找。**不用把它加进系统 PATH**——那样会影响全局，还要重启终端才生效，配在项目里更省事。
+
+`TAFFY_SITE_WWW` / `TAFFY_SITE_API` 是后台「访问流量」分站统计用的两个域名（WWW 站 / API 站）。**代码里不写死任何域名**，默认值是占位用的 `www.example.com` / `api.example.com`，部署时在 `.env` 里换成自己的即可；不配也能跑，只是流量面板里站点名会显示成占位域名。
 
 `ADMIN_PASSWORD_PREFIX` 是网页后台 `/admin` 登录口令的前缀（详见「后台管理」）：前缀拼上当天日期就是明文口令，服务端比对 md5。不配就登不进后台。
 
@@ -586,7 +591,7 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 |---|---|
 | **境外 IP 拦截** | nginx `geo` + APNIC 的中国 IP 段（8,797 个 IPv4 + 2,046 个 IPv6），**只对 443 生效**；80 端口不挡——Let's Encrypt 的 HTTP-01 验证来自境外，挡了就续不了证。每月 1 号自动重拉（`/root/cn-ip-update.py` + cron）|
 | **IP 黑名单** | 后台点一下写进 UFW（`ufw insert 1 deny from <ip> to any`），所有端口都拦；带护栏：本机 / 内网 / 保留地址 / 当前操作者自己的 IP 一律拒绝 |
-| **限速 + fail2ban** | `api.taffy.icu` 的登录 / 注册接口单独限速，触发后 fail2ban 走 nftables 封禁 |
+| **限速 + fail2ban** | API 站的登录 / 注册接口单独限速，触发后 fail2ban 走 nftables 封禁 |
 
 ### 边界（务必知道）
 

@@ -20,7 +20,7 @@ import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
-from ..config import PROJECT_ROOT
+from ..config import PROJECT_ROOT, SITE_API, SITE_WWW
 from . import blacklist
 
 LOG_DIR = "/var/log/nginx"
@@ -62,11 +62,12 @@ BOT_PATH = re.compile(
 )
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
 
-# 站点口径。日志里两个站混在一起：www 是塔菲，api 是 one-api；
-# 裸 IP 和随机 Host 头都落到默认 server（one-api）。
-SITE_WWW = "www.taffy.icu"
-SITE_API = "api.taffy.icu"
-SITE_LABELS = {SITE_WWW: "www", SITE_API: "api"}
+# 站点口径。日志里两个站混在一起：WWW 站是塔菲，API 站是 one-api；
+# 裸 IP 和随机 Host 头都落到默认 server（API 站）。
+# 域名**不写死**：从 config 读（.env 里的 TAFFY_SITE_WWW / TAFFY_SITE_API），
+# 默认是占位域名，换部署只改环境变量，不用动代码。
+SITE_LABELS = {SITE_WWW: SITE_WWW, SITE_API: SITE_API}
+SITE_BASE = SITE_WWW.split(".", 1)[1] if "." in SITE_WWW else SITE_WWW
 SITE_ALIASES = {
     "www": SITE_WWW, "api": SITE_API, "all": "all", "": SITE_WWW,
     # 也认全名——别处传进来的可能已经是规范化之后的值
@@ -424,19 +425,44 @@ def _is_bot(ua, path):
     return bool(BOT_UA.search(ua or "") or BOT_PATH.search(path or ""))
 
 
+def _host_of(value):
+    """从 host / url / referer 里抠主机名（去掉协议、路径、端口）。"""
+    text = (value or "").strip().lower()
+    if not text:
+        return ""
+    if "//" in text:
+        text = text.split("//", 1)[1]
+    return text.split("/", 1)[0].split(":", 1)[0]
+
+
+def _matches_site(host, site):
+    """host 属不属于 site 这个站（含它自己的子域）。"""
+    if not host:
+        return False
+    if host == site:
+        return True
+    return host == SITE_BASE or host.endswith("." + SITE_BASE)
+
+
 def _classify(host, path, ref=""):
-    if host:
-        if host.startswith("api."):
-            return "api.taffy.icu"
-        if "taffy.icu" in host:
-            return "www.taffy.icu"
-        return host
-    if ref and "taffy.icu" in ref:
-        return "api.taffy.icu" if "//api.taffy.icu" in ref else "www.taffy.icu"
+    """这条记录属于哪个站。认不出来就原样返回 host，不硬套。"""
+    name = _host_of(host)
+    if name:
+        if name == SITE_API or name.startswith("api."):
+            return SITE_API
+        if _matches_site(name, SITE_WWW):
+            return SITE_WWW
+        return name
+    name = _host_of(ref)
+    if name:
+        if name == SITE_API or name.startswith("api."):
+            return SITE_API
+        if _matches_site(name, SITE_WWW):
+            return SITE_WWW
     if API_PATHS.match(path):
-        return "api.taffy.icu"
+        return SITE_API
     if TAFFY_PATHS.match(path):
-        return "www.taffy.icu"
+        return SITE_WWW
     return "未标注"
 
 

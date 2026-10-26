@@ -602,7 +602,7 @@ function renderTraffic(info) {
   if (!info.overseas) parts.push(`海外 ${ex.overseas || 0}`);
   if (!info.scanners) parts.unshift('（扫描器没过滤）');
   const scope = info.site_label && info.site_label !== '全部站点'
-    ? `仅 ${info.site_label}.taffy.icu` : '全部站点';
+    ? `仅 ${info.site_label}` : '全部站点';
   trafficHintEl.textContent = `统计范围：${scope} · ${info.log_files || 0} 个日志文件 · 已排除：${parts.join(' · ')} · ` +
     `算于 ${info.generated_at || ''}（60 秒内不会重算）`;
 

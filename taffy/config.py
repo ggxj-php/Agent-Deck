@@ -29,6 +29,13 @@ VISION_MODEL = MODEL
 VISION_API_KEY = os.environ.get("VISION_API_KEY", "").strip() or API_KEY
 VISION_BASE_URL = os.environ.get("VISION_BASE_URL", "").strip() or BASE_URL
 
+# 站点口径：后台「访问流量」按这两个域名把日志分站统计。
+# 别写死自己的域名——默认给占位值，谁部署在 .env 里改成自己的：
+#   TAFFY_SITE_WWW=www.your-domain.com
+#   TAFFY_SITE_API=api.your-domain.com
+SITE_WWW = os.environ.get("TAFFY_SITE_WWW", "").strip().lower() or "www.example.com"
+SITE_API = os.environ.get("TAFFY_SITE_API", "").strip().lower() or "api.example.com"
+
 # 单次回复的最大输出 token 数。带思考的模型（deepseek 这类）思维链也吃这个额度：
 # 复杂问题上思考一开，2048 / 4096 很容易被思考吃光，正文一个字都轮不到，表现就是
 # 「思考到一半戛然而止、这一轮没有任何回答」。所以放到 16384，给正文留足空间。
