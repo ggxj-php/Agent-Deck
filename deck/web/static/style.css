@@ -1557,6 +1557,24 @@ body.admin .card input[type="file"] { padding: 8px 10px; font-size: 13px; }
   background: #fff;
 }
 
+/* ---------- MathJax 公式 ---------- */
+.math-tex { font-size: 1.02em; }
+
+.math-display {
+  display: block;
+  margin: 10px 0;
+  text-align: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* MathJax 自己会生成 mjx-container；宽公式允许横向滚动，别撑破气泡 */
+mjx-container { max-width: 100%; }
+mjx-container[display="true"] { display: block !important; margin: 6px 0 !important; }
+mjx-container svg { max-width: 100%; }
+.math-display mjx-container { margin: 0 auto !important; }
+
 /* ---------- 数学式子 ---------- */
 .math-block {
   display: block;

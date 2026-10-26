@@ -128,6 +128,24 @@
 <script src="/static/vendor/marked.min.js"></script>
 <script src="/static/vendor/highlight.min.js"></script>
 <script src="/static/vendor/purify.min.js"></script>
+<script>
+/* MathJax：真正的 LaTeX 排版（输出 SVG，不需要额外字体文件）
+   typeset 由 app.js 在每次渲染后手动调用 */
+window.MathJax = {
+  tex: {
+    inlineMath: [['$', '$']],
+    displayMath: [['$$', '$$']],
+    processEscapes: true,
+  },
+  svg: { fontCache: 'global' },
+  options: {
+    skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+    ignoreHtmlClass: 'no-mathjax',
+  },
+  startup: { typeset: false },
+};
+</script>
+<script src="/static/vendor/mathjax/tex-svg.js"></script>
 <script src="/static/ui-text.js"></script>
 <script src="/static/app.js"></script>
 </body>

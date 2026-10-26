@@ -491,7 +491,7 @@ function looksLikeLatex(body) {
   return LATEX_HINT.test(body);
 }
 
-function mathify(text) {
+function mathifyLegacy(text) {
   // 按围栏代码块 / 行内代码切分
   return text
     .split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g)
@@ -529,8 +529,108 @@ function mathify(text) {
    style 属性，能被拿来塞钓鱼覆盖层，这里一律禁掉。 */
 const SANITIZE_CONFIG = { FORBID_TAGS: ['style'], FORBID_ATTR: ['style'] };
 
+/* ---------------- MathJax 公式排版 ----------------
+ * 自己把 LaTeX 翻译成 Unicode 永远只能做到「能认出是什么」，做不到豆包那种排版
+ * （真正的上下分式、积分上下限、矩阵括号、cases 大括号）。
+ * 所以公式交给 MathJax（本地打包的 tex-svg.js，输出 SVG，不依赖网络和字体文件）：
+ *   1. mathify 先把 $...$ / $$...$$ 换成占位符，避免 markdown 把 _ * \ 吃掉；
+ *   2. marked 渲染完、DOMPurify 洗完，restoreMath 把占位符换回公式元素；
+ *   3. typesetMath 调 MathJax 排版（增量渲染只排尾巴，开销可控）。
+ */
+let mathBag = [];
+let lastMathBag = [];
+const MATH_TOKEN_RE = /@@math:(\d+)@@/;
+
+function looksMathTex(tex) {
+  return /[\\^_{}=<>]/.test(tex)
+    || (/^[\s0-9a-zA-Z()+\-*/.,|]+$/.test(tex) && /[0-9]/.test(tex));
+}
+
+function mathify(text) {
+  if (!window.MathJax || !window.MathJax.typesetPromise) {
+    return mathifyLegacy(text);          // MathJax 没加载成功就退回老办法
+  }
+  const bag = [];
+  const out = text
+    .split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g)
+    .map((part) => {
+      const isFence = part.startsWith('```') || part.startsWith('~~~');
+      const isInline = !isFence && part.startsWith('`') && part.endsWith('`') && part.length > 1;
+      if (isFence || isInline) return part;   // 代码块原样保留
+      return part
+        .replace(/\$\$([\s\S]+?)\$\$/g, (m, tex) => {
+          bag.push({ tex, display: true });
+          return `@@math:${bag.length - 1}@@`;
+        })
+        .replace(/\$([^$\n]+?)\$/g, (m, tex) => {
+          if (!looksMathTex(tex)) return m;
+          bag.push({ tex, display: false });
+          return `@@math:${bag.length - 1}@@`;
+        });
+    })
+    .join('');
+  mathBag = bag;
+  return out;
+}
+
+/* 把占位符换回 <span>，内容就是原始 LaTeX（带 $ 定界符），交给 MathJax */
+function restoreMath(root, bag) {
+  if (!root || !bag || !bag.length || !window.MathJax) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  const nodes = [];
+  while (walker.nextNode()) {
+    if (walker.currentNode.nodeValue.includes('@@math:')) nodes.push(walker.currentNode);
+  }
+  nodes.forEach((node) => {
+    const parts = node.nodeValue.split(/(@@math:\d+@@)/);
+    const frag = document.createDocumentFragment();
+    parts.forEach((part) => {
+      const m = MATH_TOKEN_RE.exec(part);
+      if (m) {
+        const item = bag[Number(m[1])];
+        if (item) {
+          const span = document.createElement('span');
+          span.className = item.display ? 'math-tex math-display' : 'math-tex';
+          span.textContent = item.display ? `$$${item.tex}$$` : `$${item.tex}$`;
+          frag.appendChild(span);
+        }
+        return;
+      }
+      if (part) frag.appendChild(document.createTextNode(part));
+    });
+    if (node.parentNode) node.parentNode.replaceChild(frag, node);
+  });
+}
+
+const mathTypesetTimers = new WeakMap();
+
+/* 流式时 tail 每 ~100ms 重渲一次，直接排太费；防抖一下，等这一波内容稳定再排 */
+function scheduleTypeset(root, delay = 140) {
+  if (!root) return;
+  const prev = mathTypesetTimers.get(root);
+  if (prev) clearTimeout(prev);
+  mathTypesetTimers.set(root, setTimeout(() => {
+    mathTypesetTimers.delete(root);
+    typesetMath(root);
+  }, delay));
+}
+
+function typesetMath(root) {
+  if (!root || !window.MathJax || !window.MathJax.typesetPromise) return;
+  try {
+    MathJax.typesetClear([root]);
+    MathJax.typesetPromise([root]).catch(() => {});
+  } catch (err) {
+    /* 排版失败就当普通文本留着，别影响聊天 */
+  }
+}
+
 function renderMarkdown(text) {
-  return DOMPurify.sanitize(marked.parse(mathify(text)), SANITIZE_CONFIG);
+  mathBag = [];
+  const html = DOMPurify.sanitize(marked.parse(mathify(text)), SANITIZE_CONFIG);
+  lastMathBag = mathBag;
+  mathBag = [];
+  return html;
 }
 
 /* 复制文本。手机连局域网 IP 打开时是 http 页面，不是安全上下文，
@@ -664,17 +764,21 @@ function renderBlockIncremental(block) {
     // 稳定段落：渲染一次后整块搬进 head，后面不再碰它
     const holder = document.createElement('div');
     holder.innerHTML = renderMarkdown(raw.slice(block.rendered, cut));
+    restoreMath(holder, lastMathBag);
     enhance(holder);
     hydrateStickers(holder, moods);
     while (holder.firstChild) block.head.appendChild(holder.firstChild);
+    typesetMath(block.head);
     block.rendered = cut;
   }
 
   // 尾巴：只渲染还没稳定的那一小段
   const tailText = raw.slice(block.rendered);
   block.tail.innerHTML = renderMarkdown(tailText);
+  restoreMath(block.tail, lastMathBag);
   enhance(block.tail);
   hydrateStickers(block.tail, moods);
+  scheduleTypeset(block.tail);
 }
 
 /* ---------------- 滚动 ---------------- */
