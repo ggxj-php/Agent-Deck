@@ -15,11 +15,11 @@ import threading
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from ..config import KNOWLEDGE_DIR, SESSIONS_DIR
+from ..config import KNOWLEDGE_DIR
 from ..kb import loader as kb_loader
 from ..sandbox import WORKSPACE, safe_path
 from ..tools.files import delete_file
-from . import sessions_store, stickers, update
+from . import stickers, update
 from .admin import _require
 
 router = APIRouter()
@@ -194,42 +194,6 @@ def workspace_delete(req: WorkspaceDelete, request: Request):
     if result.startswith("错误"):
         raise HTTPException(status_code=400, detail=result)
     return {"ok": True, "message": result}
-
-
-# ---------- 会话存档 ----------
-
-@router.get("/api/admin/sessions")
-def sessions_list(request: Request):
-    _require(request)
-    return {"dir": SESSIONS_DIR, "items": sessions_store.list_all()}
-
-
-@router.get("/api/admin/sessions/{uuid}")
-def sessions_read(uuid: str, request: Request):
-    _require(request)
-    try:
-        text, truncated = sessions_store.read(uuid)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="没有这份存档喵")
-    return {"uuid": uuid, "text": text, "truncated": truncated}
-
-
-class SessionName(BaseModel):
-    uuid: str = ""
-
-
-@router.post("/api/admin/sessions/delete")
-def sessions_delete(req: SessionName, request: Request):
-    _require(request)
-    try:
-        removed = sessions_store.remove(req.uuid)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="没有这份存档喵")
-    return {"ok": True, "removed": removed}
 
 
 # ---------- 知识库文档 ----------

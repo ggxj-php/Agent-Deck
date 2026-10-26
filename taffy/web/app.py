@@ -29,7 +29,7 @@ from ..config import CONTEXT_COMPRESS_AT
 from ..core import TaffyAgent
 from ..kb import warmup
 from ..tools import render as render_tool
-from . import sessions_store, stickers
+from . import stickers
 from .admin import router as admin_router
 from .content import router as content_router
 
@@ -404,7 +404,7 @@ def session_messages(session_id: str, request: Request):
     usage = context.usage(full, settings.context_limit())
     return {
         "session": {"id": sess["id"], "title": sess["title"]},
-        "history": sessions_store.display(messages),   # 只留用户和塔菲的正文
+        "history": store.display(messages),   # 只留用户和塔菲的正文
         "context": usage,
     }
 
@@ -421,67 +421,6 @@ def context_state(request: Request, session_id: str = ""):
     messages = store.load_messages(session_id)
     full = [{"role": "system", "content": settings.system_prompt()}] + messages
     return {"known": True, **context.usage(full, limit)}
-
-
-# ---------------- 存档（txt/json，跟「会话」是两回事） ----------------
-
-
-class SaveRequest(BaseModel):
-    session_id: str
-    uuid: str = ""
-
-
-@app.post("/api/session/save")
-def save_session(req: SaveRequest, request: Request):
-    """把这条会话另存成 txt 存档（存文件，不算在会话列表里）。"""
-    user = _user_of(request)
-    sess = store.get(user["id"], req.session_id)
-    if not sess:
-        raise HTTPException(status_code=404, detail="这个会话还没开始聊喵，先说句话再存")
-    messages = store.load_messages(req.session_id)
-    if not messages:
-        raise HTTPException(status_code=404, detail="这个会话还没聊过喵，先说句话再存")
-    full = [{"role": "system", "content": settings.system_prompt()}] + messages
-    usage = context.usage(full, settings.context_limit())
-    try:
-        return sessions_store.save(req.uuid, full, usage)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except FileExistsError:
-        raise HTTPException(
-            status_code=409,
-            detail=f"已经有一份叫「{req.uuid}」的存档了喵，换个 uuid 再存（不会覆盖原来那份）",
-        )
-
-
-class ImportRequest(BaseModel):
-    session_id: str
-    uuid: str = ""
-
-
-@app.post("/api/session/import")
-def import_session(req: ImportRequest, request: Request):
-    """把一份存档的历史接到**当前会话**上（覆盖它原来的历史）。"""
-    user = _user_of(request)
-    if not store.get(user["id"], req.session_id):
-        raise HTTPException(status_code=404, detail="会话不存在喵")
-    try:
-        messages, saved = sessions_store.load(req.uuid)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"没有叫「{req.uuid}」的存档喵")
-    store.save_messages(req.session_id, messages)
-    full = [{"role": "system", "content": settings.system_prompt()}] + messages
-    usage = context.usage(full, settings.context_limit())
-    return {
-        "ok": True,
-        "uuid": req.uuid,
-        "messages": len(messages),
-        "saved_context": saved,
-        "history": sessions_store.display(messages),
-        "context": usage,
-    }
 
 
 # ---------------- 聊天 ----------------

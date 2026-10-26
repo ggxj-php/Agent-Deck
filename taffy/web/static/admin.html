@@ -94,9 +94,6 @@
           <button type="button" class="nav-item" data-view="workspace" title="工作区文件">
             <span class="nav-text">工作区文件</span>
           </button>
-          <button type="button" class="nav-item" data-view="sessions" title="会话存档">
-            <span class="nav-text">会话存档</span>
-          </button>
         </div>
       </section>
 
@@ -564,22 +561,6 @@
           <h2>目录：<span id="ws-dir">/</span></h2>
           <div class="rows" id="ws-list"></div>
           <p class="hint" id="ws-hint"></p>
-        </div>
-      </section>
-
-      <!-- ---------- 会话存档 ---------- -->
-      <section class="view" data-view="sessions" hidden>
-        <div class="card">
-          <h2>会话存档（<span id="session-count">?</span> 份）</h2>
-          <p class="hint">
-            网页版聊天的「保存上下文」存下来的存档，放在服务器的
-            <code>sessions/</code> 目录里（不占内存）。点开可以看内容，也可以删。<br>
-            一份存档其实是同名的两个文件：<code>.txt</code> 是给人看的（就是这里点开的内容），
-            <code>.json</code> 里存着原始历史，聊天页「导入上下文」靠它把那段对话原样接回来
-            （连当时用了多少上下文一起带回来）。删的时候两份一起删。
-          </p>
-          <div class="rows" id="session-list"></div>
-          <pre class="session-body" id="session-body" hidden></pre>
         </div>
       </section>
 

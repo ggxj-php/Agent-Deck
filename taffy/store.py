@@ -133,3 +133,28 @@ def count_for_user(user_id):
         row = conn.execute("SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?",
                            (user_id,)).fetchone()
     return row["n"] if row else 0
+
+def _content_of(message):
+    """把一条消息的 content 拍成纯文本。带图那轮 content 是个列表，这里只留一句说明。"""
+    content = message.get("content")
+    if isinstance(content, list):
+        texts = [part.get("text", "") for part in content
+                 if isinstance(part, dict) and part.get("type") == "text"]
+        has_image = any(isinstance(part, dict) and part.get("type") == "image_url"
+                        for part in content)
+        text = "\n".join(t for t in texts if t)
+        return (text + "\n[图片]" if has_image else text).strip()
+    return (content or "").strip()
+
+
+def display(messages):
+    """给网页聊天区看的精简版：只留用户说的和塔菲的正文，工具那些不摆出来。"""
+    items = []
+    for message in messages:
+        role = message.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        text = _content_of(message)
+        if text:
+            items.append({"role": role, "text": text})
+    return items

@@ -9,7 +9,7 @@ window.addEventListener('error', () => {
 
 /* 后台管理前端：登录 -> 左侧导航切面板。
    面板分六组：概览（仪表盘）、模型与接口、人设（系统提示词）、素材（表情包库）、
-   文件（知识库 / 工作区 / 会话存档）、系统（检查更新）。
+   用户、系统（检查更新）。
    口令是按天算的，所以这里不存任何东西，cookie 交给浏览器自己管。 */
 
 const MOODS = ['happy', 'think', 'confused', 'proud', 'cry', 'angry', 'sleepy', 'love'];
@@ -100,9 +100,6 @@ const wsDirEl = document.getElementById('ws-dir');
 const wsListEl = document.getElementById('ws-list');
 const wsHintEl = document.getElementById('ws-hint');
 
-const sessionCountEl = document.getElementById('session-count');
-const sessionListEl = document.getElementById('session-list');
-const sessionBodyEl = document.getElementById('session-body');
 
 const updateRemoteEl = document.getElementById('update-remote');
 const updateCheckEl = document.getElementById('update-check');
@@ -304,7 +301,6 @@ const VIEW_HOOKS = {
   stickers: loadStickers,
   knowledge: loadKnowledge,
   workspace: () => loadWorkspace(wsDir),
-  sessions: loadSessions,
   update: initUpdate,
 };
 
@@ -1407,68 +1403,6 @@ async function uploadKnowledge() {
     guard(err);
   } finally {
     knUploadEl.disabled = false;
-  }
-}
-
-/* ---------------- 会话存档 ---------------- */
-
-async function loadSessions() {
-  try {
-    const data = await api('/api/admin/sessions');
-    const items = data.items || [];
-    sessionCountEl.textContent = items.length;
-    sessionListEl.innerHTML = '';
-    if (!items.length) {
-      const empty = el('div', 'row empty');
-      empty.textContent = '还没有存档喵。聊天页右上角「保存上下文」可以存一份。';
-      sessionListEl.appendChild(empty);
-      return;
-    }
-    items.forEach((item) => {
-      const row = el('div', 'row');
-      const name = el('span', 'row-name');
-      name.textContent = item.uuid;
-      const meta = el('span', 'row-meta');
-      meta.textContent = `${fmtSize(item.size)} · ${fmtTime(item.mtime)} · ${item.preview}` +
-        (item.importable ? '' : ' · 老存档（只有 txt），导不回聊天页');
-      row.append(name, meta);
-
-      const view = el('button', 'row-btn');
-      view.type = 'button';
-      view.textContent = '查看';
-      view.addEventListener('click', () => openSession(item.uuid));
-      row.appendChild(view);
-
-      const del = el('button', 'row-btn danger');
-      del.type = 'button';
-      del.textContent = '删除';
-      del.addEventListener('click', async () => {
-        if (!confirm(`确定删掉存档 ${item.uuid} 喵？`)) return;
-        try {
-          await api('/api/admin/sessions/delete', { uuid: item.uuid });
-          sessionBodyEl.hidden = true;
-          flash(`删掉啦喵：${item.uuid}`, true);
-          loadSessions();
-        } catch (err) {
-          guard(err);
-        }
-      });
-      row.appendChild(del);
-      sessionListEl.appendChild(row);
-    });
-  } catch (err) {
-    guard(err);
-  }
-}
-
-async function openSession(uuid) {
-  try {
-    const data = await api(`/api/admin/sessions/${encodeURIComponent(uuid)}`);
-    sessionBodyEl.textContent = data.text + (data.truncated ? '\n\n……（太长，后面截掉了）' : '');
-    sessionBodyEl.hidden = false;
-    sessionBodyEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  } catch (err) {
-    guard(err);
   }
 }
 

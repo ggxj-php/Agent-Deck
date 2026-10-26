@@ -57,30 +57,15 @@ const toBottomEl = document.getElementById('to-bottom');
 const pickImageEl = document.getElementById('pick-image');
 const imageInputEl = document.getElementById('image-input');
 const attachBarEl = document.getElementById('attach-bar');
-const saveSessionEl = document.getElementById('save-session');
-const saveModalEl = document.getElementById('save-modal');
-const saveUuidEl = document.getElementById('save-uuid');
-const saveMsgEl = document.getElementById('save-msg');
-const saveOkEl = document.getElementById('save-ok');
-const saveCancelEl = document.getElementById('save-cancel');
-const loadSessionEl = document.getElementById('load-session');
-const loadModalEl = document.getElementById('load-modal');
-const loadUuidEl = document.getElementById('load-uuid');
-const loadMsgEl = document.getElementById('load-msg');
-const loadOkEl = document.getElementById('load-ok');
-const loadCancelEl = document.getElementById('load-cancel');
 const ctxBarEl = document.getElementById('ctx-bar');
 const ctxFillEl = document.getElementById('ctx-fill');
 const ctxTextEl = document.getElementById('ctx-text');
-const tbMoreEl = document.getElementById('tb-more');
-const tbActionsEl = document.getElementById('tb-actions');
 const thinkToggleEl = document.getElementById('think-toggle');
 
 let sessionId = null;      // 当前会话 id（存在后端 SQLite 里）
 let me = null;             // 当前登录用户
 let sessions = [];         // 侧边栏的会话列表
 let busy = false;
-let sentCount = 0;       // 这个页面聊过几句，存上下文之前用它判断有没有东西可存
 let pendingImages = []; // 已经选好、还没发出去的多张图片（data URL 列表）
 const IMAGE_MAX_COUNT = 6;  // 一轮最多几张，和后端 uploads.MAX_COUNT 对齐
 
@@ -835,7 +820,6 @@ function renderSessionList() {
       if (item.id === sessionId) {
         sessionId = null;
         messagesEl.innerHTML = '';
-        sentCount = 0;
       }
       await loadSessions();
       if (!sessionId) {
@@ -863,7 +847,6 @@ async function switchSession(id) {
     messagesEl.innerHTML = '';
     const items = data.history || [];
     renderHistory(items);
-    sentCount = items.length;
     paintContext(data.context);
     sessionStorage.setItem(STORAGE_KEY, sessionId);
     renderSessionList();
@@ -881,7 +864,6 @@ sideNewEl.addEventListener('click', async () => {
   if (busy) return;
   messagesEl.innerHTML = '';
   sessionId = null;
-  sentCount = 0;
   paintContext(null);
   try {
     await ensureSession(true);
@@ -1259,7 +1241,6 @@ window.addEventListener('pageshow', (e) => { if (e.persisted) resume(); });
 async function send(text, images) {
   if (busy) return;
   busy = true;
-  sentCount += 1;
   sendEl.disabled = true;
   pickImageEl.disabled = true;
   inputEl.value = '';
@@ -1369,262 +1350,6 @@ imageInputEl.addEventListener('change', () => {
 });
 
 
-/* ---------------- 保存上下文 ----------------
-   存成服务器上的一个 txt（见 taffy/web/sessions_store.py），历史不留在内存里。
-   uuid 由雏草姬自己起，重名后端会拒掉（409），不会覆盖旧存档。 */
-
-function fmtSize(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function suggestUuid() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
-  return `chat-${stamp}-${Math.random().toString(36).slice(2, 6)}`;
-}
-
-function saveMsg(text, ok) {
-  saveMsgEl.textContent = text;
-  saveMsgEl.classList.toggle('ok', ok === true);
-  saveMsgEl.classList.toggle('bad', ok === false);
-}
-
-/* ---------------- 顶栏「⋯」更多菜单（窄屏才出现） ----------------
-   手机顶栏放不下三个按钮，就把「导入 / 保存」收进这里。宽屏上 CSS 直接让
-   .tb-actions 一直显示，这个菜单开关对它没影响。 */
-
-function closeMore() {
-  tbActionsEl.classList.remove('open');
-  tbMoreEl.setAttribute('aria-expanded', 'false');
-}
-
-tbMoreEl.addEventListener('click', (event) => {
-  event.stopPropagation();          // 别让下面那个「点别处收起」立刻又把它关掉
-  const open = tbActionsEl.classList.toggle('open');
-  tbMoreEl.setAttribute('aria-expanded', String(open));
-});
-
-tbActionsEl.addEventListener('click', closeMore);   // 选完就收起
-
-document.addEventListener('click', (event) => {
-  if (!tbActionsEl.classList.contains('open')) return;
-  if (tbActionsEl.contains(event.target) || tbMoreEl.contains(event.target)) return;
-  closeMore();
-});
-
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') closeMore();
-});
-
-function openSaveModal() {
-  if (busy) {
-    statusEl.textContent = '等塔菲说完这句再存喵';
-    return;
-  }
-  if (!sentCount) {
-    statusEl.textContent = '还没聊过喵，先说句话再存';
-    return;
-  }
-  saveUuidEl.value = suggestUuid();
-  saveMsg('');
-  saveModalEl.hidden = false;
-  saveUuidEl.focus();
-  saveUuidEl.select();
-}
-
-function closeSaveModal() {
-  saveModalEl.hidden = true;
-  inputEl.focus();
-}
-
-async function doSave() {
-  const uuid = saveUuidEl.value.trim();
-  if (!uuid) {
-    saveMsg('得给个 uuid 喵', false);
-    return;
-  }
-  // 跟后端同一套规矩，先在前端拦一道，省一次往返
-  if (uuid.indexOf('..') >= 0 || !/^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$/.test(uuid)) {
-    saveMsg('只能用字母、数字和 . _ -（3~64 位，开头得是字母或数字）喵', false);
-    return;
-  }
-  saveOkEl.disabled = true;
-  saveMsg('正在存喵…');
-  try {
-    const id = await ensureSession();
-    const resp = await fetch('/api/session/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: id, uuid }),
-    });
-    let data = null;
-    try {
-      data = await resp.json();
-    } catch (err) {
-      data = null;
-    }
-    if (!resp.ok) {
-      saveMsg((data && data.detail) || `存不上，服务返回 ${resp.status}`, false);
-      return;
-    }
-    saveMsg(`存好啦喵：${data.file}（${data.messages} 条记录，${fmtSize(data.bytes)}）`, true);
-    setTimeout(closeSaveModal, 1400);
-  } catch (err) {
-    saveMsg(`存不上喵：${err && err.message ? err.message : err}`, false);
-  } finally {
-    saveOkEl.disabled = false;
-  }
-}
-
-saveSessionEl.addEventListener('click', openSaveModal);
-saveCancelEl.addEventListener('click', closeSaveModal);
-saveOkEl.addEventListener('click', doSave);
-saveModalEl.addEventListener('click', (event) => {
-  if (event.target === saveModalEl) closeSaveModal();   // 点遮罩关掉
-});
-saveUuidEl.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    doSave();
-  } else if (event.key === 'Escape') {
-    closeSaveModal();
-  }
-});
-
-/* ---------------- 导入上下文 ----------------
-   把存过的存档接回这个会话（见 taffy/web/app.py 的 /api/session/import）。
-   接回来的是完整历史，所以「上下文 xx%」跟着一起回来——历史长、百分比却是 0
-   的话，自动压缩就一直不触发，下一轮直接撞超长，这正是当初要带回来的原因。 */
-
-const HISTORY_RENDER_MAX = 200;   // 太长的存档只画最近这么多条，别把页面卡住
-
-function loadMsg(text, ok) {
-  loadMsgEl.textContent = text;
-  loadMsgEl.classList.toggle('ok', ok === true);
-  loadMsgEl.classList.toggle('bad', ok === false);
-}
-
-function openLoadModal() {
-  if (busy) {
-    statusEl.textContent = '等塔菲说完这句再导喵';
-    return;
-  }
-  loadUuidEl.value = '';
-  loadMsg('');
-  loadModalEl.hidden = false;
-  loadUuidEl.focus();
-}
-
-function closeLoadModal() {
-  loadModalEl.hidden = true;
-  inputEl.focus();
-}
-
-/* 把历史摆回聊天区：工具调用那些不画（刷屏），只摆用户说的和塔菲的正文 */
-/* 历史里的用户消息长这样：「我发了两张图\n\n[图片 #abc123 uploads/abc123.jpg：摘要]」
-   把标记抠出来换成缩略图，剩下的当正文。 */
-const HISTORY_IMG_MARK = /\[图片 #([0-9a-f]{6,32})[^\]]*\]/g;
-
-function renderHistory(items) {
-  items.forEach((item) => {
-    const text = String(item.text || '');
-    if (item.role === 'user') {
-      const ids = [];
-      const re = new RegExp(HISTORY_IMG_MARK.source, 'g');
-      let hit;
-      while ((hit = re.exec(text)) !== null) ids.push(hit[1]);
-      const body = text.replace(HISTORY_IMG_MARK, '').trim();
-      addUser(body || (ids.length ? '' : '（空消息）'),
-              ids.map((id) => `/api/uploads/${id}`));
-      return;
-    }
-    const turn = addAgent();
-    // 正文里夹着 [sticker:mood]，按位置拆成「文字 - 表情包 - 文字」
-    const mark = /\[\s*sticker\s*:\s*([a-zA-Z_]+)\s*\]/gi;
-    let last = 0;
-    let hit;
-    while ((hit = mark.exec(text)) !== null) {
-      const chunk = text.slice(last, hit.index);
-      if (chunk) contentChunk(turn, chunk);
-      addSticker(turn, hit[1].toLowerCase());
-      last = hit.index + hit[0].length;
-    }
-    const tail = text.slice(last);
-    if (tail) contentChunk(turn, tail);
-    if (turn.content) scheduleRender(turn.content);
-  });
-}
-
-async function doImport() {
-  const uuid = loadUuidEl.value.trim();
-  if (!uuid) {
-    loadMsg('得填个 uuid 喵', false);
-    return;
-  }
-  // 跟后端同一套规矩，先在前端拦一道
-  if (uuid.indexOf('..') >= 0 || !/^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$/.test(uuid)) {
-    loadMsg('只能用字母、数字和 . _ -（3~64 位，开头得是字母或数字）喵', false);
-    return;
-  }
-  loadOkEl.disabled = true;
-  loadMsg('正在接回来喵…');
-  try {
-    const id = await ensureSession();
-    const resp = await fetch('/api/session/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: id, uuid }),
-    });
-    let data = null;
-    try {
-      data = await resp.json();
-    } catch (err) {
-      data = null;
-    }
-    if (!resp.ok) {
-      loadMsg((data && data.detail) || `导不进来，服务返回 ${resp.status}`, false);
-      return;
-    }
-    const items = data.history || [];
-    const shown = items.slice(-HISTORY_RENDER_MAX);
-    messagesEl.innerHTML = '';
-    renderHistory(shown);
-    const turn = addAgent();
-    noticeBubble(turn,
-      `接上存档「${data.uuid}」了喵：一共 ${data.messages} 条记录` +
-      (shown.length < items.length ? `（这里画最近 ${shown.length} 条）` : '') +
-      `，上下文跟着回到 ${Math.round(((data.context && data.context.percent) || 0) * 10) / 10}%，` +
-      '接着聊就好～');
-    if (data.context) paintContext(data.context);
-    sentCount += 1;          // 有东西可以接着存了
-    scrollToBottom();
-    loadMsg('接回来啦喵', true);
-    setTimeout(closeLoadModal, 1000);
-  } catch (err) {
-    loadMsg(`导不进来喵：${err && err.message ? err.message : err}`, false);
-  } finally {
-    loadOkEl.disabled = false;
-  }
-}
-
-loadSessionEl.addEventListener('click', openLoadModal);
-loadCancelEl.addEventListener('click', closeLoadModal);
-loadOkEl.addEventListener('click', doImport);
-loadModalEl.addEventListener('click', (event) => {
-  if (event.target === loadModalEl) closeLoadModal();   // 点遮罩关掉
-});
-loadUuidEl.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    doImport();
-  } else if (event.key === 'Escape') {
-    closeLoadModal();
-  }
-});
-
 /* 回车不发送，老老实实在输入框里换行；要发就点「发送」按钮。
    手机端也一样，软键盘的回车键只负责换行，不会手滑把半句话发出去。 */
 formEl.addEventListener('submit', (e) => {
@@ -1639,7 +1364,6 @@ newChatEl.addEventListener('click', async () => {
   clearImage();
   messagesEl.innerHTML = '';
   sessionId = null;
-  sentCount = 0;
   paintContext(null);      // 新会话，占用归零
   updateToBottom();
   try {
@@ -1686,8 +1410,8 @@ function welcome() {
     '雏草姬来啦喵～我是永雏塔菲，有什么想聊的直接说就好喵。\n\n' +
     '算法题、代码、知识库里的资料都可以问我；嵌入式、单片机（STM32 那种）、物联网、' +
     '计算机组成原理、数字取证这些塔菲也懂喵。左下角可以发图片给塔菲看（看完就删，不会留着）；' +
-    '想把这段聊天存下来就点右上角「保存上下文」（手机上收在右上角那个「⋯」里）；' +
-    '下次点「导入上下文」填那个名字，塔菲就能把这段对话连上下文用量一起接回来；' +
+    '左上角 ☰ 是侧边栏，你所有的会话都在里面，随时切回来接着聊；' +
+    '点顶栏名字能进用户中心（改密码 / 退出登录）；' +
     '想换个话题就点「新会话」，塔菲会把之前的事忘干净从头开始喵～\n\n' +
     '输入框上面那条是这段对话占了多少「上下文」，快满的时候塔菲会自己把前面聊过的' +
     '压成摘要，不会聊着聊着就卡住喵。'
@@ -1760,7 +1484,6 @@ armLeaveGuard();
         messagesEl.innerHTML = '';
         const items = data.history || [];
         renderHistory(items);
-        sentCount = items.length;
         paintContext(data.context);
         scrollToBottom();
       }

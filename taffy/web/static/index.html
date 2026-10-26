@@ -44,12 +44,6 @@
     <span class="think-toggle-text">思考</span>
     <span class="think-toggle-track"><span class="think-toggle-knob"></span></span>
   </button>
-  <button type="button" id="tb-more" class="new-chat ghost tb-more"
-          aria-label="更多" aria-expanded="false" title="更多">⋯</button>
-  <div class="tb-actions" id="tb-actions">
-    <button type="button" id="load-session" class="new-chat ghost">导入上下文</button>
-    <button type="button" id="save-session" class="new-chat ghost">保存上下文</button>
-  </div>
   <button type="button" id="new-chat" class="new-chat">新会话</button>
 </header>
 
@@ -74,41 +68,6 @@
   </div>
   <input type="file" id="image-input" accept="image/*" multiple hidden>
 </form>
-
-<div class="modal" id="save-modal" hidden>
-  <div class="modal-box">
-    <h3>保存这段上下文</h3>
-    <p class="modal-hint">
-      给这次存档起个名字（uuid），它会当成服务器上的文件名。<br>
-      字母、数字和 <code>. _ -</code> 都行，3~64 位，开头得是字母或数字。<br>
-      名字重了会被拒绝，<b>不会覆盖已经存好的那份</b>。
-    </p>
-    <input id="save-uuid" placeholder="例如 chat-2026-09-27-auth" autocomplete="off">
-    <p class="modal-msg" id="save-msg"></p>
-    <div class="modal-btns">
-      <button type="button" id="save-cancel" class="modal-cancel">取消</button>
-      <button type="button" id="save-ok">保存</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal" id="load-modal" hidden>
-  <div class="modal-box">
-    <h3>把存过的对话接回来</h3>
-    <p class="modal-hint">
-      填你当初存这份上下文时起的名字（uuid，就是后台「会话存档」里列出来的那个）。<br>
-      接回来的是完整历史，所以上面那条「上下文 xx%」也会跟着回到存档时的用量，
-      该压缩的时候照样会压。<br>
-      当前这段对话会被替换掉，互不影响的就别在这里导喵。
-    </p>
-    <input id="load-uuid" placeholder="例如 chat-20260927-a1b2" autocomplete="off">
-    <p class="modal-msg" id="load-msg"></p>
-    <div class="modal-btns">
-      <button type="button" id="load-cancel" class="modal-cancel">取消</button>
-      <button type="button" id="load-ok">导入</button>
-    </div>
-  </div>
-</div>
 
 <div class="modal" id="leave-modal" hidden>
   <div class="modal-box">
