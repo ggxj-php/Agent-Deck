@@ -184,8 +184,8 @@ async def require_login(request, call_next):
         return await call_next(request)
 
     user = auth.resolve_token(request.cookies.get(auth.COOKIE_NAME))
-    if user and user.get("disabled"):
-        user = None                  # 被封号的账号，登录态还在也不放行
+    if user and auth.is_banned(user):
+        user = None                  # 被封号（含临时封禁未到期）的账号，登录态还在也不放行
     if not user:
         if path.startswith("/api/"):
             return JSONResponse({"detail": "还没登录喵"}, status_code=401)

@@ -139,7 +139,8 @@ def create_user(name, password, invited_by="", is_admin=False, note=""):
         user_id = cur.lastrowid
     return {"id": user_id, "name": name, "invite_code": code,
             "invited_by": invited_by, "created_at": now,
-            "is_admin": bool(is_admin), "disabled": False, "note": note or ""}, ""
+            "is_admin": bool(is_admin), "disabled": False, "ban_until": 0.0,
+            "note": note or ""}, ""
 
 
 def register(name, password, invite):
@@ -174,7 +175,11 @@ def authenticate(name, password):
     user = find_by_name(name)
     if not user:
         return None
-    if user.get("disabled"):
+    if user.get("disabled") and not is_banned(user):
+        clear_ban(user["id"])          # 临时封禁到期了，顺手把标记清掉
+        user["disabled"] = 0
+        user["ban_until"] = 0
+    if is_banned(user):
         return None
     if not verify_password(password, user["password_hash"]):
         return None
@@ -194,6 +199,8 @@ def public_user(user):
             "invited_by": user.get("invited_by", ""),
             "is_admin": bool(user.get("is_admin")),
             "disabled": bool(user.get("disabled")),
+            "ban_until": float(user.get("ban_until") or 0),
+            "banned": is_banned(user),
             "note": user.get("note", ""),
             "created_at": user.get("created_at", 0),
             "last_login": user.get("last_login", 0)}
@@ -274,6 +281,39 @@ def change_password(user_id, old_password, new_password):
     return set_password(user_id, new_password)
 
 
+# ---------------- 封禁 ----------------
+
+
+def is_banned(user, now=None):
+    """这个账号**现在**算不算被封。
+
+    disabled=1 且 ban_until=0 → 永久封禁；
+    临时封禁到期后自动算没封（不用管理员手动解）。
+    """
+    if not user or not user.get("disabled"):
+        return False
+    until = float(user.get("ban_until") or 0)
+    if until <= 0:
+        return True
+    return until > (now or time.time())
+
+
+def set_ban(user_id, minutes=0):
+    """封号。minutes <= 0 表示永久封禁；否则封到这个时间点。"""
+    now = time.time()
+    until = 0.0 if int(minutes or 0) <= 0 else now + int(minutes) * 60
+    with db.cursor() as conn:
+        conn.execute("UPDATE users SET disabled = 1, ban_until = ? WHERE id = ?",
+                     (until, user_id))
+        conn.execute("DELETE FROM auth_tokens WHERE user_id = ?", (user_id,))
+    return until
+
+
+def clear_ban(user_id):
+    with db.cursor() as conn:
+        conn.execute("UPDATE users SET disabled = 0, ban_until = 0 WHERE id = ?", (user_id,))
+
+
 # ---------------- 登录态 ----------------
 
 
@@ -347,7 +387,7 @@ def main(argv):
     if cmd == "list":
         with db.cursor() as conn:
             rows = conn.execute(
-                "SELECT id, name, invite_code, invited_by, created_at, is_admin, disabled "
+                "SELECT id, name, invite_code, invited_by, created_at, is_admin, disabled, ban_until "
                 "FROM users ORDER BY id").fetchall()
         if not rows:
             print("还没有用户。用 `python -m taffy.auth create <用户名> <密码>` 建第一个。")
@@ -355,7 +395,14 @@ def main(argv):
         print(f"{'ID':<4} {'用户名':<14} {'邀请码':<10} {'邀请人':<12} 注册时间")
         for row in rows:
             ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(row["created_at"]))
-            flag = ("管理员" if row["is_admin"] else "") + ("（已封号）" if row["disabled"] else "")
+            flag = "管理员" if row["is_admin"] else ""
+            if row["disabled"]:
+                until = row["ban_until"] or 0
+                if until:
+                    flag += "（封到 %s）" % time.strftime(
+                        "%m-%d %H:%M", time.localtime(until))
+                else:
+                    flag += "（永久封禁）"
             print(f"{row['id']:<4} {row['name']:<14} {row['invite_code']:<10} "
                   f"{row['invited_by'] or '-':<12} {ts}  {flag}")
         return 0

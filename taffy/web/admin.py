@@ -588,6 +588,8 @@ def _user_row(row):
     item = dict(row)
     item["is_admin"] = bool(item.get("is_admin"))
     item["disabled"] = bool(item.get("disabled"))
+    item["ban_until"] = float(item.get("ban_until") or 0)
+    item["banned"] = auth.is_banned(item)          # 临时封禁到期后这里就是 False
     item["sessions"] = store.count_for_user(item["id"])
     return item
 
@@ -599,7 +601,7 @@ def list_users(request: Request):
     with db.cursor() as conn:
         rows = conn.execute(
             "SELECT id, name, invite_code, invited_by, created_at, is_admin, disabled, "
-            "       note, last_login FROM users ORDER BY id"
+            "       ban_until, note, last_login FROM users ORDER BY id"
         ).fetchall()
     return {"users": [_user_row(row) for row in rows], "me": me["id"],
             "total": len(rows)}
@@ -626,6 +628,8 @@ def create_user(req: UserCreate, request: Request):
 class UserUpdate(BaseModel):
     is_admin: bool | None = None
     disabled: bool | None = None
+    # 封多久（分钟）。0 = 永久；不传就按 disabled 走（True 永久 / False 解封）
+    ban_minutes: int | None = None
     note: str | None = None
     password: str | None = None
 
@@ -645,7 +649,7 @@ def update_user(user_id: int, req: UserUpdate, request: Request):
     if target["id"] == me["id"]:
         if req.is_admin is False:
             raise HTTPException(status_code=400, detail="不能取消自己的管理员权限喵")
-        if req.disabled:
+        if req.disabled or req.ban_minutes is not None:
             raise HTTPException(status_code=400, detail="不能封禁自己喵")
 
     if target.get("is_admin") and req.is_admin is False:
@@ -663,11 +667,17 @@ def update_user(user_id: int, req: UserUpdate, request: Request):
         if req.disabled is not None:
             conn.execute("UPDATE users SET disabled = ? WHERE id = ?",
                          (1 if req.disabled else 0, target["id"]))
-            if req.disabled:
-                conn.execute("DELETE FROM auth_tokens WHERE user_id = ?", (target["id"],))
         if req.note is not None:
             conn.execute("UPDATE users SET note = ? WHERE id = ?",
                          (req.note[:200], target["id"]))
+    # 封禁：优先按 ban_minutes 走（0 = 永久），其次按 disabled（True 永久 / False 解封）
+    if req.ban_minutes is not None:
+        auth.set_ban(target["id"], req.ban_minutes)      # 内部会踢掉他的登录态
+    elif req.disabled is False:
+        auth.clear_ban(target["id"])
+    elif req.disabled is True:
+        auth.set_ban(target["id"], 0)
+
     if req.password:
         err = auth.set_password(target["id"], req.password)
         if err:

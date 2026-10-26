@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    REAL    NOT NULL,
     is_admin      INTEGER NOT NULL DEFAULT 0,   -- 1 = 能进后台
     disabled      INTEGER NOT NULL DEFAULT 0,   -- 1 = 封号，登录/接口一律拒绝
+    ban_until     REAL    NOT NULL DEFAULT 0,   -- 封到这个时间（0 = 永久；到点自动解封）
     note          TEXT    NOT NULL DEFAULT '',  -- 后台备注
     last_login    REAL    NOT NULL DEFAULT 0
 );
@@ -82,6 +83,7 @@ def _migrate(conn):
     additions = {
         "is_admin": "INTEGER NOT NULL DEFAULT 0",
         "disabled": "INTEGER NOT NULL DEFAULT 0",
+        "ban_until": "REAL NOT NULL DEFAULT 0",
         "note": "TEXT NOT NULL DEFAULT ''",
         "last_login": "REAL NOT NULL DEFAULT 0",
     }

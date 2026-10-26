@@ -1777,7 +1777,12 @@ function renderUsers(meId) {
     const badge = user.is_admin
       ? '<span class="user-badge admin">管理员</span>'
       : '<span class="user-badge">普通</span>';
-    const banned = user.disabled ? '<span class="user-badge banned">已封号</span>' : '';
+    let banned = '';
+    if (user.banned) {
+      banned = `<span class="user-badge banned">已封号（${fmtBanLeft(user.ban_until)}）</span>`;
+    } else if (user.disabled) {
+      banned = '<span class="user-badge">已解封（到期）</span>';
+    }
     tr.innerHTML = `
       <td class="user-name">${escapeHtml(user.name)}${isMe ? ' <span class="user-badge me">我</span>' : ''}</td>
       <td><code>${escapeHtml(user.invite_code)}</code></td>
@@ -1791,7 +1796,7 @@ function renderUsers(meId) {
     ops.append(
       userOp(isMe ? '自己' : (user.is_admin ? '取消管理员' : '设为管理员'),
         () => toggleAdmin(user), isMe),
-      userOp(user.disabled ? '解封' : '封号', () => toggleBan(user), isMe),
+      userOp(user.banned ? '解封' : '封号', () => toggleBan(user), isMe),
       userOp('改密码', () => resetPassword(user), false),
       userOp('备注', () => editNote(user), false),
       userOp('删除', () => removeUser(user), isMe, true),
@@ -1816,12 +1821,52 @@ function toggleAdmin(user) {
     user.is_admin ? `已经取消「${user.name}」的管理员权限喵` : `「${user.name}」现在是管理员喵`);
 }
 
+/* 封禁时长：支持 30m / 12h / 7d，或者纯数字（当分钟），0 = 永久 */
+function parseBanDuration(text) {
+  const raw = String(text || '').trim().toLowerCase();
+  if (!raw) return null;
+  if (['0', '永久', 'forever', 'permanent', 'inf'].includes(raw)) return 0;
+  const match = raw.match(/^(\d+)\s*([mhd]?)$/);
+  if (!match) return null;
+  const amount = parseInt(match[1], 10);
+  if (amount === 0) return 0;
+  const unit = match[2] || 'm';
+  const perUnit = unit === 'd' ? 1440 : unit === 'h' ? 60 : 1;
+  return amount * perUnit;
+}
+
+function fmtBanLeft(until) {
+  const target = Number(until) || 0;
+  if (!target) return '永久';
+  const left = target - Date.now() / 1000;
+  if (left <= 0) return '已到期';
+  if (left < 3600) return Math.ceil(left / 60) + ' 分钟后解封';
+  if (left < 86400) return Math.ceil(left / 3600) + ' 小时后解封';
+  return Math.ceil(left / 86400) + ' 天后解封';
+}
+
 function toggleBan(user) {
-  if (!user.disabled && !window.confirm(`封掉「${user.name}」喵？他的登录态会立刻失效`)) {
+  // 已经封着的，点一下就是解封
+  if (user.banned) {
+    return patchUser(user, { disabled: false }, `已经解封「${user.name}」喵`);
+  }
+  const answer = window.prompt(
+    `封「${user.name}」多久喵？\n\n` +
+    '填法：30m（30 分钟）· 12h（12 小时）· 7d（7 天）· 0（永久封禁）',
+    '1d');
+  if (answer === null) return undefined;
+  const minutes = parseBanDuration(answer);
+  if (minutes === null) {
+    userMsg('看不懂这个时长喵：用 30m / 12h / 7d / 0 这种写法', false);
     return undefined;
   }
-  return patchUser(user, { disabled: !user.disabled },
-    user.disabled ? `已经解封「${user.name}」喵` : `已经把「${user.name}」封了喵`);
+  return patchUser(
+    user,
+    { disabled: true, ban_minutes: minutes },
+    minutes
+      ? `已封「${user.name}」，${fmtBanLeft(Date.now() / 1000 + minutes * 60).replace('后解封', '后自动解封')}`
+      : `已永久封禁「${user.name}」喵`,
+  );
 }
 
 function resetPassword(user) {

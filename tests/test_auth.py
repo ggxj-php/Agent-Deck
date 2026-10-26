@@ -1,4 +1,6 @@
 """账号 / 邀请码 / 登录态：密码哈希、邀请码唯一性、token 失效、封号。"""
+import time
+
 import pytest
 
 from taffy import auth, db
@@ -95,3 +97,41 @@ def test_普通用户不是管理员():
     assert auth.is_admin(user) is False
     admin, _ = auth.create_user("boss", "password123", is_admin=True)
     assert auth.is_admin(admin) is True
+
+def test_临时封禁到期自动解封():
+    user = make_user()
+    until = auth.set_ban(user["id"], 1)              # 封 1 分钟
+    assert until > time.time()
+    fresh = auth.find_by_id(user["id"])
+    assert auth.is_banned(fresh) is True
+    assert auth.authenticate("someone", "password123") is None
+
+    # 把到期时间改到过去，模拟时间流逝
+    with db.cursor() as conn:
+        conn.execute("UPDATE users SET ban_until = ? WHERE id = ?",
+                     (time.time() - 1, user["id"]))
+    assert auth.is_banned(auth.find_by_id(user["id"])) is False
+    # 再登录一次：能登进去，并且顺手把封禁标记清了
+    assert auth.authenticate("someone", "password123")["id"] == user["id"]
+    assert auth.find_by_id(user["id"])["disabled"] == 0
+
+
+def test_永久封禁和解封():
+    user = make_user()
+    auth.set_ban(user["id"], 0)                      # 0 = 永久
+    row = auth.find_by_id(user["id"])
+    assert row["ban_until"] == 0
+    assert auth.is_banned(row) is True
+    assert auth.authenticate("someone", "password123") is None
+
+    auth.clear_ban(user["id"])
+    assert auth.is_banned(auth.find_by_id(user["id"])) is False
+    assert auth.authenticate("someone", "password123")["id"] == user["id"]
+
+
+def test_封禁会立刻踢掉登录态():
+    user = make_user()
+    token = auth.issue_token(user["id"])
+    assert auth.resolve_token(token) is not None
+    auth.set_ban(user["id"], 30)
+    assert auth.resolve_token(token) is None         # token 被删了
