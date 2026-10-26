@@ -533,17 +533,45 @@ def chat(req: ChatRequest, request: Request):
     def events():
         # 同一个会话串行处理，避免两条消息交叉写乱历史
         with lock:
-            history = store.load_messages(req.session_id)
+            history = store.load_messages(req.session_id, for_model=True)
             agent = DeckAgent(messages=history, cut_off=bool(sess["cut_off"]), owner=owner_id)
             is_first = not history
+            artifacts = []
             try:
                 for event in agent.ask_stream(req.message, req.image, req.thinking, req.images):
+                    # 画图工具产物：顺手落库，并把「卡片标记」记下来，
+                    # 刷新页面后前端才能把那张图重新渲染出来
+                    if isinstance(event, dict) and event.get("type") == "artifact":
+                        try:
+                            aid = str(event.get("id") or "")
+                            item = render_tool.get_artifact(aid)
+                            if item:
+                                render_tool.persist_artifact(
+                                    aid, req.session_id, owner_id,
+                                    event.get("title") or item.get("title") or "",
+                                    item.get("html") or "",
+                                )
+                                artifacts.append((aid, event.get("title") or ""))
+                        except Exception:        # noqa: BLE001
+                            pass
                     yield f"data: {_sse_payload(event)}\n\n"
             finally:
                 # 不管正常结束、报错还是浏览器中途断开，都把这次跑出来的历史落库
                 try:
+                    messages = list(agent.messages[1:])
+                    if artifacts and messages:
+                        # 标记拼到最后一条 assistant 正文末尾，跟流式时的卡片位置基本一致
+                        last = messages[-1]
+                        if isinstance(last, dict) and last.get("role") == "assistant":
+                            last = dict(last)
+                            last["content"] = render_tool.append_marks(
+                                last.get("content") or "", artifacts)
+                            messages[-1] = last
+                        elif isinstance(last, dict):
+                            messages.append({"role": "assistant",
+                                             "content": render_tool.append_marks("", artifacts)})
                     store.save_messages(
-                        req.session_id, agent.messages[1:], agent.cut_off,
+                        req.session_id, messages, agent.cut_off,
                         first_user_text=(req.message if is_first else ""),
                     )
                 except Exception:            # noqa: BLE001

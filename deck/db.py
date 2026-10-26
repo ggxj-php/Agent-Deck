@@ -60,6 +60,17 @@ CREATE TABLE IF NOT EXISTS messages (
     ts         REAL    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
+
+CREATE TABLE IF NOT EXISTS artifacts (
+    -- render_html 产物：存下来，刷新页面 / 重启服务之后还能看到那张卡片
+    id         TEXT    PRIMARY KEY,
+    session_id TEXT    NOT NULL DEFAULT '',
+    user_id    INTEGER NOT NULL DEFAULT 0,
+    title      TEXT    NOT NULL DEFAULT '',
+    html       TEXT    NOT NULL DEFAULT '',
+    created_at REAL    NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_artifacts_session ON artifacts(session_id);
 """
 
 _lock = threading.Lock()

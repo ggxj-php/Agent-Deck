@@ -75,8 +75,12 @@ def rename(user_id, session_id, title):
         )
 
 
-def load_messages(session_id):
-    """把一条会话的全部消息读出来（不含 system 提示词）。"""
+def load_messages(session_id, for_model=False):
+    """把一条会话的全部消息读出来（不含 system 提示词）。
+
+    for_model=True 时会把正文里的产物标记（[[artifact:id|标题]]）剥掉——
+    那是给前端渲染卡片用的，模型不需要看到。
+    """
     with db.cursor() as conn:
         rows = conn.execute(
             "SELECT payload FROM messages WHERE session_id = ? ORDER BY seq",
@@ -88,8 +92,14 @@ def load_messages(session_id):
             item = json.loads(row["payload"])
         except ValueError:
             continue
-        if isinstance(item, dict):
-            out.append(item)
+        if not isinstance(item, dict):
+            continue
+        if for_model and isinstance(item.get("content"), str):
+            from .tools.render import strip_marks
+
+            item = dict(item)
+            item["content"] = strip_marks(item["content"])
+        out.append(item)
     return out
 
 

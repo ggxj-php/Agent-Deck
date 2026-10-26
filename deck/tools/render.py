@@ -191,17 +191,66 @@ def _store(doc: str, title: str) -> str:
 
 
 def get_artifact(aid: str):
-    """给 web 层取产物用；过期或者不存在返回 None。"""
+    """给 web 层取产物用；内存里没有就去库里捞（刷新 / 重启之后还能看）。"""
     if not aid or not re.fullmatch(r"[0-9a-f]{16}", aid):
         return None
     item = _ARTIFACTS.get(aid)
-    if not item:
-        return None
-    if time.time() - item["ts"] > RENDER_TTL:
+    if item and time.time() - item["ts"] > RENDER_TTL:
         with _LOCK:
             _ARTIFACTS.pop(aid, None)
+        item = None
+    if item:
+        return item
+    try:                                  # 回落到数据库
+        from .. import db
+
+        with db.cursor() as conn:
+            row = conn.execute(
+                "SELECT html, title, created_at FROM artifacts WHERE id = ?", (aid,)
+            ).fetchone()
+        if row:
+            return {"html": row["html"], "title": row["title"], "ts": row["created_at"]}
+    except Exception:                     # noqa: BLE001
         return None
-    return item
+    return None
+
+
+def persist_artifact(aid: str, session_id: str, user_id: int, title: str, html: str):
+    """把产物写进库，这样刷新 / 重启后卡片还在。"""
+    if not aid or not html:
+        return False
+    try:
+        from .. import db
+
+        with db.cursor() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO artifacts "
+                "(id, session_id, user_id, title, html, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (aid, session_id or "", int(user_id or 0), title or "", html, time.time()),
+            )
+        return True
+    except Exception:                     # noqa: BLE001
+        return False
+
+
+# 存进消息正文里的产物标记：[[artifact:16位id|标题]]
+_ARTIFACT_MARK_STRIP = re.compile(r"\n*\[\[artifact:[0-9a-f]{16}\|[^\]\n]*\]\]\n*")
+
+
+def append_marks(text: str, items) -> str:
+    """把这一轮产生的产物标记拼到消息末尾。"""
+    marks = "".join(
+        "\n\n[[artifact:%s|%s]]" % (aid, (title or "").replace("|", "/")[:40])
+        for aid, title in (items or [])
+    )
+    return (text or "") + marks
+
+
+def strip_marks(text: str):
+    """喂给模型之前把产物标记去掉（模型不用看到这个）。"""
+    if not text:
+        return text or ""
+    return _ARTIFACT_MARK_STRIP.sub("\n", text).strip()
 
 
 # ---------------- 清洗 ----------------

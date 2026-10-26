@@ -677,33 +677,68 @@ function addUser(text, images) {
    把标记抠出来换成缩略图，剩下的当正文；塔菲的正文里夹着 [sticker:mood]，按位置拆开。 */
 const HISTORY_IMG_MARK = /\[图片 #([0-9a-f]{6,32})[^\]]*\]/g;
 
+/* 产物标记：后端在 assistant 正文里留的 [[artifact:16位id|标题]] */
+const ARTIFACT_MARK = /\[\[artifact:([0-9a-f]{16})\|([^\]\n]*)\]\]/g;
+
 function renderHistory(items) {
+  // 先合并：工具循环在库里会留好几条连续的 assistant，
+  // 不合并的话刷新后一条回复会被切成好几个气泡
+  const blocks = [];
   (items || []).forEach((item) => {
+    const role = item.role === 'user' ? 'user' : 'assistant';
     const text = String(item.text || '');
-    if (item.role === 'user') {
+    const last = blocks[blocks.length - 1];
+    if (role === 'assistant' && last && last.role === 'assistant') {
+      last.text += (last.text ? '\n' : '') + text;
+    } else {
+      blocks.push({ role, text });
+    }
+  });
+
+  blocks.forEach((block) => {
+    if (block.role === 'user') {
       const ids = [];
       const re = new RegExp(HISTORY_IMG_MARK.source, 'g');
       let hit;
-      while ((hit = re.exec(text)) !== null) ids.push(hit[1]);
-      const body = text.replace(HISTORY_IMG_MARK, '').trim();
+      while ((hit = re.exec(block.text)) !== null) ids.push(hit[1]);
+      const body = block.text.replace(HISTORY_IMG_MARK, '').trim();
       addUser(body || (ids.length ? '' : '（空消息）'),
               ids.map((id) => `/api/uploads/${id}`));
       return;
     }
-    const turn = addAgent();
-    const mark = /\[\s*sticker\s*:\s*([a-zA-Z_]+)\s*\]/gi;
-    let last = 0;
-    let hit;
-    while ((hit = mark.exec(text)) !== null) {
-      const chunk = text.slice(last, hit.index);
-      if (chunk) contentChunk(turn, chunk);
-      addSticker(turn, hit[1].toLowerCase());
-      last = hit.index + hit[0].length;
-    }
-    const tail = text.slice(last);
-    if (tail) contentChunk(turn, tail);
-    if (turn.content) scheduleRender(turn.content);
+    renderAssistantBlock(block.text);
   });
+}
+
+/* 渲染一条 assistant 正文：按 [[artifact:...]] 切成几段，段内再处理表情包标记 */
+function renderAssistantBlock(text) {
+  const turn = addAgent();
+  ARTIFACT_MARK.lastIndex = 0;
+  let last = 0;
+  let hit;
+  while ((hit = ARTIFACT_MARK.exec(text)) !== null) {
+    renderAssistantText(turn, text.slice(last, hit.index));
+    turn.bubble.appendChild(buildArtifactCard(hit[1], hit[2] || ''));
+    last = hit.index + hit[0].length;
+  }
+  renderAssistantText(turn, text.slice(last));
+  if (turn.content) scheduleRender(turn.content);
+}
+
+/* 段内：正文 + 表情包标记 */
+function renderAssistantText(turn, text) {
+  if (!text) return;
+  const mark = /\[\s*sticker\s*:\s*([a-zA-Z_]+)\s*\]/gi;
+  let last = 0;
+  let hit;
+  while ((hit = mark.exec(text)) !== null) {
+    const chunk = text.slice(last, hit.index);
+    if (chunk) contentChunk(turn, chunk);
+    addSticker(turn, hit[1].toLowerCase());
+    last = hit.index + hit[0].length;
+  }
+  const tail = text.slice(last);
+  if (tail) contentChunk(turn, tail);
 }
 
 function addAgent() {
@@ -858,11 +893,16 @@ function addArtifact(turn, event) {
   const id = String(event.id || '').replace(/[^0-9a-f]/gi, '');
   if (!id) return;
 
-  const wrap = el('div', 'artifact');
+  turn.bubble.appendChild(buildArtifactCard(id, event.title));
+  updateToBottom();
+}
 
+/* 画图产物卡片：流式时和刷新后渲染历史都走这一个函数 */
+function buildArtifactCard(id, titleText) {
+  const wrap = el('div', 'artifact');
   const bar = el('div', 'artifact-bar');
   const title = el('span', 'artifact-title');
-  title.textContent = event.title || '塔菲画的图';
+  title.textContent = titleText || '画的图';
   const open = el('a', 'artifact-open');
   open.href = `/api/artifact/${id}`;
   open.target = '_blank';
@@ -877,13 +917,11 @@ function addArtifact(turn, event) {
   frame.setAttribute('sandbox', 'allow-scripts');
   frame.setAttribute('referrerpolicy', 'no-referrer');
   frame.setAttribute('loading', 'lazy');
-  frame.setAttribute('title', event.title || '塔菲画的图');
+  frame.setAttribute('title', titleText || '画的图');
   frame.src = `/api/artifact/${id}`;
 
   wrap.appendChild(bar);
   wrap.appendChild(frame);
-  turn.bubble.appendChild(wrap);
-  updateToBottom();
 
   // iframe 是 sandbox（读不到它的 document），只能把可用宽高 post 进去让它自己等比缩放
   fitArtifactFrame(frame);
@@ -891,6 +929,7 @@ function addArtifact(turn, event) {
     fitArtifactFrame(frame);
     setTimeout(() => fitArtifactFrame(frame), 300);
   });
+  return wrap;
 }
 
 /* 可视高度上限：别让一张图把整个聊天窗铺满，最多占七成 */
