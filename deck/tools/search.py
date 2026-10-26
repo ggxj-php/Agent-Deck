@@ -633,49 +633,6 @@ def _finish(keyword, total, notes, candidates, key):
     return f"没搜到「{keyword}」的结果（{detail}）"
 
 
-def _official_search(keyword: str, limit: int) -> str:
-    """DeepSeek 官方搜索接口：POST {base}/tools/search，一次请求直接拿结果 + 正文。
-
-    比抓搜索结果页干净得多（不用解析 HTML、不会被风控、还自带 summary/正文）。
-    """
-    try:
-        from .. import settings
-        url = settings.web_search_official_api()
-        key = settings.chat_key()
-        if not url or not key:
-            return ""
-        resp = _FETCH_SESSION.post(
-            url, headers={"Authorization": f"Bearer {key}"},
-            json={"query": keyword, "count": max(1, min(limit, 10)),
-                  "need_content": True},
-            timeout=15,
-        )
-    except Exception:                       # noqa: BLE001
-        return ""
-    if resp.status_code != 200:
-        return ""
-    try:
-        data = resp.json()
-    except Exception:                       # noqa: BLE001
-        return ""
-    parts = []
-    for i, item in enumerate((data.get("results") or [])[:limit], 1):
-        title = str(item.get("title") or "").strip()
-        link = str(item.get("url") or "").strip()
-        summary = str(item.get("summary") or "").strip()
-        content = str(item.get("content") or "").strip() or summary
-        if not (title or link or content):
-            continue
-        piece = f"{i}. {title}\n   {link}\n   {summary or content[:200]}"
-        if content:
-            piece += f"\n   正文摘录：{content[:800]}"
-        parts.append(piece)
-    if not parts:
-        return ""
-    return ("\n\n".join(parts)
-            + "\n\n（结果来自官方搜索接口 tools/search，够用就别再 open_url）")
-
-
 def web_search(keyword: str, max_results: int = 5) -> str:
     """跑搜索引擎拿结果，并自动补上最相关几条的正文摘录。
 
@@ -689,18 +646,6 @@ def web_search(keyword: str, max_results: int = 5) -> str:
     cached = _cached(key)
     if cached is not None:
         return cached
-
-    # 后台开了「服务端内置搜索」且探测到是官方接口模式 → 一次请求直接拿结果，
-    # 不用再抓搜索结果页（最快的一条路）
-    try:
-        from .. import settings
-        if settings.web_search_mode() == "tools_api":
-            body = _official_search(keyword, limit)
-            if body:
-                _remember(key, body)
-                return body
-    except Exception:                       # noqa: BLE001
-        pass
 
     total = len(_query_terms(keyword)) or 1
     notes = []

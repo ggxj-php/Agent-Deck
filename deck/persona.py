@@ -198,20 +198,7 @@ def build_prompt():
         core = CORE_PROMPT
     persona_part = (current().get("prompt") or "").strip()
     parts = [part for part in (core, persona_part) if part]
-    text = "\n\n".join(parts) + _unavailable_tools_note()
-    try:
-        mode = settings.web_search_mode()
-        if mode == "inline":
-            text += ("\n\n【本轮已开启服务端内置联网搜索】平台**已经自动联网搜过**，"
-                     "结果以参考资料 / 网页片段 / 带链接的段落形式出现在你的上下文里。"
-                     "先找这些资料再用它们回答；**只有在上下文里确实找不到任何相关网页资料时**，"
-                     "才调用 web_search 补搜一次（别一上来就自己搜，那样反而更慢、还会被当成没联网）。")
-        elif mode == "tools_api":
-            text += ("\n\n【web_search 已接官方搜索接口（又快又干净）：要查资料直接调用它，"
-                     "一般不用再 open_url；一次提问最多搜 1~2 次。】")
-    except Exception:                        # noqa: BLE001
-        pass
-    return text
+    return "\n\n".join(parts) + _unavailable_tools_note()
 
 
 def public(pid=None):

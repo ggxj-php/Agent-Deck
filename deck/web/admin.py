@@ -63,12 +63,6 @@ def _state():
         "vision_base_url": settings.vision_base_url(),
         "chat_base_source": settings.base_source(vision=False),
         "vision_base_source": settings.base_source(vision=True),
-        # 服务端内置联网搜索：开关 + 探测结果（前端据此决定显不显示那个开关）
-        "web_search": {
-            "enabled": settings.model_web_search(),
-            "mode": settings.web_search_mode(),
-            "probe": settings.web_search_probe(),
-        },
         # 检索翻译那一路的连接：留空就跟聊天那套一样，所以键和地址都说清楚它们是哪来的
         "translate_base_url": settings.translate_base_url(),
         "translate_base_source": settings.translate_own_base(),
@@ -109,21 +103,6 @@ def admin_page(request: Request):
 def state(request: Request):
     _require(request)
     return _state()
-
-
-class WebSearchRequest(BaseModel):
-    enabled: bool = True
-
-
-@router.post("/api/admin/web-search")
-def web_search_save(req: WebSearchRequest, request: Request):
-    """开关服务端内置联网搜索；开了之后会重新探测端点到底支不支持。"""
-    _require(request)
-    enabled = settings.set_model_web_search(bool(req.enabled))
-    probe = settings.web_search_probe(force=enabled)
-    return {"ok": True, "enabled": enabled, "probe": probe,
-            "mode": settings.web_search_mode(),
-            "active": settings.web_search_active()}
 
 
 class ModelsRequest(BaseModel):
