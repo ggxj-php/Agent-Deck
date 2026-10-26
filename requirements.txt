@@ -1,0 +1,20 @@
+# 运行依赖（范围写法，方便装在不同 Python / 平台上）
+# 想复现线上那套精确版本，用 requirements.lock.txt
+
+openai>=1.30
+requests>=2.28
+python-dotenv>=1.0
+# 知识库解析 + read_pdf / read_doc
+pypdf>=4.0
+python-docx>=1.1
+# 抽 PDF 内嵌图（pypdf 的 page.images 依赖它），以及上传图片的解码/重编码/去 EXIF
+pillow>=10.0
+# 知识库：中文分词 + 打分
+jieba>=0.42
+numpy>=1.24
+# 网页正文抽取 + 编码猜测
+lxml>=5.0
+charset-normalizer>=3.0
+# 网页版后端
+fastapi>=0.110
+uvicorn>=0.29

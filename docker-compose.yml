@@ -1,0 +1,23 @@
+# docker compose up -d --build
+#
+# 注意：.env 里放密钥，别提交。admin.json（后台改过的配置）第一次由后台生成，
+# 想持久化就把宿主机上已有的 admin.json 用 volume 挂进来。
+services:
+  taffy:
+    build:
+      context: .
+      # 要跑 C/C++ / Java / Node 就取消下面这行注释
+      # args: { WITH_TOOLCHAINS: "1" }
+    image: taffy-agent:latest
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./workspace:/app/workspace
+      - ./knowledge:/app/knowledge
+      - ./.cache:/app/.cache
+      - ./sessions:/app/sessions
+    restart: unless-stopped

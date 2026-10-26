@@ -11,6 +11,14 @@
 ```
 Taffy-Agent/
 ├── agent.py                 # 终端入口：python agent.py
+├── requirements.txt         # 运行依赖（范围写法）
+├── requirements.lock.txt    # 线上跑通的精确版本（复现部署用）
+├── requirements-dev.txt     # 开发 / CI 依赖（pytest、ruff）
+├── pyproject.toml           # 打包元数据 + pytest / ruff 配置
+├── Dockerfile               # 容器镜像（--build-arg WITH_TOOLCHAINS=1 带上 g++/JDK/Node）
+├── docker-compose.yml       # 一键起服务 + 挂 volume
+├── .github/workflows/ci.yml # CI：3.11/3.12 跑测试 + 语法检查 + docker build
+├── tests/                   # pytest 测试（安全沙箱、上传校验、渲染清洗、静态审查…）
 ├── .env                     # 密钥（已 gitignore，不进仓库）
 ├── admin.json               # 后台改过的模型 / key / 接口地址 / 上下文上限 / 人设提示词（已 gitignore，改过才生成）
 ├── taffy/
@@ -74,8 +82,11 @@ Taffy-Agent/
 - 依赖：
 
 ```bash
-pip install openai requests python-dotenv pypdf python-docx jieba numpy \
-            lxml charset-normalizer fastapi uvicorn pillow
+# 推荐：直接用依赖清单（范围版本）
+pip install -r requirements.txt
+
+# 想跟线上完全一致（精确版本，Python 3.12 验证过）
+pip install -r requirements.lock.txt
 ```
 
 | 包 | 用途 |
@@ -94,6 +105,63 @@ pip install openai requests python-dotenv pypdf python-docx jieba numpy \
 另外可选装 `fonttools`（`pip install fonttools`）：让 `pypdf` 能解析 PDF 里嵌入的 CFF 字体编码。不装也能跑，只是碰到非常规编码的 PDF 可能抽出乱码，索引时会刷 `fontTools is required to…` 的警告。
 
 想跑 C/C++ / Java / Node 还需要 `g++`、`javac`+`java`、`node`（不装的话其它语言照常）。
+
+## 测试、CI 与 Docker
+
+### 跑测试
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest -q          # 68 个用例，几秒跑完
+python -m pytest -q --cov=taffy --cov-report=term-missing   # 看覆盖率
+```
+
+测试重点覆盖**安全相关**的部分（这部分最不该没测试）：
+
+| 测试文件 | 盯什么 |
+|---|---|
+| `tests/test_sandbox.py` | 路径越界：`../`、绝对路径、软链接指向外面，一律要抛 |
+| `tests/test_pyguard.py` | `run_code` 运行时护栏：联网 / 起进程 / `ctypes` / 越界读写，真起子进程验证被拦 |
+| `tests/test_codescan.py` | 非 Python 代码的静态审查：危险头文件、`child_process`、越界路径字符串 |
+| `tests/test_uploads.py` | 上传图片：魔术字节、假图、超量、**EXIF 是否真的剥干净**、TTL 清理 |
+| `tests/test_render.py` | `render_html` 清洗：iframe / `script src` / `javascript:` 要清掉，内联脚本要保留 |
+| `tests/test_blacklist.py` | IP 黑名单护栏：本机 / 内网 / 保留地址 / IPv6 / 操作者自己一律拒绝 |
+| `tests/test_traffic.py` | 站点归类、机房识别、`/static/` 不能被当敏感路径 |
+| `tests/test_files.py` | 文件工具越界 |
+| `tests/test_docs.py` | 文档页码解析等纯逻辑 |
+
+### CI
+
+`.github/workflows/ci.yml`，push 到 `main` 或开 PR 都会跑：
+
+1. Python 3.11 / 3.12 两个版本
+2. `python -m compileall` 全量语法检查
+3. `pytest`（失败就红）
+4. 覆盖率报告（不阻塞）
+5. `ruff` 检查（不阻塞，先当提示）
+6. `docker build` 验证镜像能构建
+
+> 注释：仓库同时镜像在 Gitee，但 CI 只在 GitHub Actions 上跑。
+
+### Docker
+
+```bash
+# 只跑 Python（镜像小，约 200MB）
+docker build -t taffy-agent .
+docker run --rm -p 8000:8000 --env-file .env \
+    -v "$PWD/workspace:/app/workspace" \
+    -v "$PWD/knowledge:/app/knowledge" \
+    -v "$PWD/.cache:/app/.cache" \
+    taffy-agent
+
+# 想让它能跑 run_code 的 C/C++ / Java / Node（镜像大约多 300MB）
+docker build --build-arg WITH_TOOLCHAINS=1 -t taffy-agent:full .
+
+# 或者用 compose
+docker compose up -d --build
+```
+
+镜像里**不会**打进 `.env` / `admin.json`（见 `.dockerignore`）；运行时数据靠 volume 挂。
 
 ## 配置
 

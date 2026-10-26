@@ -1,0 +1,4 @@
+# 开发 / CI 用
+pytest>=8.0
+pytest-cov>=5.0
+ruff>=0.6

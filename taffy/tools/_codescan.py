@@ -147,7 +147,9 @@ _C_HEADERS = re.compile(
     r"""#\s*include\s*[<"]\s*("""
     r"""windows|winsock2|ws2tcpip|shellapi|winreg|tlhelp32|shlobj|process|direct|"""
     r"""winbase|winsvc|userenv|lz32|urlmon|sys/socket|netinet/in|arpa/inet|dlfcn"""
-    r""")\s*[>"]""",
+    # 后面可能跟 .h / .hpp（真实 include 基本都是 <winsock2.h> 这种）。
+    # 不写这一段整条规则等于没生效——实测 <sys/socket.h> 能直接溜过去
+    r""")(?:\.h(?:pp)?)?\s*[>"]""",
     re.I,
 )
 

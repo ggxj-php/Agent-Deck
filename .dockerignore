@@ -1,0 +1,28 @@
+# 版本控制 / 本地环境
+.git
+.github
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+*.egg-info
+
+# 秘密：绝对不能打进镜像
+.env
+.env.*
+admin.json
+
+# 运行时数据（用 volume 挂，不进镜像）
+workspace/
+sessions/
+.cache/
+knowledge/
+*.log
+
+# 测试和文档不占镜像体积
+tests/
+docs/
+*.md
+!README.md
