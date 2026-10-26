@@ -508,12 +508,15 @@ body {
    表情包长得横七竖八（有宽有竖的），原来钉死 116×116 会把它们压扁拉变形——
    这里 width/height 都 auto，浏览器按原图宽高比缩到框里，不变形。 */
 .sticker {
-  display: block;
+  /* 行内块：能停在句子之间（模型把 [sticker:x] 写在哪就显示在哪），
+     竖排对齐用 middle，免得把整行文字顶歪 */
+  display: inline-block;
+  vertical-align: middle;
   width: auto;
   height: auto;
   max-width: 116px;
   max-height: 116px;
-  margin: 8px 0 2px;
+  margin: 2px 4px;
   border-radius: 14px;
   box-shadow: 0 3px 12px rgba(224, 114, 159, .22);
 }
