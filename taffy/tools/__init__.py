@@ -4,10 +4,10 @@
 """
 import json
 
-from . import (asm86, asm_sim, basics, calc, files, forensics, kb, logic, mcu,
-               numconv, render, runner, search, sticker, text)
+from . import (asm86, asm_sim, basics, calc, docs, files, forensics, kb, logic,
+               mcu, numconv, render, runner, search, sticker, text)
 
-_MODULES = (basics, kb, search, files, forensics, runner, sticker, render,
+_MODULES = (basics, kb, search, files, docs, forensics, runner, sticker, render,
             asm_sim, asm86, mcu, logic, numconv, calc, text)
 
 TOOLS = []
