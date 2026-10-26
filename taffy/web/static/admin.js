@@ -1096,7 +1096,8 @@ function nextStickerName(mood, ext) {
 function stickerCard(item, onDelete) {
   const card = el('div', 'sticker-card');
   const img = el('img', 'sticker-thumb');
-  img.src = `/static/stickers/${encodeURIComponent(item.name)}`;
+  // 表情包跟着身份卡走，走同一个按人设取图的接口（不能再用 /static/stickers）
+  img.src = `/api/persona/sticker/${encodeURIComponent(item.name)}`;
   img.alt = item.name;
   img.loading = 'lazy';
   const name = el('div', 'sticker-name');
