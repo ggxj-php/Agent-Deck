@@ -205,43 +205,44 @@ def _rehydrate(messages, max_images=3, window=2):
     return messages
 
 
-# 只保留最近几轮工具调用的原文，更早的压缩掉：
-# 工具参数里可能有整段 HTML（画图）/ 搜索结果，工具结果里可能是一整页正文，
-# 这些每轮都重发给模型，长会话一下就把上下文撑到几万 token、首字越来越慢。
+# 只保留最近几轮工具调用，更早的**整对删掉**（assistant.tool_calls + 对应的 tool 结果）。
+# 工具参数里可能有整段 HTML（画图），工具结果里可能是一整页正文，这些每轮重发
+# 会把上下文撑爆、首字越来越慢。
+#
+# 以前试过把参数替换成 {"_omitted": true} —— 结果模型看到自己历史上带着这个参数，
+# 照抄着调用了 write_file(_omitted=True)，报错后又重试，直接死循环。所以改成整对删除：
+# 删掉的部分模型完全看不到，不会再有奇怪的示范。
 TRIM_KEEP_TOOL = 2
 
 
 def _trim_history(messages):
-    """发给模型前，把较早的工具参数 / 工具结果压缩成占位。库里仍存全文。"""
-    keep = set()
-    seen = 0
-    for i in range(len(messages) - 1, -1, -1):
-        if messages[i].get("role") == "tool":
-            seen += 1
-            if seen <= TRIM_KEEP_TOOL:
-                keep.add(i)
-    out = []
-    for i, msg in enumerate(messages):
-        role = msg.get("role")
-        if role == "tool" and i not in keep:
-            content = str(msg.get("content") or "")
-            if len(content) > 200:
-                msg = dict(msg)
-                msg["content"] = content[:160] + "\n…（较早的工具结果已省略）"
-        elif role == "assistant" and msg.get("tool_calls") and i not in keep:
-            calls = []
-            for call in msg["tool_calls"]:
-                call = dict(call)
-                fn = dict(call.get("function") or {})
-                args = str(fn.get("arguments") or "")
-                if len(args) > 200:
-                    fn["arguments"] = '{"_omitted": true}'
-                call["function"] = fn
-                calls.append(call)
-            msg = dict(msg)
-            msg["tool_calls"] = calls
-        out.append(msg)
-    return out
+    """发给模型前，把较早的工具轮次整对摘掉。库里仍保留全文（历史渲染不受影响）。"""
+    rounds = []          # [(assistant 下标, [tool 下标...])]
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            ids = {c.get("id") for c in msg["tool_calls"]}
+            tool_idx = []
+            j = i + 1
+            while j < len(messages) and messages[j].get("role") == "tool":
+                if ids and messages[j].get("tool_call_id") not in ids:
+                    break
+                tool_idx.append(j)
+                j += 1
+            rounds.append((i, tool_idx))
+            i = j
+        else:
+            i += 1
+
+    if len(rounds) <= TRIM_KEEP_TOOL:
+        return list(messages)
+
+    drop = set()
+    for ai, tool_idx in rounds[: len(rounds) - TRIM_KEEP_TOOL]:
+        drop.add(ai)
+        drop.update(tool_idx)
+    return [msg for idx, msg in enumerate(messages) if idx not in drop]
 
 
 _PLAIN_STICKER = re.compile(r"\[\s*sticker\s*:\s*([a-zA-Z_]+)\s*\]", re.I)
@@ -389,6 +390,8 @@ class DeckAgent:
         last_round = ""      # 最近一轮已经吐出去的原始正文，流被掐断时用来补历史
         try:
             stickers_sent = 0
+            recent_sigs = []          # 最近的工具调用签名，用来发现重复重试
+
             for _ in range(MAX_ROUNDS):
                 message = None
                 finish_reason = None
@@ -485,7 +488,16 @@ class DeckAgent:
                     name = function["name"]
                     yield {"type": "tool_start", "name": name, "arguments": function["arguments"]}
 
+                    # 护栏：同样的工具 + 同样的参数连续重复，八成是卡住了在瞎试
+                    signature = (name, str(function.get("arguments") or ""))
+                    recent_sigs.append(signature)
+                    repeated = (len(recent_sigs) >= 3
+                                and len(set(recent_sigs[-3:])) == 1)
+
                     args, result = execute(name, function["arguments"])
+                    if repeated:
+                        result = (str(result) + "\n\n⚠️ 同样的调用已经连续重复 3 次了，别再重复："
+                                  "换个办法，或者直接停下来告诉用户卡在哪一步。")
 
                     # 画图的产物要在前端插一张卡片，所以除了回执再单独发个事件
                     if name == "render_html":
