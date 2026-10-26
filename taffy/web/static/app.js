@@ -530,6 +530,32 @@ function scrollToBottom() {
   updateToBottom();
 }
 
+/* 刷新 / 切会话之后要稳稳落到最底：markdown 是延迟渲染的、图片也异步加载，
+   只滚一次会被后来的内容顶上去。这里在接下来 1 秒内补滚几次；
+   用户自己往上翻过就立刻停手，不跟人抢滚动条。 */
+let pinTimer = null;
+let userHeldUp = false;
+
+messagesEl.addEventListener('scroll', () => {
+  const gap = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+  userHeldUp = gap > 40;
+}, { passive: true });
+
+function pinToBottom() {
+  userHeldUp = false;
+  scrollToBottom();
+  if (pinTimer) clearInterval(pinTimer);
+  const started = Date.now();
+  pinTimer = setInterval(() => {
+    if (userHeldUp || Date.now() - started > 1000) {
+      clearInterval(pinTimer);
+      pinTimer = null;
+      return;
+    }
+    scrollToBottom();
+  }, 80);
+}
+
 /* 只要没贴着底，右下角就冒一个「回到底部」的按钮；翻到底了它就自己藏起来。 */
 const NEAR_BOTTOM = 80;
 
@@ -985,8 +1011,7 @@ async function switchSession(id) {
     }
     paintContext(data.context);
     renderSessionList();
-    updateToBottom();
-    scrollToBottom();
+    pinToBottom();            // 切会话后稳稳吸底
     statusEl.textContent = '在线喵';
   } catch (err) {
     statusEl.textContent = '切不过去喵：' + ((err && err.message) || '未知原因');
@@ -1506,6 +1531,7 @@ newChatEl.addEventListener('click', async () => {
   try {
     await ensureSession(true);
     welcome();
+    pinToBottom();
     refreshContext();
     statusEl.textContent = '在线喵';
   } catch (err) {
@@ -1627,7 +1653,7 @@ armLeaveGuard();
           welcome();          // 空会话给个开场白，别对着空白页发呆
         }
         paintContext(data.context);
-        scrollToBottom();
+        pinToBottom();          // 历史渲染完稳稳吸底
       }
     }
     if (!sessionId) {
