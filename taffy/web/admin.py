@@ -998,3 +998,50 @@ def persona_sticker_exts():
         return tuple(EXTS)
     except Exception:                    # noqa: BLE001
         return (".png", ".jpg", ".jpeg", ".gif", ".webp")
+
+
+MAX_ASSET_BYTES = 8 * 1024 * 1024
+
+
+@router.post("/api/admin/personas/{pid}/asset")
+async def persona_asset(pid: str, request: Request, kind: str = "avatar"):
+    """上传身份卡的头像 / 网页图标。
+
+    请求体直接是图片（不是 multipart）。头像会缩到 512px 存成 PNG，
+    图标同样，保证所有浏览器都能当 favicon 用。
+    """
+    _require(request)
+    pid = persona.safe_id(pid)
+    if not pid or not persona.exists(pid):
+        raise HTTPException(status_code=404, detail="没有这个人设喵")
+    if kind not in ("avatar", "icon"):
+        raise HTTPException(status_code=400, detail="kind 只能是 avatar 或 icon")
+    length = int(request.headers.get("content-length") or 0)
+    if length > MAX_ASSET_BYTES:
+        raise HTTPException(status_code=413, detail="图片太大喵（上限 8MB）")
+    raw = await request.body()
+    if not raw:
+        raise HTTPException(status_code=400, detail="空文件喵")
+    if len(raw) > MAX_ASSET_BYTES:
+        raise HTTPException(status_code=413, detail="图片太大喵（上限 8MB）")
+
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(raw)) as img:
+            img.load()
+            img = img.convert("RGBA")
+            limit = 512
+            img.thumbnail((limit, limit))
+            path = os.path.join(persona._dir(pid), f"{kind}.png")
+            img.save(path, "PNG")
+            size = img.size
+    except HTTPException:
+        raise
+    except Exception:                    # noqa: BLE001
+        raise HTTPException(status_code=400, detail="这不是一张能识别的图片喵")
+
+    persona.save(pid, {kind: f"{kind}.png"})
+    persona._cache["key"] = None
+    return {"ok": True, "kind": kind, "size": list(size),
+            "url": f"/api/persona/{kind}?pid={pid}"}

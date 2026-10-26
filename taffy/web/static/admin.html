@@ -445,6 +445,16 @@
             <label>在线文案 <input id="persona-online" placeholder="在线喵"></label>
             <label>思考文案 <input id="persona-thinking" placeholder="正在思考喵…"></label>
             <label>主题色 <input type="color" id="persona-theme" value="#ffb7d5"></label>
+            <label class="persona-asset-label">头像
+              <img id="persona-avatar-preview" class="persona-asset-preview" alt="头像">
+              <input type="file" id="persona-avatar-file" accept="image/*" hidden>
+              <button type="button" class="ghost" id="persona-avatar-btn">选图上传</button>
+            </label>
+            <label class="persona-asset-label">网页图标
+              <img id="persona-icon-preview" class="persona-asset-preview" alt="图标">
+              <input type="file" id="persona-icon-file" accept="image/*" hidden>
+              <button type="button" class="ghost" id="persona-icon-btn">选图上传</button>
+            </label>
           </div>
           <label class="persona-prompt-label">提示词（留空 = 用内置那份）
             <textarea id="persona-prompt" rows="10"

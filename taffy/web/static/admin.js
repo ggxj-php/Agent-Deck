@@ -2109,6 +2109,10 @@ async function editPersona(item) {
     els.online.value = detail.status_online || '';
     els.thinking.value = detail.status_thinking || '';
     if (els.theme) els.theme.value = detail.theme || '#ffb7d5';
+    const avPrev = document.getElementById('persona-avatar-preview');
+    if (avPrev) avPrev.src = detail.avatar ? detail.avatar : '/static/avatar.jpg';
+    const icPrev = document.getElementById('persona-icon-preview');
+    if (icPrev) icPrev.src = detail.icopath || (`/api/persona/icon?pid=${encodeURIComponent(item.id)}`);
     els.prompt.value = detail.prompt || '';
     document.getElementById('persona-form-title').textContent = `编辑「${detail.name || detail.id}」`;
     document.getElementById('persona-save').textContent = '保存修改';
@@ -2372,3 +2376,49 @@ document.getElementById('persona-import-file').addEventListener('change', async 
     personaMsg('导入失败喵：' + (err && err.message ? err.message : err), false);
   }
 });
+
+/* ---------------- 身份卡：头像 / 图标上传 ---------------- */
+
+async function uploadPersonaAsset(kind) {
+  const state = editingPersona || (document.getElementById('persona-id').value || '').trim();
+  if (!state) {
+    personaMsg('先填好 ID 再传图喵', false);
+    return;
+  }
+  if (!editingPersona) {
+    personaMsg('先把这张卡存下来（点创建），再传头像', false);
+    return;
+  }
+  const input = document.getElementById(kind === 'avatar' ? 'persona-avatar-file' : 'persona-icon-file');
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  try {
+    const resp = await fetch(`/api/admin/personas/${encodeURIComponent(editingPersona)}/asset?kind=${kind}`, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    });
+    let data = null;
+    try { data = await resp.json(); } catch (err) { data = null; }
+    if (!resp.ok) {
+      personaMsg((data && data.detail) || ('上传失败（' + resp.status + '）'), false);
+      return;
+    }
+    const preview = document.getElementById(kind === 'avatar' ? 'persona-avatar-preview' : 'persona-icon-preview');
+    if (preview) preview.src = data.url + '&v=' + Date.now();
+    personaMsg(kind === 'avatar' ? '头像换好啦喵' : '网页图标换好啦喵，刷新页面就能看到', true);
+    await loadPersonas();
+  } catch (err) {
+    personaMsg('上传失败喵：' + (err && err.message ? err.message : err), false);
+  }
+}
+
+document.getElementById('persona-avatar-btn').addEventListener('click', () => {
+  document.getElementById('persona-avatar-file').click();
+});
+document.getElementById('persona-icon-btn').addEventListener('click', () => {
+  document.getElementById('persona-icon-file').click();
+});
+document.getElementById('persona-avatar-file').addEventListener('change', () => uploadPersonaAsset('avatar'));
+document.getElementById('persona-icon-file').addEventListener('change', () => uploadPersonaAsset('icon'));

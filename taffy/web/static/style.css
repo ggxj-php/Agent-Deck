@@ -2686,3 +2686,16 @@ body.chat-page .topbar { padding-left: 50px; }
   color: #b06a1e;
   margin-left: 5px;
 }
+
+
+/* 身份卡的头像 / 图标上传 */
+.persona-asset-label { align-items: flex-start; }
+.persona-asset-preview {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  border: 1px solid var(--line, #f0d9e6);
+  object-fit: cover;
+  background: #fff;
+  margin-bottom: 6px;
+}
