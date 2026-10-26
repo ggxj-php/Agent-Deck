@@ -9,6 +9,7 @@ from . import (
     asm_sim,
     basics,
     calc,
+    diagram,
     docs,
     files,
     forensics,
@@ -23,7 +24,7 @@ from . import (
     text,
 )
 
-_MODULES = (basics, kb, search, files, docs, forensics, runner, sticker, render,
+_MODULES = (basics, kb, search, files, docs, forensics, runner, sticker, render, diagram,
             asm_sim, asm86, mcu, logic, numconv, calc, text)
 
 # 这些工具把「外部内容」带进上下文：网页正文、搜索结果、知识库片段、
@@ -78,8 +79,8 @@ TOOL_GROUPS = {
     },
     "code": {
         "label": "跑代码 / 画图",
-        "desc": "编译运行代码、写 HTML 渲染成卡片",
-        "tools": ("run_code", "render_html"),
+        "desc": "编译运行代码、结构化画图、写 HTML 渲染成卡片",
+        "tools": ("run_code", "draw_diagram", "render_html"),
     },
     "forensics": {
         "label": "数字取证",

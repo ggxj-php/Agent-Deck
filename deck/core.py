@@ -556,7 +556,7 @@ class DeckAgent:
                     call = plan["call"]
 
                     # 画图的产物要在前端插一张卡片，所以除了回执再单独发个事件
-                    if name == "render_html":
+                    if name in ("render_html", "draw_diagram"):
                         try:
                             payload = json.loads(result)
                         except Exception:

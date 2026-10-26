@@ -66,6 +66,7 @@ Agent-Deck/
 │   │   ├── text.py          # regex_test / diff_text / json_tool：正则 / 差异 / JSON
 │   │   ├── docs.py          # read_pdf / read_doc / read_img：文档与图片（走视觉模型）
 │   │   ├── render.py        # render_html：让 Agent 写 HTML 直接渲染成卡片
+│   │   ├── diagram.py       # draw_diagram：模型给节点数据，服务端生成 SVG（树/流程/ER/DFD…）
 │   │   ├── _pyguard.py      # Python 运行时审计钩子（子进程里跑）
 │   │   └── _codescan.py     # C/C++/Java/JS 跑前静态审查
 │   └── web/                 # 网页版
@@ -138,6 +139,7 @@ python -m pytest -q --cov=deck --cov-report=term-missing   # 看覆盖率
 | `tests/test_codescan.py` | 非 Python 代码的静态审查：危险头文件、`child_process`、越界路径字符串 |
 | `tests/test_uploads.py` | 上传图片：魔术字节、假图、超量、**EXIF 是否真的剥干净**、TTL 清理 |
 | `tests/test_render.py` | `render_html` 清洗：iframe / `script src` / `javascript:` 要清掉，内联脚本要保留 |
+| `tests/test_diagram.py` | `draw_diagram`：9 种图各画一张、空数据报错、标签转义不注入 |
 | `tests/test_blacklist.py` | IP 黑名单护栏：本机 / 内网 / 保留地址 / IPv6 / 操作者自己一律拒绝 |
 | `tests/test_traffic.py` | 站点归类、机房识别、`/static/` 不能被当敏感路径 |
 | `tests/test_files.py` | 文件工具越界 |
@@ -460,7 +462,8 @@ python -m deck.web
 | `read_pdf` | 按页抽 PDF 文字（带页码），`pages` 支持 `1-5` / `1,4,7`；扫描页和插图可交给视觉模型看 |
 | `read_doc` | 读 `.docx` 的段落、表格和内嵌图（老式 `.doc` 要先另存） |
 | `read_img` | 看工作区里的一张图，走和聊天发图同一条多模态链路，可带 prompt 指定重点 |
-| `render_html` | 写一段 HTML 直接渲染成聊天气泡里的卡片（SVG / canvas / CSS 动画都行，四层 XSS 防护）|
+| `draw_diagram` | **结构化画图**：树 / 流程图 / 关系图 / 数据流图 / 架构图 / 时序图 / 图表 / 时间线 / ER 图，模型只给几十 token 的节点数据，服务端生成 SVG（比手写 HTML 快一个数量级）|
+| `render_html` | 写一段 HTML 直接渲染成聊天气泡里的卡片（SVG / canvas / CSS 动画都行，四层 XSS 防护），用在创意海报 / 界面草图 / 动画这类自由排版 |
 
 ## 工程计算与教学仿真
 
