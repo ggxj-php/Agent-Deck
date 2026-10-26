@@ -426,6 +426,8 @@ class DeckAgent:
                             finish_reason = payload
                         elif kind == "thinking":
                             yield {"type": "thinking", "text": payload}
+                        elif kind == "tool_pending":
+                            yield {"type": "tool_pending", "name": payload}
                         else:
                             chunks.append(payload)
                             # 正文里可能夹着 [sticker:mood]，边收边切开

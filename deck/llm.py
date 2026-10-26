@@ -121,6 +121,7 @@ def stream_chat(messages: list, tools: list, model: str = "",
 
     text_parts = []
     calls = {}  # index -> {"id", "name", "arguments"}，流式下 tool_call 是分片下发的
+    pending_sent = set()   # 已经发过「正在准备工具」事件的下标
     finish = None
 
     for chunk in stream:
@@ -149,6 +150,11 @@ def stream_chat(messages: list, tools: list, model: str = "",
             if piece.function:
                 if piece.function.name:
                     slot["name"] = piece.function.name
+                    # 模型开始生成这个工具的参数了（画图时那一大段 HTML 可能要十几秒），
+                    # 先告诉前端「正在准备 —— 别让气泡空着像卡死」
+                    if piece.index not in pending_sent:
+                        pending_sent.add(piece.index)
+                        yield "tool_pending", piece.function.name
                 if piece.function.arguments:
                     slot["arguments"] += piece.function.arguments
 

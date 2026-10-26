@@ -967,20 +967,39 @@ function thinkingChunk(turn, text) {
 
 /* 发出消息后、模型第一个字还没回来：气泡里先放一个「正在想…」的跳动占位，
    别让用户对着一个空气泡发呆。任何事件（思考/正文/工具/表情包/产物）一到就撤掉。 */
-function showLoading(turn) {
-  if (!turn || turn.loading) return;
+function showLoading(turn, labelText) {
+  if (!turn) return;
+  if (turn.loading) {
+    if (labelText) {
+      const label = turn.loading.querySelector('.loading-text');
+      if (label) label.textContent = labelText;
+    }
+    return;
+  }
   const box = el('div', 'bubble-loading');
   for (let i = 0; i < 3; i += 1) box.appendChild(el('span', 'dot'));
   const label = el('span', 'loading-text');
-  label.textContent = t('loading');
+  label.textContent = labelText || t('loading');
   box.appendChild(label);
   turn.bubble.appendChild(box);
   turn.loading = box;
+  // 秒数一直走：模型想很久的时候，用户能看见它确实在动，而不是卡死
+  let seconds = 0;
+  const baseText = labelText || t('loading');
+  turn.loadingTimer = setInterval(() => {
+    seconds += 1;
+    label.textContent = `${baseText} ${seconds}s`;
+  }, 1000);
   updateToBottom();
 }
 
 function clearLoading(turn) {
-  if (!turn || !turn.loading) return;
+  if (!turn) return;
+  if (turn.loadingTimer) {
+    clearInterval(turn.loadingTimer);
+    turn.loadingTimer = null;
+  }
+  if (!turn.loading) return;
   turn.loading.remove();
   turn.loading = null;
 }
@@ -1150,7 +1169,9 @@ function addSticker(turn, mood, name) {
   // 先排队：等正文出现句末标点/换行再插，避免把句子劈开
   if (!turn.queuedStickers) turn.queuedStickers = [];
   turn.queuedStickers.push(index);
-  flushQueuedStickers(turn, false);
+  // 回复一开头就是表情包（正文还没开始）→ 立刻显示，不然气泡里啥也没有，
+  // 后面模型去调工具（可能要十几秒），用户看着就是「卡死了」
+  flushQueuedStickers(turn, !turn.content);
 }
 
 /* 把排队的表情包插进正文：force=true 时（这一块正文结束了）直接插 */
@@ -1813,7 +1834,10 @@ async function streamChat(id, message, onEvent, images) {
 }
 
 function handleEvent(turn, event) {
-  if (turn.loading) clearLoading(turn);   // 有事件了，别再显示「正在想…」
+  // 有正文 / 思考 / 工具 / 产物任何一样就撤掉占位；
+  // 但单纯的「表情包」事件不算：模型常先甩一张图再去跑十几秒的工具，
+  // 这时候占位留着（还带秒数）比空气泡更像在干活。
+  if (turn.loading && event.type !== 'sticker') clearLoading(turn);
   switch (event.type) {
     case 'thinking':
       thinkingChunk(turn, event.text);
@@ -1821,12 +1845,18 @@ function handleEvent(turn, event) {
     case 'content':
       contentChunk(turn, event.text);
       break;
+    case 'tool_pending':
+      // 模型正在生成工具参数（画图那一大段 HTML 可能要十几秒）：先显示进度
+      showLoading(turn, `正在准备 ${event.name}…`);
+      break;
     case 'tool_start':
       // send_sticker 不用画工具卡片，紧接着的 sticker 事件就是它的样子
       if (event.name !== 'send_sticker') toolStart(turn, event.name, event.arguments);
       break;
     case 'tool_end':
       toolEnd(turn, event.name, event.result);
+      // 工具跑完还要等模型下一轮：先挂个「正在想…」，别让界面空着
+      showLoading(turn);
       break;
     case 'sticker':
       addSticker(turn, event.mood, event.name);
