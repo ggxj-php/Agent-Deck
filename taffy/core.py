@@ -222,13 +222,23 @@ def _sendable(messages):
 class TaffyAgent:
     """一个塔菲会话。对话历史存在实例里，所以同一个实例能记住上下文。"""
 
-    def __init__(self):
+    def __init__(self, messages=None, cut_off=False, owner=None):
+        """messages 是这条会话已经存下来的历史（不含 system 那条）。
+
+        网页版现在**不再把 agent 常驻内存**：每轮请求从 SQLite 读出历史、灌进来跑完、
+        再写回去，所以内存跟「同时有几个请求」有关，跟「有多少个会话」无关。
+        owner 是用户 id，上传的图片按人隔离。
+        """
         # 第一条永远是系统提示词，网页版每个会话都从这句开始，不会丢人设。
         # 现问一次（而不是 import 时定死）：后台改了提示词，新会话立刻就是新的，
         # 不用重启；已经在聊的会话还留着它自己那份（第一条早就定下来了）。
         self.messages = [{"role": "system", "content": settings.system_prompt()}]
+        if messages:
+            self.messages.extend(messages)
         # 上一轮是不是被截断/中断了。是的话，用户发「继续」就接着写而不是重开一轮。
-        self.cut_off = False
+        self.cut_off = bool(cut_off)
+        # 用户 id：上传图片按人隔离用
+        self.owner = owner
 
     def context_usage(self):
         """当前上下文用量，网页版拿它显示「上下文 xx%」。"""
@@ -272,7 +282,7 @@ class TaffyAgent:
             incoming.append(image)
         if images:
             incoming.extend(images)
-        refs, image_notes = uploads.save(incoming)
+        refs, image_notes = uploads.save(incoming, owner=self.owner)
         summaries = uploads.summarize(refs) if refs else {}
         markers = uploads.marker_text(refs, summaries, image_notes)
 

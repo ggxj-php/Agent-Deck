@@ -76,13 +76,43 @@ const tbMoreEl = document.getElementById('tb-more');
 const tbActionsEl = document.getElementById('tb-actions');
 const thinkToggleEl = document.getElementById('think-toggle');
 
-let sessionId = sessionStorage.getItem(STORAGE_KEY);
+let sessionId = null;      // 当前会话 id（存在后端 SQLite 里）
+let me = null;             // 当前登录用户
+let sessions = [];         // 侧边栏的会话列表
 let busy = false;
 let sentCount = 0;       // 这个页面聊过几句，存上下文之前用它判断有没有东西可存
 let pendingImages = []; // 已经选好、还没发出去的多张图片（data URL 列表）
 const IMAGE_MAX_COUNT = 6;  // 一轮最多几张，和后端 uploads.MAX_COUNT 对齐
 
 marked.setOptions({ gfm: true, breaks: true });
+
+/* 任何接口回 401 都说明登录过期了，直接踢回登录页，别让页面卡在死状态 */
+const _realFetch = window.fetch.bind(window);
+window.fetch = async (input, init) => {
+  const resp = await _realFetch(input, init);
+  if (resp.status === 401 && !String(input).includes('/api/auth/login')
+      && !String(input).includes('/api/auth/register')) {
+    location.replace('/login');
+    throw new Error('登录过期了喵');
+  }
+  return resp;
+};
+
+const sidebarEl = document.getElementById('sidebar');
+const sideScrimEl = document.getElementById('side-scrim');
+const sideToggleEl = document.getElementById('side-toggle');
+const sideListEl = document.getElementById('side-list');
+const sideNameEl = document.getElementById('side-name');
+const sideInviteEl = document.getElementById('side-invite');
+const sideInviteCodeEl = document.getElementById('side-invite-code');
+const sideNewEl = document.getElementById('side-new');
+const sidePassEl = document.getElementById('side-pass');
+const sideLogoutEl = document.getElementById('side-logout');
+const passModalEl = document.getElementById('pass-modal');
+const passOldEl = document.getElementById('pass-old');
+const passNewEl = document.getElementById('pass-new');
+const passMsgEl = document.getElementById('pass-msg');
+const passCancelEl = document.getElementById('pass-cancel');
 
 const el = (tag, cls) => {
   const node = document.createElement(tag);
@@ -714,13 +744,201 @@ function prettyArgs(raw) {
 
 async function ensureSession(force) {
   if (!force && sessionId) return sessionId;
-  const resp = await fetch('/api/session', { method: 'POST' });
+  const resp = await fetch('/api/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
   if (!resp.ok) throw new Error('开新会话失败');
   const data = await resp.json();
-  sessionId = data.session_id;
-  sessionStorage.setItem(STORAGE_KEY, sessionId);
+  sessionId = data.session.id;
+  await loadSessions();
   return sessionId;
 }
+
+/* ---------------- 侧边栏：用户 / 会话列表 ---------------- */
+
+function openSidebar() {
+  sidebarEl.classList.add('open');
+  sideScrimEl.hidden = false;
+}
+
+function closeSidebar() {
+  sidebarEl.classList.remove('open');
+  sideScrimEl.hidden = true;
+}
+
+function paintUser() {
+  if (!me) return;
+  sideNameEl.textContent = me.name;
+  sideInviteCodeEl.textContent = me.invite_code || '—';
+}
+
+async function loadMe() {
+  const resp = await fetch('/api/auth/me', { cache: 'no-store' });
+  if (!resp.ok) {
+    location.replace('/login');
+    return null;
+  }
+  const data = await resp.json();
+  me = data.user;
+  paintUser();
+  return me;
+}
+
+async function loadSessions() {
+  try {
+    const resp = await fetch('/api/sessions', { cache: 'no-store' });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    sessions = data.sessions || [];
+    renderSessionList();
+  } catch (err) {
+    /* 列不出来就先这样，下一轮再说 */
+  }
+}
+
+function renderSessionList() {
+  sideListEl.innerHTML = '';
+  if (!sessions.length) {
+    const empty = el('div', 'side-empty');
+    empty.textContent = '还没有会话喵';
+    sideListEl.appendChild(empty);
+    return;
+  }
+  sessions.forEach((item) => {
+    const row = el('div', 'side-item');
+    if (item.id === sessionId) row.classList.add('on');
+    const title = el('button', 'side-item-title');
+    title.type = 'button';
+    title.textContent = item.title || '新会话';
+    title.title = item.title || '';
+    title.addEventListener('click', () => switchSession(item.id));
+    const del = el('button', 'side-item-del');
+    del.type = 'button';
+    del.textContent = '×';
+    del.setAttribute('aria-label', '删除这个会话');
+    del.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      if (!window.confirm(`删掉「${item.title || '新会话'}」喵？删了就回不来了`)) return;
+      const resp = await fetch(`/api/sessions/${item.id}`, { method: 'DELETE' });
+      if (!resp.ok) return;
+      if (item.id === sessionId) {
+        sessionId = null;
+        messagesEl.innerHTML = '';
+        sentCount = 0;
+      }
+      await loadSessions();
+      if (!sessionId) {
+        await ensureSession();
+        welcome();
+      }
+      closeSidebar();
+    });
+    row.append(title, del);
+    sideListEl.appendChild(row);
+  });
+}
+
+async function switchSession(id) {
+  if (busy) return;
+  if (id === sessionId) {
+    closeSidebar();
+    return;
+  }
+  try {
+    const resp = await fetch(`/api/sessions/${id}/messages`, { cache: 'no-store' });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    sessionId = id;
+    messagesEl.innerHTML = '';
+    const items = data.history || [];
+    renderHistory(items);
+    sentCount = items.length;
+    paintContext(data.context);
+    sessionStorage.setItem(STORAGE_KEY, sessionId);
+    renderSessionList();
+    updateToBottom();
+    scrollToBottom();
+  } finally {
+    closeSidebar();
+  }
+  inputEl.focus();
+}
+
+sideToggleEl.addEventListener('click', openSidebar);
+sideScrimEl.addEventListener('click', closeSidebar);
+sideNewEl.addEventListener('click', async () => {
+  if (busy) return;
+  messagesEl.innerHTML = '';
+  sessionId = null;
+  sentCount = 0;
+  paintContext(null);
+  try {
+    await ensureSession(true);
+    welcome();
+    loadSessions();
+  } catch (err) {
+    statusEl.textContent = '开新会话失败';
+  }
+  closeSidebar();
+  inputEl.focus();
+});
+
+sideInviteEl.addEventListener('click', async () => {
+  const code = (me && me.invite_code) || '';
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    statusEl.textContent = '邀请码已复制喵';
+  } catch (err) {
+    statusEl.textContent = '复制失败，手动记一下：' + code;
+  }
+});
+
+sideLogoutEl.addEventListener('click', async () => {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (err) { /* 忽略 */ }
+  location.replace('/login');
+});
+
+/* ---------------- 改密码 ---------------- */
+
+function closePassModal() {
+  passModalEl.hidden = true;
+  passMsgEl.hidden = true;
+  passOldEl.value = '';
+  passNewEl.value = '';
+}
+
+sidePassEl.addEventListener('click', () => {
+  passModalEl.hidden = false;
+  passMsgEl.hidden = true;
+  passOldEl.focus();
+  closeSidebar();
+});
+
+passCancelEl.addEventListener('click', closePassModal);
+
+document.getElementById('pass-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  passMsgEl.hidden = true;
+  const resp = await fetch('/api/auth/password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ old_password: passOldEl.value, new_password: passNewEl.value }),
+  });
+  let data = null;
+  try { data = await resp.json(); } catch (err) { data = null; }
+  if (!resp.ok) {
+    passMsgEl.hidden = false;
+    passMsgEl.textContent = (data && data.detail) || '改不了喵';
+    return;
+  }
+  closePassModal();
+  statusEl.textContent = '密码改好啦喵';
+});
 
 /* ---------------- 上下文占用 ----------------
    后端按「中文 1 字 1 token、英文 4 字符 1 token」粗估（见 taffy/context.py），
@@ -941,6 +1159,7 @@ async function send(text, images) {
     pickImageEl.disabled = false;
     statusEl.textContent = '在线喵';
     refreshContext();     // 这一轮又添了几条，顺便把上下文占用刷新一下
+    loadSessions();       // 首句聊完，标题会从「新会话」变成那句话
     inputEl.focus();
   }
 }
@@ -1182,14 +1401,36 @@ function closeLoadModal() {
 }
 
 /* 把历史摆回聊天区：工具调用那些不画（刷屏），只摆用户说的和塔菲的正文 */
+/* 历史里的用户消息长这样：「我发了两张图\n\n[图片 #abc123 uploads/abc123.jpg：摘要]」
+   把标记抠出来换成缩略图，剩下的当正文。 */
+const HISTORY_IMG_MARK = /\[图片 #([0-9a-f]{6,32})[^\]]*\]/g;
+
 function renderHistory(items) {
   items.forEach((item) => {
+    const text = String(item.text || '');
     if (item.role === 'user') {
-      addUser(item.text, null);
+      const ids = [];
+      const re = new RegExp(HISTORY_IMG_MARK.source, 'g');
+      let hit;
+      while ((hit = re.exec(text)) !== null) ids.push(hit[1]);
+      const body = text.replace(HISTORY_IMG_MARK, '').trim();
+      addUser(body || (ids.length ? '' : '（空消息）'),
+              ids.map((id) => `/api/uploads/${id}`));
       return;
     }
     const turn = addAgent();
-    contentChunk(turn, item.text);
+    // 正文里夹着 [sticker:mood]，按位置拆成「文字 - 表情包 - 文字」
+    const mark = /\[\s*sticker\s*:\s*([a-zA-Z_]+)\s*\]/gi;
+    let last = 0;
+    let hit;
+    while ((hit = mark.exec(text)) !== null) {
+      const chunk = text.slice(last, hit.index);
+      if (chunk) contentChunk(turn, chunk);
+      addSticker(turn, hit[1].toLowerCase());
+      last = hit.index + hit[0].length;
+    }
+    const tail = text.slice(last);
+    if (tail) contentChunk(turn, tail);
     if (turn.content) scheduleRender(turn.content);
   });
 }
@@ -1275,7 +1516,7 @@ newChatEl.addEventListener('click', async () => {
   clearImage();
   messagesEl.innerHTML = '';
   sessionId = null;
-  sessionStorage.removeItem(STORAGE_KEY);
+  sentCount = 0;
   paintContext(null);      // 新会话，占用归零
   updateToBottom();
   try {
@@ -1384,9 +1625,29 @@ armLeaveGuard();
 (async function init() {
   loadStickerLib();   // 不等它，表情包清单到了就用新的，没到就用兜底那份
   try {
-    await ensureSession();
-    welcome();
-    refreshContext();  // 刷新页面后把上次聊到哪、上下文用了几成接回来
+    await loadMe();                 // 没登录会直接跳 /login
+    await loadSessions();
+    if (sessions.length) {
+      // 接着最近聊的那条会话
+      const latest = sessions[0].id;
+      const resp = await fetch(`/api/sessions/${latest}/messages`, { cache: 'no-store' });
+      if (resp.ok) {
+        const data = await resp.json();
+        sessionId = latest;
+        messagesEl.innerHTML = '';
+        const items = data.history || [];
+        renderHistory(items);
+        sentCount = items.length;
+        paintContext(data.context);
+        scrollToBottom();
+      }
+    }
+    if (!sessionId) {
+      await ensureSession();
+      welcome();
+    }
+    renderSessionList();
+    refreshContext();  // 刷新页面后把上下文用了几成接回来
   } catch (err) {
     statusEl.textContent = '连不上服务喵';
   }

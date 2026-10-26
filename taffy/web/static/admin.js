@@ -1,13 +1,8 @@
 /* 兜底：万一脚本某一行抛异常，别让人卡在「看看钥匙喵…」——
    至少把登录框放出来，而不是白屏干瞪眼。 */
 window.addEventListener('error', () => {
-  const login = document.getElementById('login-view');
-  const panel = document.getElementById('panel-view');
   const status = document.getElementById('status');
-  if (login && panel && panel.hidden) {
-    login.hidden = false;
-    if (status) status.textContent = '脚本出了点问题，先登录试试';
-  }
+  if (status) status.textContent = '脚本出了点问题，刷新一下试试';
 });
 
 'use strict';
@@ -23,11 +18,8 @@ const NAV_KEY = 'taffy_admin_nav_closed';   // 哪几个分组收起来了
 const NAV_HIDDEN_KEY = 'taffy_admin_nav_hidden'; // 整条侧边栏收起来了吗
 
 const statusEl = document.getElementById('status');
-const loginView = document.getElementById('login-view');
 const panelView = document.getElementById('panel-view');
 const logoutEl = document.getElementById('logout');
-const loginForm = document.getElementById('login-form');
-const passwordEl = document.getElementById('password');
 const navToggleEl = document.getElementById('nav-toggle');
 const navCollapseEl = document.getElementById('nav-collapse');
 const sidebarEl = document.getElementById('sidebar');
@@ -162,12 +154,12 @@ function fmtDuration(seconds) {
 /* ---------------- 请求 ---------------- */
 
 /* 统一发请求：非 2xx 就把后端给的 detail 抛出来 */
-async function api(path, body) {
-  const post = body !== undefined;
+async function api(path, body, method) {
+  const hasBody = body !== undefined;
   const resp = await fetch(path, {
-    method: post ? 'POST' : 'GET',
-    headers: post ? { 'Content-Type': 'application/json' } : {},
-    body: post ? JSON.stringify(body) : undefined,
+    method: method || (hasBody ? 'POST' : 'GET'),
+    headers: hasBody ? { 'Content-Type': 'application/json' } : {},
+    body: hasBody ? JSON.stringify(body) : undefined,
   });
   return readResponse(resp);
 }
@@ -305,6 +297,7 @@ function showView(name) {
 }
 
 const VIEW_HOOKS = {
+  users: loadUsers,
   dashboard: refreshSysinfo,
   traffic: loadTraffic,
   prompt: loadPrompt,
@@ -315,28 +308,21 @@ const VIEW_HOOKS = {
   update: initUpdate,
 };
 
-function showLogin(message) {
-  loginView.hidden = false;
-  panelView.hidden = true;
-  sidebarEl.hidden = true;
-  navToggleEl.hidden = true;
-  navCollapseEl.hidden = true;
-  logoutEl.hidden = true;
-  flash(message || '先输口令喵', false);
-  passwordEl.focus();
+function showLogin() {
+  /* 后台鉴权现在走用户账号：不是管理员就回登录页（登录后再跳回来） */
+  location.replace('/login?next=/admin');
 }
 
 /* ---------------- 配置：模型 / 接口 / 向量 ---------------- */
 
 function render(state) {
   lastState = state;
-  loginView.hidden = true;
   panelView.hidden = false;
   sidebarEl.hidden = false;
   navToggleEl.hidden = false;
   navCollapseEl.hidden = false;
   logoutEl.hidden = false;
-  sidebarTipEl.textContent = `口令每天换一次 · 聊天用 ${state.model} 喵`;
+  sidebarTipEl.textContent = `管理员后台 · 聊天用 ${state.model} 喵`;
 
   modelEl.value = state.model;
   visionEl.value = state.vision_model;
@@ -1590,25 +1576,13 @@ MOODS.forEach((mood) => {
   stickerMoodEl.appendChild(option);
 });
 
-loginForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  try {
-    await api('/api/admin/login', { password: passwordEl.value });
-    passwordEl.value = '';
-    await load('登录成功喵～');
-  } catch (err) {
-    flash(err.message, false);
-    passwordEl.value = '';
-  }
-});
-
 logoutEl.addEventListener('click', async () => {
   try {
-    await api('/api/admin/logout', {});
+    await api('/api/auth/logout', {});
   } catch (err) {
-    /* 退不了也要把界面切回登录页 */
+    /* 退不了也照样跳登录页 */
   }
-  showLogin('已经退出喵');
+  location.replace('/login');
 });
 
 saveModelsEl.addEventListener('click', async () => {
@@ -1816,3 +1790,153 @@ setInterval(() => {
 }, 5000);
 
 load();
+/* ---------------- 用户管理 ----------------
+   列表、建号、改权限、封号、重置密码、备注、删除。
+   所有操作都走后端 /api/admin/users，后端会再校验一次「你是不是管理员」。 */
+
+let usersCache = [];
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(Number(ts) * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function userMsg(text, ok) {
+  const node = document.getElementById('user-msg');
+  if (!node) return;
+  node.hidden = !text;
+  node.textContent = text || '';
+  node.classList.toggle('ok', Boolean(ok));
+}
+
+function userOp(text, handler, disabled, danger) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'user-op' + (danger ? ' danger' : '');
+  btn.textContent = text;
+  btn.disabled = Boolean(disabled);
+  btn.addEventListener('click', handler);
+  return btn;
+}
+
+async function loadUsers() {
+  try {
+    const data = await api('/api/admin/users');
+    usersCache = data.users || [];
+    renderUsers(data.me);
+    userMsg('');
+  } catch (err) {
+    userMsg(err && err.message ? err.message : '用户列表拉不到', false);
+  }
+}
+
+function renderUsers(meId) {
+  const tbody = document.getElementById('user-rows');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  usersCache.forEach((user) => {
+    const tr = document.createElement('tr');
+    const isMe = user.id === meId;
+    const badge = user.is_admin
+      ? '<span class="user-badge admin">管理员</span>'
+      : '<span class="user-badge">普通</span>';
+    const banned = user.disabled ? '<span class="user-badge banned">已封号</span>' : '';
+    tr.innerHTML = `
+      <td class="user-name">${escapeHtml(user.name)}${isMe ? ' <span class="user-badge me">我</span>' : ''}</td>
+      <td><code>${escapeHtml(user.invite_code)}</code></td>
+      <td>${escapeHtml(user.invited_by || '—')}</td>
+      <td>${user.sessions}</td>
+      <td>${fmtTime(user.created_at)}</td>
+      <td>${fmtTime(user.last_login)}</td>
+      <td>${badge}${banned}</td>`;
+    const ops = document.createElement('td');
+    ops.className = 'user-ops';
+    ops.append(
+      userOp(isMe ? '自己' : (user.is_admin ? '取消管理员' : '设为管理员'),
+        () => toggleAdmin(user), isMe),
+      userOp(user.disabled ? '解封' : '封号', () => toggleBan(user), isMe),
+      userOp('改密码', () => resetPassword(user), false),
+      userOp('备注', () => editNote(user), false),
+      userOp('删除', () => removeUser(user), isMe, true),
+    );
+    tr.appendChild(ops);
+    tbody.appendChild(tr);
+  });
+}
+
+async function patchUser(user, body, okText) {
+  try {
+    await api(`/api/admin/users/${user.id}`, body, 'PATCH');
+    await loadUsers();
+    userMsg(okText || '改好了喵', true);
+  } catch (err) {
+    userMsg(err && err.message ? err.message : '改不了喵', false);
+  }
+}
+
+function toggleAdmin(user) {
+  return patchUser(user, { is_admin: !user.is_admin },
+    user.is_admin ? `已经取消「${user.name}」的管理员权限喵` : `「${user.name}」现在是管理员喵`);
+}
+
+function toggleBan(user) {
+  if (!user.disabled && !window.confirm(`封掉「${user.name}」喵？他的登录态会立刻失效`)) {
+    return undefined;
+  }
+  return patchUser(user, { disabled: !user.disabled },
+    user.disabled ? `已经解封「${user.name}」喵` : `已经把「${user.name}」封了喵`);
+}
+
+function resetPassword(user) {
+  const pass = window.prompt(`给「${user.name}」设个新密码（至少 8 位）`);
+  if (!pass) return undefined;
+  return patchUser(user, { password: pass }, `「${user.name}」的密码改好了，他的登录态已全部失效`);
+}
+
+function editNote(user) {
+  const note = window.prompt(`给「${user.name}」写个备注`, user.note || '');
+  if (note === null) return undefined;
+  return patchUser(user, { note }, '备注存好了喵');
+}
+
+async function removeUser(user) {
+  if (!window.confirm(`删掉用户「${user.name}」和他所有会话喵？删了就回不来了`)) return;
+  try {
+    await api(`/api/admin/users/${user.id}`, undefined, 'DELETE');
+    await loadUsers();
+    userMsg(`已经把「${user.name}」删掉了喵`, true);
+  } catch (err) {
+    userMsg(err && err.message ? err.message : '删不掉喵', false);
+  }
+}
+
+document.getElementById('user-create').addEventListener('click', async () => {
+  const nameEl = document.getElementById('user-new-name');
+  const passEl = document.getElementById('user-new-pass');
+  const adminEl = document.getElementById('user-new-admin');
+  const noteEl = document.getElementById('user-new-note');
+  const name = nameEl.value.trim();
+  const password = passEl.value;
+  if (!name || !password) {
+    userMsg('用户名和密码都得填喵', false);
+    return;
+  }
+  try {
+    await api('/api/admin/users', {
+      name, password,
+      is_admin: adminEl.checked,
+      note: noteEl.value.trim(),
+    });
+    nameEl.value = '';
+    passEl.value = '';
+    noteEl.value = '';
+    adminEl.checked = false;
+    await loadUsers();
+    userMsg(`「${name}」建好了喵`, true);
+  } catch (err) {
+    userMsg(err && err.message ? err.message : '建不了喵', false);
+  }
+});

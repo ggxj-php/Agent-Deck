@@ -1,28 +1,22 @@
-"""后台管理：登录、改模型、改 Key、改知识库的向量模型。挂在 /admin 和 /api/admin/* 底下。
+"""后台管理：改模型、改 Key、管用户、看流量。挂在 /admin 和 /api/admin/* 底下。
 
-口令是按天变的：md5(.env 里的 ADMIN_PASSWORD_PREFIX + 当天日期 YYMMDD)，日期按
-UTC+8 算——服务器时钟是 UTC 也不会差一天。口令只在内存里比对，不落盘、不写日志。
+**鉴权复用了用户账号**（不再是自己那套按天变的口令）：
+必须先以普通用户身份登录，且那个账号的 is_admin = 1，才能进后台。
+管理员可以在「用户管理」里给谁开权限、封号、改密码。
 
-**这里刻意不留任何默认前缀**：前缀是口令里唯一的秘密，写进代码就等于公开了。
-没配的话登录直接拒绝，并提示去 .env 里配。
-
-登录成功发一个随机 token 的 cookie，12 小时有效；进程重启就全失效，得重新登。
+默认管理员在第一次启动时自动创建（见 auth.ensure_default_admin）。
 """
-import hashlib
-import hmac
 import json
 import os
-import secrets
 import threading
 import time
-from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 
-from .. import llm, settings
-from ..config import ADMIN_PASSWORD_PREFIX, CONTEXT_COMPRESS_AT, EMBED_DIM
+from .. import auth, db, llm, settings, store
+from ..config import CONTEXT_COMPRESS_AT, EMBED_DIM
 from ..kb import stats as kb_stats
 from . import blacklist, sysinfo, traffic, update
 
@@ -33,59 +27,24 @@ router = APIRouter()
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
-COOKIE_NAME = "taffy_admin"
-TOKEN_TTL = 12 * 3600
-_TOKENS = {}
-_TOKENS_LOCK = threading.Lock()
+def _current_user(request):
+    """从 cookie 认人（不抛异常，认不出来返回 None）。"""
+    return auth.resolve_token(request.cookies.get(auth.COOKIE_NAME))
 
 
-def _digest(text):
-    return hashlib.md5(text.encode("utf-8")).hexdigest()
-
-
-def _beijing_now():
-    """按北京时间取「当前」。服务器跑在 UTC 上也不会把日期算错一天。"""
-    return datetime.now(timezone.utc) + timedelta(hours=8)
-
-
-def expected_password(day=None):
-    """当天口令的 md5。动态的就是日期那一段；前缀没配的话这个值没意义，
-    登录那条路会先拦下来。"""
-    return _digest(ADMIN_PASSWORD_PREFIX + (day or _beijing_now()).strftime("%y%m%d"))
-
-
-def check_password(password):
-    """比对 md5，别拿明文字符串直接比。没配前缀一律不放行。"""
-    if not ADMIN_PASSWORD_PREFIX:
-        return False
-    if not isinstance(password, str) or not password:
-        return False
-    return hmac.compare_digest(_digest(password), expected_password())
-
-
-def _issue_token():
-    token = secrets.token_urlsafe(32)
-    now = time.time()
-    with _TOKENS_LOCK:
-        for old, expire in list(_TOKENS.items()):
-            if expire < now:
-                del _TOKENS[old]
-        _TOKENS[token] = now + TOKEN_TTL
-    return token
-
-
-def _logged_in(request):
-    token = request.cookies.get(COOKIE_NAME)
-    if not token:
-        return False
-    with _TOKENS_LOCK:
-        expire = _TOKENS.get(token)
-    return bool(expire and expire > time.time())
+def _admin(request):
+    """必须登录 + 是管理员才放行。"""
+    user = _current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="先登录喵")
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="要管理员权限喵")
+    request.state.user = user
+    return user
 
 
 def _require(request):
-    if not _logged_in(request):
-        raise HTTPException(status_code=401, detail="先登录喵")
+    return _admin(request)
 
 
 def _state():
@@ -128,40 +87,14 @@ def _state():
 
 
 @router.get("/admin")
-def admin_page():
+def admin_page(request: Request):
+    """后台页面：不是管理员就踢回登录页。"""
+    user = _current_user(request)
+    if not user:
+        return RedirectResponse(url="/login?next=/admin", status_code=303)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="要管理员权限喵")
     return FileResponse(os.path.join(STATIC_DIR, "admin.html"))
-
-
-class LoginRequest(BaseModel):
-    password: str = ""
-
-
-@router.post("/api/admin/login")
-def login(req: LoginRequest, response: Response):
-    if not ADMIN_PASSWORD_PREFIX:
-        raise HTTPException(
-            status_code=503,
-            detail="后台口令还没配喵：在 .env 里加一行 ADMIN_PASSWORD_PREFIX=你自己定的一串，再重启服务",
-        )
-    if not check_password(req.password):
-        raise HTTPException(status_code=401, detail="口令不对喵")
-    response.set_cookie(
-        COOKIE_NAME,
-        _issue_token(),
-        max_age=TOKEN_TTL,
-        httponly=True,   # 前端 JS 读不到，少一个被偷的口子
-        samesite="lax",
-    )
-    return {"ok": True}
-
-
-@router.post("/api/admin/logout")
-def logout(request: Request, response: Response):
-    token = request.cookies.get(COOKIE_NAME)
-    with _TOKENS_LOCK:
-        _TOKENS.pop(token, None)
-    response.delete_cookie(COOKIE_NAME)
-    return {"ok": True}
 
 
 @router.get("/api/admin/state")
@@ -645,3 +578,120 @@ def save_prompt(req: PromptRequest, request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _prompt_payload()
+
+# ---------------- 用户管理 ----------------
+
+_NAME_ERR = "用户名 3~20 位，只能中文 / 字母 / 数字 / _ -"
+
+
+def _user_row(row):
+    item = dict(row)
+    item["is_admin"] = bool(item.get("is_admin"))
+    item["disabled"] = bool(item.get("disabled"))
+    item["sessions"] = store.count_for_user(item["id"])
+    return item
+
+
+@router.get("/api/admin/users")
+def list_users(request: Request):
+    """用户列表：权限、封号状态、邀请码、注册时间、最后登录、会话数。"""
+    me = _require(request)
+    with db.cursor() as conn:
+        rows = conn.execute(
+            "SELECT id, name, invite_code, invited_by, created_at, is_admin, disabled, "
+            "       note, last_login FROM users ORDER BY id"
+        ).fetchall()
+    return {"users": [_user_row(row) for row in rows], "me": me["id"],
+            "total": len(rows)}
+
+
+class UserCreate(BaseModel):
+    name: str = ""
+    password: str = ""
+    is_admin: bool = False
+    note: str = ""
+
+
+@router.post("/api/admin/users")
+def create_user(req: UserCreate, request: Request):
+    """管理员直接开号（不用邀请码）。"""
+    _require(request)
+    user, err = auth.create_user(req.name, req.password, invited_by="admin",
+                                 is_admin=req.is_admin, note=req.note)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {"ok": True, "user": auth.public_user(user)}
+
+
+class UserUpdate(BaseModel):
+    is_admin: bool | None = None
+    disabled: bool | None = None
+    note: str | None = None
+    password: str | None = None
+
+
+@router.patch("/api/admin/users/{user_id}")
+def update_user(user_id: int, req: UserUpdate, request: Request):
+    """改权限 / 封号 / 备注 / 重置密码。
+
+    两条护栏：不能把自己降权或封号（免得把自己锁在门外），
+    也不能把最后一个管理员干掉。
+    """
+    me = _require(request)
+    target = auth.find_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="没有这个用户喵")
+
+    if target["id"] == me["id"]:
+        if req.is_admin is False:
+            raise HTTPException(status_code=400, detail="不能取消自己的管理员权限喵")
+        if req.disabled:
+            raise HTTPException(status_code=400, detail="不能封禁自己喵")
+
+    if target.get("is_admin") and req.is_admin is False:
+        with db.cursor() as conn:
+            others = conn.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE is_admin = 1 AND id != ?",
+                (target["id"],)).fetchone()["n"]
+        if not others:
+            raise HTTPException(status_code=400, detail="这是最后一个管理员，不能降权喵")
+
+    with db.cursor() as conn:
+        if req.is_admin is not None:
+            conn.execute("UPDATE users SET is_admin = ? WHERE id = ?",
+                         (1 if req.is_admin else 0, target["id"]))
+        if req.disabled is not None:
+            conn.execute("UPDATE users SET disabled = ? WHERE id = ?",
+                         (1 if req.disabled else 0, target["id"]))
+            if req.disabled:
+                conn.execute("DELETE FROM auth_tokens WHERE user_id = ?", (target["id"],))
+        if req.note is not None:
+            conn.execute("UPDATE users SET note = ? WHERE id = ?",
+                         (req.note[:200], target["id"]))
+    if req.password:
+        err = auth.set_password(target["id"], req.password)
+        if err:
+            raise HTTPException(status_code=400, detail=err)
+        if target["id"] != me["id"]:
+            auth.revoke_all(target["id"])       # 改了别人密码就把他的登录态全踢掉
+    return {"ok": True}
+
+
+@router.delete("/api/admin/users/{user_id}")
+def delete_user(user_id: int, request: Request):
+    me = _require(request)
+    if user_id == me["id"]:
+        raise HTTPException(status_code=400, detail="不能删自己喵")
+    target = auth.find_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="没有这个用户喵")
+    if target.get("is_admin"):
+        with db.cursor() as conn:
+            others = conn.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE is_admin = 1 AND id != ?",
+                (user_id,)).fetchone()["n"]
+        if not others:
+            raise HTTPException(status_code=400, detail="这是最后一个管理员，不能删喵")
+    with db.cursor() as conn:
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    return {"ok": True}

@@ -78,12 +78,6 @@ SEARCH_MIN_INTERVAL = _env_seconds("SEARCH_MIN_INTERVAL", 2.0)
 SEARCH_COOLDOWN = _env_seconds("SEARCH_COOLDOWN", 600.0)
 SEARCH_CACHE_TTL = _env_seconds("SEARCH_CACHE_TTL", 300.0)
 
-# 网页后台（/admin）登录口令的前缀。
-# 口令是按天算的：md5(ADMIN_PASSWORD_PREFIX + 当天日期 YYMMDD)，所以这里配的
-# 前缀就是这个口令里唯一的秘密。代码里**故意不留默认值**——留了就等于把口令公开，
-# 谁都能算出当天口令。不配的话后台登录会直接拒绝并提示去 .env 里配。
-ADMIN_PASSWORD_PREFIX = os.environ.get("ADMIN_PASSWORD_PREFIX", "").strip()
-
 # 单次提问内，工具最多轮询这么多次
 MAX_ROUNDS = 100
 

@@ -100,6 +100,18 @@
         </div>
       </section>
 
+      <section class="nav-group" data-group="用户">
+        <button type="button" class="nav-head">
+          <span class="nav-text">用户</span>
+          <i class="caret" aria-hidden="true"></i>
+        </button>
+        <div class="nav-items">
+          <button type="button" class="nav-item" data-view="users" title="用户管理">
+            <span class="nav-text">用户管理</span>
+          </button>
+        </div>
+      </section>
+
       <section class="nav-group" data-group="系统">
         <button type="button" class="nav-head">
           <span class="nav-text">系统</span>
@@ -117,22 +129,38 @@
 
   <main class="admin-main">
 
-    <section id="login-view" class="card" hidden>
-      <h2>先登录喵</h2>
-      <p class="hint">
-        口令每天换一次，只有塔菲的主人知道喵。<br>
-        怎么配、怎么算，见 README 的「后台管理」那一节。
-      </p>
-      <form id="login-form">
-        <label>口令
-          <input type="password" id="password" placeholder="当日口令"
-                 autocomplete="current-password">
-        </label>
-        <button type="submit">登录</button>
-      </form>
-    </section>
+    <div id="panel-view">
 
-    <div id="panel-view" hidden>
+      <!-- ---------- 用户管理 ---------- -->
+      <section class="view" data-view="users" hidden>
+        <div class="card">
+          <h2>用户</h2>
+          <p class="hint">
+            每个用户都有唯一的邀请码，注册时填谁的码就算谁邀请的。
+            <b>管理员</b>能进这个后台；<b>封号</b>会立刻踢掉他的登录态。
+          </p>
+          <div class="user-create-row">
+            <input id="user-new-name" placeholder="用户名（3~20 字）" maxlength="20">
+            <input id="user-new-pass" type="password" placeholder="初始密码（≥8 位）"
+                   autocomplete="new-password">
+            <label class="user-check"><input type="checkbox" id="user-new-admin"> 管理员</label>
+            <input id="user-new-note" placeholder="备注（可选）" maxlength="60">
+            <button type="button" id="user-create">建用户</button>
+          </div>
+          <p class="hint" id="user-msg" hidden></p>
+          <div class="table-wrap">
+            <table class="user-table">
+              <thead>
+                <tr>
+                  <th>用户名</th><th>邀请码</th><th>邀请人</th><th>会话</th>
+                  <th>注册</th><th>最后登录</th><th>权限</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="user-rows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
       <!-- ---------- 仪表盘 ---------- -->
       <section class="view" data-view="dashboard" hidden>

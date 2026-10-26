@@ -139,6 +139,12 @@ def _save_index(index):
         pass
 
 
+def owner_of(aid):
+    """这张图是哪个用户传的（没记录返回 None）。"""
+    item = _load_index().get(aid or "")
+    return (item or {}).get("owner")
+
+
 def sweep(ttl=TTL_SECONDS):
     """删掉超过 TTL 的图片和索引项。返回删了几个。"""
     now = time.time()
@@ -172,7 +178,7 @@ def sweep(ttl=TTL_SECONDS):
 
 # ---------------- 存 / 取 ----------------
 
-def save(data_urls):
+def save(data_urls, owner=None):
     """校验并落盘。返回 (refs, notes)。
 
     refs 里每项：{"id", "path"（相对 workspace）, "mime"}
@@ -212,7 +218,8 @@ def save(data_urls):
             continue
 
         index[aid] = {"file": fname, "ts": time.time(), "size": len(clean),
-                      "mime": "image/png" if ext == "png" else "image/jpeg"}
+                      "mime": "image/png" if ext == "png" else "image/jpeg",
+                      "owner": owner}
         refs.append({"id": aid, "path": "uploads/" + fname,
                      "mime": index[aid]["mime"]})
     _save_index(index)

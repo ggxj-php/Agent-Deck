@@ -12,6 +12,26 @@
 </head>
 <body>
 
+<aside class="sidebar" id="sidebar">
+  <div class="side-head">
+    <img class="side-avatar" src="/static/avatar.jpg" alt="">
+    <div class="side-who">
+      <div class="side-name" id="side-name">…</div>
+      <button type="button" class="side-invite" id="side-invite" title="点一下复制邀请码">
+        邀请码 <code id="side-invite-code">…</code>
+      </button>
+    </div>
+  </div>
+  <button type="button" class="side-new" id="side-new">＋ 新会话</button>
+  <div class="side-list" id="side-list"></div>
+  <div class="side-foot">
+    <button type="button" class="side-link" id="side-pass">改密码</button>
+    <button type="button" class="side-link" id="side-logout">退出登录</button>
+  </div>
+</aside>
+<div class="side-scrim" id="side-scrim" hidden></div>
+<button type="button" class="side-toggle" id="side-toggle" aria-label="会话列表">☰</button>
+
 <header class="topbar">
   <img class="avatar" src="/static/avatar.jpg" alt="塔菲">
   <div class="who">
@@ -101,6 +121,23 @@
       <button type="button" id="leave-cancel" class="modal-cancel">再待会儿</button>
       <button type="button" id="leave-ok">离开</button>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="pass-modal" hidden>
+  <div class="modal-box">
+    <h3>改密码</h3>
+    <form id="pass-form">
+      <label class="pass-field"><span>原密码</span>
+        <input type="password" id="pass-old" autocomplete="current-password" required></label>
+      <label class="pass-field"><span>新密码</span>
+        <input type="password" id="pass-new" autocomplete="new-password" minlength="8" required></label>
+      <p class="modal-hint" id="pass-msg" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="ghost" id="pass-cancel">取消</button>
+        <button type="submit" id="pass-ok">确定</button>
+      </div>
+    </form>
   </div>
 </div>
 

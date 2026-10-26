@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffb7d5">
+<title>登录 · 永雏塔菲</title>
+<link rel="icon" href="/static/avatar.jpg">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="auth-body">
+
+<main class="auth-card">
+  <img class="auth-avatar" src="/static/avatar.jpg" alt="塔菲">
+  <h1 class="auth-title">永雏塔菲</h1>
+  <p class="auth-sub">先登录才能跟塔菲聊天喵</p>
+
+  <div class="auth-tabs" role="tablist">
+    <button type="button" class="auth-tab on" id="tab-login" role="tab">登录</button>
+    <button type="button" class="auth-tab" id="tab-register" role="tab">用邀请码注册</button>
+  </div>
+
+  <form id="auth-form" class="auth-form" autocomplete="on">
+    <label class="auth-field">
+      <span>用户名</span>
+      <input id="f-name" name="username" type="text" autocomplete="username"
+             minlength="3" maxlength="20" required placeholder="3~20 个字">
+    </label>
+    <label class="auth-field">
+      <span>密码</span>
+      <input id="f-password" name="password" type="password" autocomplete="current-password"
+             minlength="8" required placeholder="至少 8 位">
+    </label>
+    <label class="auth-field" id="invite-field" hidden>
+      <span>邀请码</span>
+      <input id="f-invite" name="invite" type="text" maxlength="16"
+             placeholder="找已经在用的雏草姬要一个">
+    </label>
+    <button type="submit" class="auth-submit" id="auth-submit">登录</button>
+  </form>
+
+  <p class="auth-msg" id="auth-msg" hidden></p>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  const formEl = document.getElementById('auth-form');
+  const tabLoginEl = document.getElementById('tab-login');
+  const tabRegisterEl = document.getElementById('tab-register');
+  const inviteFieldEl = document.getElementById('invite-field');
+  const inviteEl = document.getElementById('f-invite');
+  const nameEl = document.getElementById('f-name');
+  const passwordEl = document.getElementById('f-password');
+  const submitEl = document.getElementById('auth-submit');
+  const msgEl = document.getElementById('auth-msg');
+
+  let mode = 'login';
+
+  function showMsg(text, ok) {
+    msgEl.hidden = !text;
+    msgEl.textContent = text || '';
+    msgEl.classList.toggle('ok', Boolean(ok));
+  }
+
+  function setMode(next) {
+    mode = next;
+    const isLogin = next === 'login';
+    tabLoginEl.classList.toggle('on', isLogin);
+    tabRegisterEl.classList.toggle('on', !isLogin);
+    inviteFieldEl.hidden = isLogin;
+    inviteEl.required = !isLogin;
+    submitEl.textContent = isLogin ? '登录' : '注册并登录';
+    passwordEl.autocomplete = isLogin ? 'current-password' : 'new-password';
+    showMsg('');
+  }
+
+  tabLoginEl.addEventListener('click', () => setMode('login'));
+  tabRegisterEl.addEventListener('click', () => setMode('register'));
+
+  formEl.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (submitEl.disabled) return;
+    const payload = {
+      name: nameEl.value.trim(),
+      password: passwordEl.value,
+      invite: mode === 'register' ? inviteEl.value.trim() : '',
+    };
+    if (!payload.name || !payload.password) {
+      showMsg('用户名和密码都得填喵');
+      return;
+    }
+    if (mode === 'register' && !payload.invite) {
+      showMsg('要填邀请码喵');
+      return;
+    }
+    submitEl.disabled = true;
+    showMsg('');
+    try {
+      const url = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      let data = null;
+      try { data = await resp.json(); } catch (err) { data = null; }
+      if (!resp.ok) {
+        showMsg((data && data.detail) || ('失败了喵（' + resp.status + '）'));
+        submitEl.disabled = false;
+        return;
+      }
+      showMsg(mode === 'login' ? '登录成功，跳转中…' : '注册成功，跳转中…', true);
+      const next = new URLSearchParams(location.search).get('next') || '/';
+      location.replace(next.startsWith('/') ? next : '/');
+    } catch (err) {
+      showMsg('连不上服务器喵：' + (err && err.message ? err.message : err));
+      submitEl.disabled = false;
+    }
+  });
+
+  // 已经是登录状态就直接进聊天页
+  fetch('/api/auth/me', { cache: 'no-store' })
+    .then((resp) => { if (resp.ok) location.replace('/'); })
+    .catch(() => {});
+
+  nameEl.focus();
+})();
+</script>
+</body>
+</html>
