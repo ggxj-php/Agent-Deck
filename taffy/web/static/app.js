@@ -49,6 +49,10 @@ function applyPersona(info) {
   const name = info.name || '塔菲';
   document.title = `${name} · Agent`;
   applyTheme(info.theme);
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeMeta && /^#[0-9a-fA-F]{6}$/.test(info.theme || '')) {
+    themeMeta.content = info.theme;
+  }
   // 网页图标跟着身份卡换
   if (info.icon) {
     let link = document.querySelector('link[rel="icon"]');

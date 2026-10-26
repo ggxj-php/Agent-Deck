@@ -394,6 +394,53 @@ function render(state) {
   }
 }
 
+/* 后台也跟着身份卡走：标题、顶栏名字、头像、网页图标、主题色 */
+async function loadBranding() {
+  try {
+    const resp = await fetch('/api/persona', { cache: 'no-store' });
+    if (!resp.ok) return;
+    const info = await resp.json();
+    const name = info.name || '塔菲';
+    document.title = `${name} 后台`;
+    const nameEl = document.getElementById('top-name');
+    if (nameEl) nameEl.textContent = `${name} 后台`;
+    const avatarEl = document.getElementById('top-avatar');
+    if (avatarEl && info.avatar) {
+      avatarEl.src = info.avatar;
+      avatarEl.alt = name;
+    }
+    const iconEl = document.getElementById('page-icon');
+    if (iconEl && info.icon) iconEl.href = info.icon;
+    if (info.theme) {
+      applyThemeColor(info.theme);
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.content = info.theme;
+    }
+  } catch (err) {
+    /* 拿不到就用写死的塔菲，不影响后台使用 */
+  }
+}
+
+/* 把 #rrggbb 主题色换算成浅/深档，覆盖后台用的那几个 CSS 变量 */
+function applyThemeColor(theme) {
+  if (!/^#[0-9a-fA-F]{6}$/.test(theme || '')) return;
+  const mix = (target, ratio) => {
+    const num = parseInt(theme.replace('#', ''), 16);
+    const base = [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+    const to = target === 'w' ? 255 : 0;
+    const out = base.map((v) => Math.round(v + (to - v) * ratio));
+    return '#' + out.map((n) => n.toString(16).padStart(2, '0')).join('');
+  };
+  const root = document.documentElement.style;
+  root.setProperty('--pink', mix('w', 0.25));
+  root.setProperty('--pink-dark', theme);
+  root.setProperty('--pink-deep', mix('b', 0.3));
+  root.setProperty('--pink-pale', mix('w', 0.45));
+  root.setProperty('--pink-mist', mix('w', 0.78));
+  root.setProperty('--bg', mix('w', 0.93));
+  root.setProperty('--line', mix('w', 0.7));
+}
+
 /* 能力探测：这台机器没有的功能，导航里就不显示（换台机器部署也不会满屏报错） */
 async function loadCapabilities() {
   try {
@@ -419,6 +466,7 @@ async function loadCapabilities() {
 async function load(message) {
   try {
     render(await api('/api/admin/state'));
+    loadBranding();
     loadCapabilities();
     flash(message || '已登录喵', true);
   } catch (err) {
