@@ -2527,3 +2527,22 @@ sup, sub { font-size: 0.72em; line-height: 0; }
 .user-logout:hover { background: #ffe9eb; }
 
 #pass-msg.ok { color: #1f8a5b; }
+
+/* 侧边栏里的「管理员后台」入口（只有管理员看得到） */
+.side-admin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid #f3d2a8;
+  background: #fff8ec;
+  color: #b06a1e;
+  border-radius: 11px;
+  padding: 9px;
+  font-size: 13.5px;
+  text-decoration: none;
+  margin-top: -2px;
+}
+
+.side-admin:hover { background: #fff1d9; border-color: #e9be83; }
+.side-admin[hidden] { display: none; }

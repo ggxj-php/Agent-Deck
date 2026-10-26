@@ -91,6 +91,7 @@ const sideNameEl = document.getElementById('side-name');
 const sideInviteEl = document.getElementById('side-invite');
 const sideInviteCodeEl = document.getElementById('side-invite-code');
 const sideNewEl = document.getElementById('side-new');
+const sideAdminEl = document.getElementById('side-admin');
 const sidePassEl = document.getElementById('side-pass');
 const sideLogoutEl = document.getElementById('side-logout');
 const passModalEl = document.getElementById('user-modal');
@@ -766,6 +767,8 @@ function paintUser() {
   if (!me) return;
   sideNameEl.textContent = me.name;
   sideInviteCodeEl.textContent = me.invite_code || '—';
+  // 只有管理员才看得到「管理员后台」入口
+  sideAdminEl.hidden = !me.is_admin;
 }
 
 async function loadMe() {
