@@ -2419,3 +2419,111 @@ sup, sub { font-size: 0.72em; line-height: 0; }
   cursor: pointer;
   flex: none;
 }
+
+/* ================= 用户中心 ================= */
+
+.who-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  flex: 1;
+  min-width: 0;
+}
+
+.who-btn .name { text-decoration: underline dotted rgba(214, 63, 134, 0.35); }
+
+.user-box {
+  position: relative;
+  max-width: 380px;
+  text-align: left;
+}
+
+.user-close {
+  position: absolute;
+  right: 10px;
+  top: 8px;
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  color: #c9b3bf;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.user-close:hover { color: #d63f86; }
+
+.user-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+
+.user-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #ffd6e9;
+}
+
+.user-head-text { min-width: 0; }
+.user-title { font-size: 17px; font-weight: 600; }
+.user-sub { font-size: 12px; color: #9a8a94; margin-top: 2px; }
+
+.user-rows {
+  background: #fff7fb;
+  border: 1px solid var(--line, #f0d9e6);
+  border-radius: 12px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+}
+
+.user-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 13px;
+  color: #8a7680;
+}
+
+.user-row + .user-row { border-top: 1px dashed #f6e3ee; }
+.user-row b { color: #4a3b43; font-weight: 600; }
+
+.user-invite {
+  border: none;
+  background: #ffeaf4;
+  color: #b5568a;
+  border-radius: 8px;
+  padding: 3px 10px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 13px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.user-h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #9a8a94;
+  font-weight: 600;
+}
+
+.user-logout {
+  width: 100%;
+  margin-top: 14px;
+  border: 1px solid #f5cdd2;
+  background: #fff5f6;
+  color: #c0392b;
+  border-radius: 11px;
+  padding: 10px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.user-logout:hover { background: #ffe9eb; }
+
+#pass-msg.ok { color: #1f8a5b; }

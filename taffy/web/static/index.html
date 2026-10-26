@@ -34,10 +34,10 @@
 
 <header class="topbar">
   <img class="avatar" src="/static/avatar.jpg" alt="塔菲">
-  <div class="who">
+  <button type="button" class="who who-btn" id="user-open" title="用户中心（改密码 / 退出登录）">
     <div class="name">永雏塔菲</div>
     <div class="status" id="status">在线喵</div>
-  </div>
+  </button>
   <button type="button" id="think-toggle" class="think-toggle on" role="switch"
           aria-checked="true" aria-label="深度思考"
           title="深度思考：开（点一下关掉，回答更快）">
@@ -124,20 +124,44 @@
   </div>
 </div>
 
-<div class="modal" id="pass-modal" hidden>
-  <div class="modal-box">
-    <h3>改密码</h3>
+<div class="modal" id="user-modal" hidden>
+  <div class="modal-box user-box">
+    <button type="button" class="user-close" id="user-close" aria-label="关闭">×</button>
+
+    <div class="user-head">
+      <img class="user-avatar" src="/static/avatar.jpg" alt="塔菲">
+      <div class="user-head-text">
+        <div class="user-title" id="user-title">…</div>
+        <div class="user-sub" id="user-sub">用户中心</div>
+      </div>
+    </div>
+
+    <div class="user-rows">
+      <div class="user-row">
+        <span>我的邀请码</span>
+        <button type="button" class="user-invite" id="user-invite" title="点一下复制">…</button>
+      </div>
+      <div class="user-row"><span>注册时间</span><b id="user-created">—</b></div>
+      <div class="user-row"><span>我的会话</span><b id="user-sessions">—</b></div>
+    </div>
+
+    <h4 class="user-h4">改密码</h4>
     <form id="pass-form">
       <label class="pass-field"><span>原密码</span>
         <input type="password" id="pass-old" autocomplete="current-password" required></label>
       <label class="pass-field"><span>新密码</span>
-        <input type="password" id="pass-new" autocomplete="new-password" minlength="8" required></label>
+        <input type="password" id="pass-new" autocomplete="new-password"
+               minlength="8" required placeholder="至少 8 位"></label>
+      <label class="pass-field"><span>确认新密码</span>
+        <input type="password" id="pass-confirm" autocomplete="new-password"
+               minlength="8" required></label>
       <p class="modal-hint" id="pass-msg" hidden></p>
       <div class="modal-actions">
-        <button type="button" class="ghost" id="pass-cancel">取消</button>
-        <button type="submit" id="pass-ok">确定</button>
+        <button type="submit" id="pass-ok">保存新密码</button>
       </div>
     </form>
+
+    <button type="button" class="user-logout" id="user-logout">退出登录</button>
   </div>
 </div>
 

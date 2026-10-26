@@ -108,11 +108,20 @@ const sideInviteCodeEl = document.getElementById('side-invite-code');
 const sideNewEl = document.getElementById('side-new');
 const sidePassEl = document.getElementById('side-pass');
 const sideLogoutEl = document.getElementById('side-logout');
-const passModalEl = document.getElementById('pass-modal');
+const passModalEl = document.getElementById('user-modal');
 const passOldEl = document.getElementById('pass-old');
 const passNewEl = document.getElementById('pass-new');
+const passConfirmEl = document.getElementById('pass-confirm');
 const passMsgEl = document.getElementById('pass-msg');
-const passCancelEl = document.getElementById('pass-cancel');
+const passOkEl = document.getElementById('pass-ok');
+const userOpenEl = document.getElementById('user-open');
+const userCloseEl = document.getElementById('user-close');
+const userLogoutEl = document.getElementById('user-logout');
+const userTitleEl = document.getElementById('user-title');
+const userSubEl = document.getElementById('user-sub');
+const userInviteEl = document.getElementById('user-invite');
+const userCreatedEl = document.getElementById('user-created');
+const userSessionsEl = document.getElementById('user-sessions');
 
 const el = (tag, cls) => {
   const node = document.createElement(tag);
@@ -903,6 +912,127 @@ sideLogoutEl.addEventListener('click', async () => {
   location.replace('/login');
 });
 
+/* ---------------- 用户中心（改密码 / 退出登录） ---------------- */
+
+function fmtDay(ts) {
+  if (!ts) return '—';
+  const d = new Date(Number(ts) * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function passMsg(text, ok) {
+  passMsgEl.hidden = !text;
+  passMsgEl.textContent = text || '';
+  passMsgEl.classList.toggle('ok', Boolean(ok));
+}
+
+function closeUserModal() {
+  passModalEl.hidden = true;
+  passMsg('');
+  passOldEl.value = '';
+  passNewEl.value = '';
+  passConfirmEl.value = '';
+}
+
+async function openUserModal() {
+  closeSidebar();
+  passModalEl.hidden = false;
+  passMsg('');
+  passOldEl.value = '';
+  passNewEl.value = '';
+  passConfirmEl.value = '';
+  // 先拿最新的用户信息，再画
+  try {
+    const resp = await fetch('/api/auth/me', { cache: 'no-store' });
+    if (resp.ok) {
+      const data = await resp.json();
+      me = data.user || me;
+      paintUser();
+      if (me) {
+        userTitleEl.textContent = me.name;
+        userSubEl.textContent = me.is_admin ? '管理员 · 用户中心' : '用户中心';
+        userInviteEl.textContent = me.invite_code || '—';
+        userCreatedEl.textContent = fmtDay(me.created_at);
+        userSessionsEl.textContent = String(data.sessions || 0) + ' 条';
+      }
+    }
+  } catch (err) { /* 拿不到就用缓存的那份 */ }
+  if (me && !userTitleEl.textContent) userTitleEl.textContent = me.name;
+  passOldEl.focus();
+}
+
+userOpenEl.addEventListener('click', openUserModal);
+userCloseEl.addEventListener('click', closeUserModal);
+passModalEl.addEventListener('click', (event) => {
+  if (event.target === passModalEl) closeUserModal();   // 点遮罩关掉
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !passModalEl.hidden) closeUserModal();
+});
+
+userInviteEl.addEventListener('click', async () => {
+  const code = (me && me.invite_code) || userInviteEl.textContent;
+  try {
+    await navigator.clipboard.writeText(code);
+    statusEl.textContent = '邀请码已复制喵';
+  } catch (err) {
+    statusEl.textContent = '复制失败，手动记一下：' + code;
+  }
+});
+
+document.getElementById('pass-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  passMsg('');
+  const next = passNewEl.value;
+  if (next !== passConfirmEl.value) {
+    passMsg('两次输入的新密码不一样喵');
+    passConfirmEl.focus();
+    return;
+  }
+  if (next.length < 8) {
+    passMsg('新密码至少 8 位喵');
+    return;
+  }
+  passOkEl.disabled = true;
+  try {
+    const resp = await fetch('/api/auth/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old_password: passOldEl.value, new_password: next }),
+    });
+    let data = null;
+    try { data = await resp.json(); } catch (err) { data = null; }
+    if (!resp.ok) {
+      passMsg((data && data.detail) || '改不了喵');
+      passOkEl.disabled = false;
+      return;
+    }
+    passOldEl.value = '';
+    passNewEl.value = '';
+    passConfirmEl.value = '';
+    passMsg('密码改好啦喵（下次登录用新的）', true);
+    statusEl.textContent = '密码改好啦喵';
+  } catch (err) {
+    passMsg('连不上服务器喵');
+  }
+  passOkEl.disabled = false;
+});
+
+userLogoutEl.addEventListener('click', async () => {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (err) { /* 退不了也照样跳 */ }
+  location.replace('/login');
+});
+
+sideLogoutEl.addEventListener('click', async () => {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (err) { /* 忽略 */ }
+  location.replace('/login');
+});
+
 /* ---------------- 改密码 ---------------- */
 
 function closePassModal() {
@@ -912,14 +1042,7 @@ function closePassModal() {
   passNewEl.value = '';
 }
 
-sidePassEl.addEventListener('click', () => {
-  passModalEl.hidden = false;
-  passMsgEl.hidden = true;
-  passOldEl.focus();
-  closeSidebar();
-});
-
-passCancelEl.addEventListener('click', closePassModal);
+sidePassEl.addEventListener('click', openUserModal);
 
 document.getElementById('pass-form').addEventListener('submit', async (event) => {
   event.preventDefault();
