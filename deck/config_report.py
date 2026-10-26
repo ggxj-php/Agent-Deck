@@ -108,8 +108,8 @@ _ITEMS = [
          desc="超过就淘汰最早的；产物在内存里，重启就没了"),
     dict(group="运行参数", key="upload_ttl", label="上传图片保留时长",
          source="uploads.py TTL_SECONDS",
-         get=lambda: __import__("deck.uploads", fromlist=["TTL_SECONDS"]).TTL_SECONDS // 3600,
-         default=24, restart=True, desc="单位小时，过期自动清"),
+         get=lambda: f"{__import__('deck.uploads', fromlist=['TTL_SECONDS']).TTL_SECONDS // 60} 分钟",
+         default="20 分钟", restart=True, desc="过期自动清（后台每 5 分钟扫一次）"),
 ]
 
 

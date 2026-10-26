@@ -9,7 +9,7 @@
 4. **最近 1~2 轮自动 rehydrate**：发请求前把最近的图重新塞回多模态，
    模型「看得见」，不用它自己判断要不要看；
 5. **更久远的**：只有摘要，需要细节时人格会让它 `read_img uploads/<id>.jpg` 回看原图；
-6. **24 小时 TTL**：过期文件自动清掉，不在服务器上无限堆积。
+6. **20 分钟 TTL**：过期文件自动清掉（后台每 5 分钟扫一次），不在服务器上无限堆积。
 
 校验仍然只认魔术字节 + 解码重编码（洗 polyglot、剥 EXIF）。
 """
@@ -31,7 +31,7 @@ MAX_BYTES = 4 * 1024 * 1024
 MAX_COUNT = 6
 MAX_SIDE = 8000
 MAX_AFTER_ENCODE = 3 * 1024 * 1024
-TTL_SECONDS = 24 * 3600
+TTL_SECONDS = 20 * 60          # 上传的图片只留 20 分钟，过期自动清掉
 SUMMARY_MAX_TOKENS = 500
 
 _SIGNATURES = (

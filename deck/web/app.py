@@ -148,6 +148,27 @@ def _user_of(request):
 
 
 @asynccontextmanager
+def _start_upload_sweeper(interval=300):
+    """后台定时清理过期上传图片（TTL 20 分钟）。
+
+    以前只在「下次有人上传」时顺手 sweep 一次，没人上传就一直堆着；
+    现在每 5 分钟扫一次，过期图片最多多留 5 分钟。
+    """
+    def loop():
+        while True:
+            try:
+                removed = uploads.sweep()
+                if removed:
+                    print(f"[uploads] 清理了 {removed} 张过期图片", flush=True)
+            except Exception as exc:         # noqa: BLE001
+                print(f"[uploads] 清理失败：{exc}", flush=True)
+            time.sleep(interval)
+
+    threading.Thread(target=loop, daemon=True).start()
+    print(f"[uploads] 后台清理已启动：TTL {uploads.TTL_SECONDS // 60} 分钟，每 {interval // 60} 分钟扫一次",
+          flush=True)
+
+
 async def lifespan(_app):
     db.init()                        # 建表（幂等）
     try:
@@ -162,6 +183,7 @@ async def lifespan(_app):
     except Exception as exc:         # noqa: BLE001
         print(f"[admin] 初始化默认管理员失败：{exc}", flush=True)
     threading.Thread(target=warmup, daemon=True).start()
+    _start_upload_sweeper()
     yield
 
 
