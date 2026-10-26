@@ -10,6 +10,7 @@
 window.UI_TEXT = {
   /* ---------- 通用 ---------- */
   unknownReason: '未知原因',
+  loading: '正在想…',        // 发出消息后、首字还没回来的那段占位
   offline: '连不上服务喵',
   offlineRefresh: '连不上服务喵，刷新一下吧',
   reconnecting: '重连中喵…',

@@ -750,7 +750,7 @@ function addAgent() {
   row.append(avatar, bubble);
   messagesEl.appendChild(row);
   scrollToBottom();
-  return { row, bubble, thinking: null, content: null, tools: [], stickers: [] };
+  return { row, bubble, thinking: null, content: null, loading: null, tools: [], stickers: [] };
 }
 
 function thinkingChunk(turn, text) {
@@ -769,6 +769,26 @@ function thinkingChunk(turn, text) {
   }
   turn.thinking.body.textContent += text;
   updateToBottom();
+}
+
+/* 发出消息后、模型第一个字还没回来：气泡里先放一个「正在想…」的跳动占位，
+   别让用户对着一个空气泡发呆。任何事件（思考/正文/工具/表情包/产物）一到就撤掉。 */
+function showLoading(turn) {
+  if (!turn || turn.loading) return;
+  const box = el('div', 'bubble-loading');
+  for (let i = 0; i < 3; i += 1) box.appendChild(el('span', 'dot'));
+  const label = el('span', 'loading-text');
+  label.textContent = t('loading');
+  box.appendChild(label);
+  turn.bubble.appendChild(box);
+  turn.loading = box;
+  updateToBottom();
+}
+
+function clearLoading(turn) {
+  if (!turn || !turn.loading) return;
+  turn.loading.remove();
+  turn.loading = null;
 }
 
 /* 正文/工具/表情包一来，就说明这段思考结束了，把标题标一下。
@@ -1507,6 +1527,7 @@ async function streamChat(id, message, onEvent, images) {
 }
 
 function handleEvent(turn, event) {
+  if (turn.loading) clearLoading(turn);   // 有事件了，别再显示「正在想…」
   switch (event.type) {
     case 'thinking':
       thinkingChunk(turn, event.text);
@@ -1597,12 +1618,14 @@ async function send(text, images) {
   clearImage();
 
   const turn = addAgent();
+  showLoading(turn);            // 首字回来之前先显示「正在想…」
   try {
     const id = await ensureSession();
     await streamChat(id, text, (event) => handleEvent(turn, event), images);
   } catch (err) {
     errorBubble(turn, err && err.message ? err.message : String(err));
   } finally {
+    clearLoading(turn);
     settleThinking(turn);
     if (turn.content) scheduleRender(turn.content);
     busy = false;
