@@ -783,13 +783,13 @@ function renderAssistantBlock(text) {
 /* 段内：正文 + 表情包标记 */
 function renderAssistantText(turn, text) {
   if (!text) return;
-  const mark = /\[\s*sticker\s*:\s*([a-zA-Z_]+)\s*\]/gi;
+  const mark = /\[\s*sticker\s*:\s*([a-zA-Z_]+)(?:\s*:\s*([^\]\s]+))?\s*\]/gi;
   let last = 0;
   let hit;
   while ((hit = mark.exec(text)) !== null) {
     const chunk = text.slice(last, hit.index);
     if (chunk) contentChunk(turn, chunk);
-    addSticker(turn, hit[1].toLowerCase());
+    addSticker(turn, hit[1].toLowerCase(), hit[2] || '');
     last = hit.index + hit[0].length;
   }
   const tail = text.slice(last);
@@ -819,10 +819,17 @@ function thinkingChunk(turn, text) {
     summary.append(spin, label);
     const body = el('div', 'thinking-body');
     box.append(summary, body);
+    // 展开的瞬间滚到底部，看到最新那句
+    box.addEventListener('toggle', () => {
+      if (box.open) body.scrollTop = body.scrollHeight;
+    });
     turn.bubble.appendChild(box);
     turn.thinking = { box, body };
   }
-  turn.thinking.body.textContent += text;
+  const body = turn.thinking.body;
+  body.textContent += text;
+  // 面板开着的时候跟着新内容滚到底，不然新写的几句得手动翻
+  if (turn.thinking.box.open) body.scrollTop = body.scrollHeight;
   updateToBottom();
 }
 
@@ -915,10 +922,18 @@ function toolEnd(turn, name, result) {
 const STICKER_TOKEN_SPLIT = /(@@sticker:\d+@@)/;
 const STICKER_TOKEN_EXACT = /^@@sticker:(\d+)@@$/;
 
-function stickerImg(mood) {
-  const pool = stickerPool(mood);
-  if (!pool.length) return null;
-  const name = pool[Math.floor(Math.random() * pool.length)];
+function stickerImg(value) {
+  // 传进来可能是「心情」也可能是「具体文件名」：
+  // 文件名（带后缀）= 发图时已经定死的，原样用；心情 = 老格式，随机挑一张兜底
+  const token = String(value || '');
+  let name = '';
+  if (/\.[a-z0-9]+$/i.test(token)) {
+    name = token;
+  } else {
+    const pool = stickerPool(token);
+    if (!pool.length) return null;
+    name = pool[Math.floor(Math.random() * pool.length)];
+  }
   const img = el('img', 'sticker');
   img.src = `/api/persona/sticker/${encodeURIComponent(name)}`;
   img.alt = mood;
@@ -950,13 +965,18 @@ function hydrateStickers(root, moods) {
   });
 }
 
-function addSticker(turn, mood) {
+function addSticker(turn, mood, name) {
   settleThinking(turn);
-  const safe = String(mood).replace(/[^a-z]/gi, '');
-  if (!stickerPool(safe).length) return;
+  const safe = String(mood || '').replace(/[^a-z]/gi, '');
+  // name 是发图时就定好的文件名（后端会写进历史标记），有就用它，刷新不会变
+  const token = String(name || '').trim() || safe;
+  if (!token) return;
+  if (turn.stickers && turn.stickers.includes(token) === false) {
+    // 同一张图可以重复出现，这里不拦；只是保留 push 顺序
+  }
   if (!turn.stickers) turn.stickers = [];
   const index = turn.stickers.length;
-  turn.stickers.push(safe);
+  turn.stickers.push(token);
   contentChunk(turn, `@@sticker:${index}@@`);   // 就地放个占位符
 }
 
@@ -1598,7 +1618,7 @@ function handleEvent(turn, event) {
       toolEnd(turn, event.name, event.result);
       break;
     case 'sticker':
-      addSticker(turn, event.mood);
+      addSticker(turn, event.mood, event.name);
       break;
     case 'artifact':
       addArtifact(turn, event);

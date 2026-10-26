@@ -8,7 +8,35 @@
 第一次调用就结束了，拆成多次调用根本没机会发第二张。
 """
 
+import os
+import random
+
 MOODS = ("happy", "think", "confused", "proud", "cry", "angry", "sleepy", "love")
+
+
+def pick_sticker(mood):
+    """从当前身份卡的表情包里随机挑一张该心情的图，返回文件名（没有就空串）。
+
+    为什么要挑死一张：以前前端每次渲染都随机挑，刷新一次换一张。
+    现在发图的时候就把文件名定下来、写进正文标记（[sticker:心情:文件名]），
+    刷新之后照着标记渲染，永远是同一张。
+    """
+    mood = str(mood or "").strip().lower()
+    if mood not in MOODS:
+        return ""
+    try:
+        from .. import persona
+
+        folder = persona.stickers_dir()
+        names = sorted(
+            name for name in os.listdir(folder)
+            if name.lower().startswith(mood) and os.path.isfile(os.path.join(folder, name))
+        )
+        if not names:
+            return ""
+        return random.choice(names)
+    except Exception:                    # noqa: BLE001
+        return ""
 
 SPECS = [
     {

@@ -12,7 +12,7 @@ from .config import EXIT_WORDS, MAX_ROUNDS, RESUME_INSTRUCTION, RESUME_WORDS, ST
 from .llm import stream_chat
 from .tools import active_specs, execute
 from .tools.render import append_marks, strip_marks
-from .tools.sticker import MOODS
+from .tools.sticker import MOODS, pick_sticker
 
 # 内联图片只认 data:image/...;base64,... 这种。上限按 base64 字符串长度算，
 # 4MB 的原图编码后约 5.5MB，留点余量；再大就不收，免得一张巨图把内存顶爆。
@@ -205,6 +205,29 @@ def _rehydrate(messages, max_images=3, window=2):
     return messages
 
 
+_PLAIN_STICKER = re.compile(r"\[\s*sticker\s*:\s*([a-zA-Z_]+)\s*\]", re.I)
+
+
+def _name_sticker_marks(text, picked):
+    """按出现顺序把 [sticker:心情] 换成 [sticker:心情:文件名]。"""
+    it = iter(picked)
+
+    def repl(match):
+        try:
+            _mood, name = next(it)
+        except StopIteration:
+            return match.group(0)
+        mood = match.group(1).lower()
+        return f"[sticker:{mood}:{name}]" if name else match.group(0)
+
+    return _PLAIN_STICKER.sub(repl, text)
+
+
+def _strip_sticker_names(text):
+    """发给模型前把标记里的文件名去掉（模型不需要知道具体哪张图）。"""
+    return re.sub(r"\[sticker:([a-zA-Z_]+):[^\]]+\]", r"[sticker:\1]", text)
+
+
 def _sendable(messages):
     """发请求前剔掉非法的 assistant 消息。
 
@@ -215,10 +238,10 @@ def _sendable(messages):
     out = []
     for message in messages:
         if message.get("role") == "assistant" and isinstance(message.get("content"), str):
-            # 正文里可能有画图产物标记（给前端渲染卡片用），模型不需要看到
-            if "[[artifact:" in message["content"]:
+            # 正文里可能有画图产物标记（前端渲染卡片用）和表情包文件名，模型都不需要看到
+            if "[[artifact:" in message["content"] or "[sticker:" in message["content"]:
                 message = dict(message)
-                message["content"] = strip_marks(message["content"])
+                message["content"] = _strip_sticker_names(strip_marks(message["content"]))
         if (message.get("role") != "assistant"
                 or message.get("content")
                 or message.get("tool_calls")):
@@ -334,6 +357,7 @@ class DeckAgent:
                 splitter = _StickerStream(STICKER_LIMIT, stickers_sent)
                 # 每轮都新起一个：工具轮之间各自 flush
                 guard = _LeakGuard(settings.system_prompt())
+                picked = []          # 这一轮发出去的表情包（心情, 文件名）
                 try:
                     for kind, payload in stream_chat(
                         _sendable(_rehydrate(self.messages)), active_specs(), model,
@@ -354,7 +378,9 @@ class DeckAgent:
                                     if out:
                                         yield {"type": "content", "text": out}
                                 else:
-                                    yield {"type": "sticker", "mood": value}
+                                    name = pick_sticker(value)
+                                    picked.append((value, name))
+                                    yield {"type": "sticker", "mood": value, "name": name}
                     # 这一轮收尾了，把还没吐的尾巴补上
                     for ev, value in splitter.flush():
                         if ev == "content":
@@ -362,7 +388,9 @@ class DeckAgent:
                             if out:
                                 yield {"type": "content", "text": out}
                         else:
-                            yield {"type": "sticker", "mood": value}
+                            name = pick_sticker(value)
+                            picked.append((value, name))
+                            yield {"type": "sticker", "mood": value, "name": name}
                     # **必须无条件 flush**：guard 扣着最后 80 个字防泄漏，
                     # 如果这一轮正好以 [sticker:x] 结尾，上面的 splitter.flush() 是空的，
                     # 只靠循环里那个 guard.flush() 就永远轮不到 → 最后一段话被吞掉。
@@ -382,6 +410,11 @@ class DeckAgent:
                 if message is None:
                     yield {"type": "error", "message": "模型没有返回任何内容"}
                     return
+
+                # 把这一轮挑中的表情文件名写进正文标记：刷新后照标记渲染，永远是同一张
+                if picked and isinstance(message.get("content"), str) and "[sticker:" in message["content"]:
+                    message = dict(message)
+                    message["content"] = _name_sticker_marks(message["content"], picked)
 
                 # 兜底：空正文又没工具调用的消息一旦进历史，后面每轮都会 400
                 if not message.get("content") and not message.get("tool_calls"):
@@ -444,7 +477,8 @@ class DeckAgent:
                                 break
                             stickers_sent += 1
                             sent += 1
-                            yield {"type": "sticker", "mood": mood}
+                            yield {"type": "sticker", "mood": mood,
+                                   "name": pick_sticker(mood)}
 
                         if sent == 0:
                             # 硬上限：这一轮已经发够了，回执改成提醒，图不再发出去
