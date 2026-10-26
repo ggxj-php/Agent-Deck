@@ -198,7 +198,14 @@ def build_prompt():
         core = CORE_PROMPT
     persona_part = (current().get("prompt") or "").strip()
     parts = [part for part in (core, persona_part) if part]
-    return "\n\n".join(parts) + _unavailable_tools_note()
+    text = "\n\n".join(parts) + _unavailable_tools_note()
+    try:
+        if settings.web_search_active():
+            text += ("\n\n【联网搜索已由服务端内置开启：搜到的网页会自动附在你的上下文里，"
+                     "直接拿来回答就行，不用调用 web_search / open_url。】")
+    except Exception:                        # noqa: BLE001
+        pass
+    return text
 
 
 def public(pid=None):

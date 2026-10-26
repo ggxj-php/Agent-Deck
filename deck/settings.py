@@ -361,6 +361,98 @@ def set_embed_enabled(value):
         _write(data)
 
 
+# ---------- 服务端内置联网搜索（模型自带 web search）----------
+# DeepSeek v4.1-flash / 阿里百炼那套支持 enable_search：平台自己去搜，把结果塞进上下文，
+# 不用我们再抓网页（能快好几秒）。但「接口没报错」不等于真支持——有些中转会静默忽略
+# 未知参数，所以这里靠「带搜索后 prompt_tokens 明显变大」来判定。
+_WEB_SEARCH_PROBE = {"key": None, "ts": 0.0, "result": None}
+_WEB_SEARCH_TTL = 1800
+
+
+def model_web_search():
+    """后台开关：是否优先用服务端内置联网搜索（默认开）。"""
+    value = _load().get("model_web_search")
+    if value is None:
+        value = os.environ.get("MODEL_WEB_SEARCH", "1")
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in ("0", "false", "off", "no", "")
+
+
+def set_model_web_search(value):
+    with _lock:
+        data = _load()
+        data["model_web_search"] = bool(value)
+        _write(data)
+    _WEB_SEARCH_PROBE["ts"] = 0.0        # 开关一变就重新探测
+    return model_web_search()
+
+
+def web_search_probe(force=False):
+    """探测当前端点/模型支不支持内置联网搜索。
+
+    判定不是「接口返回 200」，而是「带 enable_search 之后 prompt_tokens 明显变大」：
+    支持的话平台会把搜到的网页塞进上下文，token 数会暴涨；不支持时参数被静默忽略、
+    token 几乎不变，只看 200 会误判。
+    """
+    import time
+
+    base, model = chat_base_url(), chat_model()
+    cache_key = (base, model)
+    now = time.time()
+    cached = _WEB_SEARCH_PROBE["result"]
+    if (not force and cached and _WEB_SEARCH_PROBE["key"] == cache_key
+            and now - _WEB_SEARCH_PROBE["ts"] < _WEB_SEARCH_TTL):
+        return cached
+
+    result = {"supported": False, "reason": "没检测过", "checked_at": int(now)}
+    key = chat_key()
+    if key and base:
+        try:
+            import requests
+
+            url = base.rstrip("/") + "/chat/completions"
+            headers = {"Authorization": f"Bearer {key}"}
+            # 探测问句要「真的需要联网」的那种：问「回一个字：好」平台根本不会去搜，
+            # 会误判成不支持。
+            messages = [{"role": "user", "content": "今天北京天气怎么样？"}]
+
+            def prompt_tokens(extra):
+                body = {"model": model, "messages": messages, "max_tokens": 1}
+                body.update(extra)
+                resp = requests.post(url, headers=headers, json=body, timeout=40)
+                if resp.status_code != 200:
+                    return None, resp.text[:200]
+                return (resp.json().get("usage") or {}).get("prompt_tokens"), ""
+
+            plain, err_plain = prompt_tokens({})
+            searched, err_search = prompt_tokens({"enable_search": True})
+            if plain is None or searched is None:
+                detail = (err_search or err_plain or "").replace("\n", " ")
+                result = {"supported": False,
+                          "reason": f"接口不接受 enable_search（{detail[:120]}）",
+                          "checked_at": int(now)}
+            elif searched - plain >= 200:
+                result = {"supported": True,
+                          "reason": f"支持：带搜索后上下文 {plain} → {searched} tokens",
+                          "checked_at": int(now)}
+            else:
+                result = {"supported": False,
+                          "reason": (f"参数被接受但搜索结果没注入（{plain} → {searched} tokens），"
+                                     "可能是假支持"),
+                          "checked_at": int(now)}
+        except Exception as exc:                   # noqa: BLE001
+            result = {"supported": False,
+                      "reason": f"检测失败：{type(exc).__name__}", "checked_at": int(now)}
+    _WEB_SEARCH_PROBE.update({"key": cache_key, "ts": now, "result": result})
+    return result
+
+
+def web_search_active():
+    """现在到底走不走内置搜索：开关开着 + 端点确实支持。"""
+    return model_web_search() and bool(web_search_probe().get("supported"))
+
+
 def update_embed(model, base_url, key):
     """改向量模型 / 地址 / key。留空表示「这项不改」。"""
     with _lock:

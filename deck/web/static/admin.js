@@ -32,6 +32,9 @@ const datalistEl = document.getElementById('model-list');
 const historyHintEl = document.getElementById('history-hint');
 const historyEl = document.getElementById('history-chips');
 const saveModelsEl = document.getElementById('save-models');
+const webSearchBoxEl = document.getElementById('web-search-box');
+const webSearchToggleEl = document.getElementById('web-search-toggle');
+const webSearchHintEl = document.getElementById('web-search-hint');
 const contextLimitEl = document.getElementById('context-limit');
 const contextStateEl = document.getElementById('context-state');
 const saveContextEl = document.getElementById('save-context');
@@ -345,6 +348,8 @@ function render(state) {
       `key 来自 ${state.translate_key_source === 'admin' ? '后台' : 'env'}。`;
 
   // 向量模型：模型名和地址直接填出来给主人看着改，key 只说来源
+  renderWebSearch(state.web_search || {});
+
   embedModelEl.value = state.embed_model || '';
   embedBaseEl.value = state.embed_base_url || '';
   embedMaxTokensEl.value = state.embed_max_tokens || '';   // 0 = 自动探测，留空显示
@@ -483,6 +488,37 @@ async function load(message) {
 }
 
 /* 向量那一路的总开关：勾上 = 开。状态分三种——没设过（跟配置走）、明确开着、明确关着 */
+/* 服务端内置联网搜索开关：**先确认端点支持才显示**——
+   不支持就整个藏起来，避免用户开了以为生效、其实还是老路子。 */
+function renderWebSearch(info) {
+  const probe = info.probe || {};
+  const supported = Boolean(probe.supported);
+  webSearchBoxEl.hidden = !supported;
+  if (!supported) {
+    webSearchToggleEl.checked = false;
+    webSearchToggleEl.disabled = true;
+    webSearchHintEl.textContent = `服务端不支持模型内置联网搜索（${probe.reason || '没检测过'}），所以这个开关不显示。`;
+    return;
+  }
+  webSearchToggleEl.disabled = false;
+  webSearchToggleEl.checked = Boolean(info.enabled);
+  webSearchHintEl.textContent = `${probe.reason || ''}` +
+    ' 开着 = 直接让模型自己联网（快）；关掉 = 用本站的网页搜索 / 抓取（慢一点但可控）。';
+}
+
+webSearchToggleEl.addEventListener('change', async () => {
+  webSearchToggleEl.disabled = true;
+  try {
+    const res = await api('/api/admin/web-search', { enabled: webSearchToggleEl.checked });
+    renderWebSearch({ enabled: res.enabled, probe: res.probe });
+    flash(res.active ? '已改用服务端内置联网搜索，下一条消息生效' : '已改回本站网页搜索 / 抓取', true);
+  } catch (err) {
+    flash(`保存失败：${err.message}`, false);
+  } finally {
+    webSearchToggleEl.disabled = false;
+  }
+});
+
 function renderEmbedSwitch(state) {
   const on = Boolean(state.embed_on);
   const set = state.embed_switch;

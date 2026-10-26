@@ -100,7 +100,11 @@ def stream_chat(messages: list, tools: list, model: str = "",
     if not key:
         raise RuntimeError(_NO_KEY)
 
-    extra = _think_extra(thinking)
+    extra = dict(_think_extra(thinking) or {})
+    # 服务端内置联网搜索：开了之后平台自己去搜、把结果塞进上下文，
+    # 我们就不用再调 web_search/open_url 抓网页了（能快好几秒）
+    if settings.web_search_active():
+        extra["enable_search"] = True
     kwargs = {"extra_body": extra} if extra else {}
     try:
         stream = _client(key, base).chat.completions.create(

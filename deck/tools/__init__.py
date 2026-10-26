@@ -141,7 +141,17 @@ def is_enabled(name):
 def active_specs():
     """给模型看的工具清单（按后台开关过滤）。"""
     groups = enabled_groups()
-    return [spec for spec in TOOLS if group_of(spec["function"]["name"]) in groups]
+    specs = [spec for spec in TOOLS if group_of(spec["function"]["name"]) in groups]
+    try:
+        from .. import settings
+        if settings.web_search_active():
+            # 走服务端内置搜索时，把自家的网页搜索 / 抓取工具摘掉：
+            # 模型已经有搜索结果了，再给它这两个工具只会多绕几轮
+            specs = [s for s in specs
+                     if s["function"]["name"] not in ("web_search", "open_url")]
+    except Exception:                        # noqa: BLE001
+        pass
+    return specs
 
 
 def groups_payload():
