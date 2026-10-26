@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-deck"
 version = "1.0.0"
-description = "永雏塔菲风格的 Agent：工具循环 + 知识库 + 网页版 + 后台"
+description = "可自部署的 AI Agent：身份卡换人设 + 工具开关 + 知识库检索 + 沙箱跑代码 + 网页后台"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

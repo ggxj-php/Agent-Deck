@@ -165,7 +165,7 @@ async def lifespan(_app):
     yield
 
 
-app = FastAPI(title="Taffy Agent", lifespan=lifespan)
+app = FastAPI(title="Agent Deck", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.include_router(admin_router)
 app.include_router(content_router)
