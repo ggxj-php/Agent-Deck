@@ -783,6 +783,7 @@ function renderAssistantBlock(text) {
 /* 段内：正文 + 表情包标记 */
 function renderAssistantText(turn, text) {
   if (!text) return;
+  text = snapStickersToBoundaries(text);
   const mark = /\[\s*sticker\s*:\s*([a-zA-Z_]+)(?:\s*:\s*([^\]\s]+))?\s*\]/gi;
   let last = 0;
   let hit;
@@ -870,10 +871,12 @@ function contentChunk(turn, text) {
   }
   turn.content.raw += text;
   scheduleRender(turn.content);
+  if (turn.queuedStickers && turn.queuedStickers.length) flushQueuedStickers(turn, false);
 }
 
 function toolStart(turn, name, args) {
   settleThinking(turn);
+  flushQueuedStickers(turn, true);   // 这一块正文结束了，排队的表情先放掉
   turn.content = null; // 工具跑完后的正文另起一块，保持先后顺序
 
   const card = el('details', 'tool');
@@ -920,6 +923,45 @@ function toolEnd(turn, name, result) {
    这样 markdown 永远是一个完整的块（粗体 / 列表 / 代码块不会被劈开），
    表情包又能停在它**原本的位置**（句子之间），不会一股脑堆到最后。 */
 const STICKER_TOKEN_SPLIT = /(@@sticker:\d+@@)/;
+
+/* 表情包只放在「句子结束」处：句末标点 / 换行之后。
+   模型经常把 [sticker:x] 写在句子中间（「2026 参考 / [sticker] 2027 参考」），
+   而表情包是块级元素，会把一句话劈成两半，很难看。 */
+const STICKER_ANY_MARK = /\[\s*sticker\s*:\s*([a-zA-Z_]+)(?:\s*:\s*([^\]\s]+))?\s*\]/gi;
+
+function snapStickersToBoundaries(text) {
+  STICKER_ANY_MARK.lastIndex = 0;
+  const marks = [];
+  let m;
+  while ((m = STICKER_ANY_MARK.exec(text)) !== null) {
+    marks.push({ start: m.index, end: STICKER_ANY_MARK.lastIndex, raw: m[0] });
+  }
+  if (!marks.length) return text;
+
+  let out = '';
+  let cursor = 0;
+  const trailing = [];                                  // 后面找不到边界的，放到最后
+  for (const mark of marks) {
+    if (mark.start < cursor) continue;                 // 已经被前面的搬走了
+    out += text.slice(cursor, mark.start);
+    // 往后找最近的句末标点 / 换行
+    let cut = -1;
+    for (let i = mark.end; i < text.length; i += 1) {
+      const ch = text[i];
+      if ('。！？!?…；;'.includes(ch)) { cut = i + 1; break; }
+      if (ch === '\n') { cut = i + 1; break; }
+    }
+    if (cut === -1) {
+      trailing.push(mark.raw);                         // 这句没写标点：挪到这段最后
+      cursor = mark.end;
+    } else {
+      out += text.slice(mark.end, cut) + mark.raw;     // 先说完这句，再放表情
+      cursor = cut;
+    }
+  }
+  out += text.slice(cursor) + trailing.join('');
+  return out;
+}
 const STICKER_TOKEN_EXACT = /^@@sticker:(\d+)@@$/;
 
 function stickerImg(value) {
@@ -974,12 +1016,32 @@ function addSticker(turn, mood, name) {
   if (!turn.stickers) turn.stickers = [];
   const index = turn.stickers.length;
   turn.stickers.push(token);
-  contentChunk(turn, `@@sticker:${index}@@`);   // 就地放个占位符
+  // 先排队：等正文出现句末标点/换行再插，避免把句子劈开
+  if (!turn.queuedStickers) turn.queuedStickers = [];
+  turn.queuedStickers.push(index);
+  flushQueuedStickers(turn, false);
+}
+
+/* 把排队的表情包插进正文：force=true 时（这一块正文结束了）直接插 */
+function flushQueuedStickers(turn, force) {
+  if (!turn || !turn.queuedStickers || !turn.queuedStickers.length) return;
+  if (!turn.content) {
+    if (!force) return;
+    const idx = turn.queuedStickers.splice(0);
+    idx.forEach((i) => contentChunk(turn, `@@sticker:${i}@@`));
+    return;
+  }
+  const endsAtBoundary = /[。！？!?…；;\n]\s*$/.test(turn.content.raw);
+  if (!force && !endsAtBoundary) return;
+  const index = turn.queuedStickers.shift();
+  contentChunk(turn, `@@sticker:${index}@@`);
+  if (force && turn.queuedStickers.length) flushQueuedStickers(turn, true);
 }
 
 // 助手画的图：用沙箱 iframe 渲染，脚本能跑但摸不到父页面
 function addArtifact(turn, event) {
   settleThinking(turn);
+  flushQueuedStickers(turn, true);
   turn.content = null;
 
   const id = String(event.id || '').replace(/[^0-9a-f]/gi, '');
@@ -1719,6 +1781,7 @@ async function send(text, images) {
     errorBubble(turn, err && err.message ? err.message : String(err), true);
   } finally {
     clearLoading(turn);
+    flushQueuedStickers(turn, true);
     settleThinking(turn);
     if (turn.content) scheduleRender(turn.content);
     busy = false;
