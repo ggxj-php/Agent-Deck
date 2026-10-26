@@ -370,6 +370,7 @@ def set_embed_enabled(value):
 #                  （DeepSeek 官方这套）
 # 都不支持就退回本站的「抓搜索结果页 + 抓正文」老路子。
 _WEB_SEARCH_PROBE = {"key": None, "ts": 0.0, "result": None}
+_WEB_SEARCH_PROBE_TTL_OVERRIDE = {"ttl": 0}
 _WEB_SEARCH_TTL = 1800
 _PROBE_QUERY = "今天北京天气怎么样？"
 
@@ -450,8 +451,9 @@ def web_search_probe(force=False):
     cache_key = (base, model)
     now = time.time()
     cached = _WEB_SEARCH_PROBE["result"]
+    ttl = _WEB_SEARCH_PROBE_TTL_OVERRIDE.get("ttl") or _WEB_SEARCH_TTL
     if (not force and cached and _WEB_SEARCH_PROBE["key"] == cache_key
-            and now - _WEB_SEARCH_PROBE["ts"] < _WEB_SEARCH_TTL):
+            and now - _WEB_SEARCH_PROBE["ts"] < ttl):
         return cached
 
     result = {"supported": False, "mode": "none", "reason": "没检测过",
@@ -477,10 +479,27 @@ def web_search_probe(force=False):
                               "reason": f"{why_inline}；{why_api}",
                               "checked_at": int(now)}
         except Exception as exc:            # noqa: BLE001
-            result = {"supported": False, "mode": "none",
-                      "reason": f"检测失败：{type(exc).__name__}", "checked_at": int(now)}
+            # 探测本身网络抖动时别急着判「不支持」——那会让开关明明开着却退回抓网页。
+            # 先乐观按 inline 处理，真不支持的话 llm.py 会在运行时报错降级并标记。
+            result = {"supported": True, "mode": "inline",
+                      "reason": f"探测时网络抖动（{type(exc).__name__}），先按 inline 处理",
+                      "checked_at": int(now)}
+            _WEB_SEARCH_PROBE_TTL_OVERRIDE["ttl"] = 300      # 抖动结果别缓存太久
     _WEB_SEARCH_PROBE.update({"key": cache_key, "ts": now, "result": result})
     return result
+
+
+def mark_inline_unsupported(reason: str = ""):
+    """运行时发现接口不认 enable_search：立刻降级成 none，别每次请求都白试一遍。"""
+    import time
+    now = time.time()
+    _WEB_SEARCH_PROBE.update({
+        "key": (chat_base_url(), chat_model()), "ts": now,
+        "result": {"supported": False, "mode": "none",
+                   "reason": reason or "接口不接受 enable_search（运行时降级）",
+                   "checked_at": int(now)},
+    })
+    _WEB_SEARCH_PROBE_TTL_OVERRIDE["ttl"] = 300
 
 
 def web_search_mode():

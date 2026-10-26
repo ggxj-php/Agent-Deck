@@ -105,23 +105,35 @@ def stream_chat(messages: list, tools: list, model: str = "",
     # 我们就不用再调 web_search/open_url 抓网页了（能快好几秒）
     if settings.web_search_mode() == "inline":
         extra["enable_search"] = True
-    kwargs = {"extra_body": extra} if extra else {}
-    try:
-        stream = _client(key, base).chat.completions.create(
+
+    def _create(extra_body):
+        return _client(key, base).chat.completions.create(
             model=model,
             messages=messages,
             tools=tools,
             max_tokens=MAX_TOKENS,
             stream=True,
-            **kwargs,
+            **({"extra_body": extra_body} if extra_body else {}),
         )
+
+    try:
+        stream = _create(extra)
     except Exception as exc:      # noqa: BLE001
-        if extra:
+        text = str(exc)
+        # 端点不认 enable_search（有的中转直接 400）：记下来降级成抓网页，
+        # 去掉这个参数重新发一次，别让整条回复因为一个可选参数失败。
+        if extra.get("enable_search") and any(
+                k in text for k in ("enable_search", "search_options", "unknown", "invalid")):
+            settings.mark_inline_unsupported(f"接口拒绝 enable_search：{text[:120]}")
+            extra.pop("enable_search", None)
+            stream = _create(extra)
+        elif extra:
             raise RuntimeError(
                 f"{exc}（可能是这个接口不认 {THINKING_PARAM} 参数，"
                 "把网页上的「思考」开关打开再试一次）"
             ) from exc
-        raise
+        else:
+            raise
 
     text_parts = []
     calls = {}  # index -> {"id", "name", "arguments"}，流式下 tool_call 是分片下发的
