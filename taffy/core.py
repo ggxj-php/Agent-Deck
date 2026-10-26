@@ -351,11 +351,18 @@ class TaffyAgent:
                     # 这一轮收尾了，把还没吐的尾巴补上
                     for ev, value in splitter.flush():
                         if ev == "content":
-                            out = guard.flush()
+                            out = guard.feed(value)
                             if out:
                                 yield {"type": "content", "text": out}
                         else:
                             yield {"type": "sticker", "mood": value}
+                    # **必须无条件 flush**：guard 扣着最后 80 个字防泄漏，
+                    # 如果这一轮正好以 [sticker:x] 结尾，上面的 splitter.flush() 是空的，
+                    # 只靠循环里那个 guard.flush() 就永远轮不到 → 最后一段话被吞掉。
+                    # （表现：界面上话说到一半就断了，但库里存的正文是完整的）
+                    tail = guard.flush()
+                    if tail:
+                        yield {"type": "content", "text": tail}
                     if guard.hit:
                         print("[leak-guard] 拦下一段疑似系统提示原文", file=sys.stderr)
                 except Exception as exc:
