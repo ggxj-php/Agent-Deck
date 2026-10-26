@@ -1999,3 +1999,26 @@ sup, sub { font-size: 0.72em; line-height: 0; }
   }
 
 }
+
+/* 待发送图片：可以多张，横向排、自动换行 */
+.attach-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 用户气泡里的多张图 */
+.sent-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.sent-image {
+  max-width: 140px;
+  max-height: 140px;
+  border-radius: 12px;
+  object-fit: cover;
+  display: block;
+}

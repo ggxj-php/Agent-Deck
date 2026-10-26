@@ -7,7 +7,7 @@ import json
 import re
 import sys
 
-from . import context, settings
+from . import context, settings, uploads
 from .config import (EXIT_WORDS, MAX_ROUNDS, RESUME_INSTRUCTION, RESUME_WORDS,
                        STICKER_LIMIT)
 from .llm import stream_chat
@@ -200,12 +200,15 @@ class TaffyAgent:
         """当前上下文用量，网页版拿它显示「上下文 xx%」。"""
         return context.usage(self.messages, settings.context_limit())
 
-    def ask_stream(self, user_input: str, image: str = None, thinking: bool = None):
+    def ask_stream(self, user_input: str, image: str = None, thinking: bool = None,
+                   images: list = None):
         """把用户这句话丢给模型，边跑边吐事件，最多跑 MAX_ROUNDS 轮工具。
 
-        image 是可选的图片 data URL。带了图就按图文混合发给模型，但这一轮
-        跑完会立刻把历史里的图片数据换掉：图只在内存里过一趟，不落盘、也不
-        会在后续每一轮被反复上传。
+        image / images 是这一轮上传的图片（内联 data URL，可以多张）。
+        处理方式和以前不同：先校验魔术字节，真的图片才落到 workspace/uploads/，
+        让模型自己调 read_img 去看——这样图片内容会走「外部内容边界」，
+        比把图直接塞进多模态请求安全。这一轮结束（正常结束 / 报错 / 被取消）
+        都会把落盘的临时图片删掉，不在服务器上留东西。
 
         事件类型：
           thinking    {text}                       思考过程增量
@@ -228,30 +231,32 @@ class TaffyAgent:
         resume = self.cut_off and _is_resume(user_input)
         self.cut_off = False
 
-        image_slot = None
+        # 这一轮上传的图片先过一遍：校验魔术字节 → 落盘到 workspace/uploads/
+        # （只认真图片，data URL 上的 MIME 和扩展名都不信）
+        incoming = []
+        if image:
+            incoming.append(image)
+        if images:
+            incoming.extend(images)
+        saved_paths, image_notes = uploads.save_images(incoming)
+        image_hint = uploads.hint_text(saved_paths, image_notes)
+
         if resume:
             self.messages.append({"role": "user", "content": RESUME_INSTRUCTION})
-        elif image:
-            if not _valid_image(image):
-                yield {"type": "error", "message": "这张图塔菲收不了喵（只支持常见图片格式，且不超过 4MB）"}
-                return
-            self.messages.append({
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_input or "看看这张图喵"},
-                    {"type": "image_url", "image_url": {"url": image}},
-                ],
-            })
-            image_slot = len(self.messages) - 1
         else:
-            self.messages.append({"role": "user", "content": user_input})
+            content = user_input or ""
+            if image_hint:
+                content = (content + "\n\n" if content else "") + image_hint
+            self.messages.append({"role": "user", "content": content})
 
         # 带图这一轮整套走图片那套配置（模型 + key + 接口地址），纯文字走聊天那套，
         # 两套在后台能分开配（比如聊天 GLM、图片 DeepSeek）。
         # 工具循环里图片还在历史里，所以整轮都用同一套，不会中途换来换去。
         # 网页上那个「思考」开关：不传就按「开」处理，跟以前的行为一致。
         think = True if thinking is None else bool(thinking)
-        vision = image_slot is not None
+        # 图不再作为多模态内容进上下文了，一律走聊天模型；
+        # 真正「看图」发生在 read_img 工具里（那边用图片模型）
+        vision = False
         model = settings.model_for(vision=vision)
         api_key = settings.key_for(vision=vision)
         base_url = settings.base_url_for(vision=vision)
@@ -395,12 +400,9 @@ class TaffyAgent:
             yield {"type": "content", "text": "喵呜…工具调太多次了，塔菲脑子转不动了喵"}
             yield {"type": "done", "context": self.context_usage()}
         finally:
-            # 图看完了就把原始数据抹掉，history 里只留一句说明
-            if image_slot is not None:
-                self.messages[image_slot] = {
-                    "role": "user",
-                    "content": (user_input + "\n" if user_input else "") + "[图片已阅，数据已清除]",
-                }
+            # 这一轮结束（正常 / 报错 / 被取消）都把落盘的临时图片删干净，
+            # 服务器上不留雏草姬上传的原图
+            uploads.cleanup(saved_paths)
 
             # 这一轮没正常结束（网络掐断 / 浏览器关了 / 生成器被取消）：
             # 把已经说出去的那段正文补进历史，用户发「继续」时模型才知道说到哪儿了。

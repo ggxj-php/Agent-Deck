@@ -78,8 +78,12 @@ _sessions_lock = threading.Lock()
 class ChatRequest(BaseModel):
     session_id: str
     message: str = ""
-    # 可选的内联图片（data:image/...;base64,...）。不落盘，这一轮跑完就丢。
-    image: str | None = None
+    # 可选的内联图片（data:image/...;base64,...），支持多张。
+    # 后端会校验魔术字节、真的图片才落到 workspace/uploads/，
+    # 让模型自己用 read_img 读，这一轮结束就删掉。
+    image: str | None = None           # 老字段，兼容旧前端（等价于 images 一张）
+    images: list[str] | None = None    # 新字段：一次可以传多张
+
     # 「深度思考」开关（网页顶栏那个）。不传 = 开，跟以前的行为一致。
     thinking: bool | None = None
 
@@ -236,7 +240,8 @@ def chat(req: ChatRequest):
     def events():
         # 同一个会话串行处理，避免两条消息交叉写乱历史
         with entry["lock"]:
-            for event in entry["agent"].ask_stream(req.message, req.image, req.thinking):
+            for event in entry["agent"].ask_stream(
+                req.message, req.image, req.thinking, req.images):
                 yield f"data: {_sse_payload(event)}\n\n"
         yield "data: [DONE]\n\n"
 

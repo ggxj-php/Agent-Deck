@@ -57,8 +57,6 @@ const toBottomEl = document.getElementById('to-bottom');
 const pickImageEl = document.getElementById('pick-image');
 const imageInputEl = document.getElementById('image-input');
 const attachBarEl = document.getElementById('attach-bar');
-const attachPreviewEl = document.getElementById('attach-preview');
-const attachRemoveEl = document.getElementById('attach-remove');
 const saveSessionEl = document.getElementById('save-session');
 const saveModalEl = document.getElementById('save-modal');
 const saveUuidEl = document.getElementById('save-uuid');
@@ -81,7 +79,8 @@ const thinkToggleEl = document.getElementById('think-toggle');
 let sessionId = sessionStorage.getItem(STORAGE_KEY);
 let busy = false;
 let sentCount = 0;       // 这个页面聊过几句，存上下文之前用它判断有没有东西可存
-let pendingImage = null; // 已经选好、还没发出去的图片（data URL）
+let pendingImages = []; // 已经选好、还没发出去的多张图片（data URL 列表）
+const IMAGE_MAX_COUNT = 6;  // 一轮最多几张，和后端 uploads.MAX_COUNT 对齐
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -504,14 +503,18 @@ toBottomEl.addEventListener('click', () => {
 
 /* ---------------- 消息渲染 ---------------- */
 
-function addUser(text, image) {
+function addUser(text, images) {
   const row = el('div', 'msg user');
   const bubble = el('div', 'bubble');
-  if (image) {
-    const img = el('img', 'sent-image');
-    img.src = image;
-    img.alt = '发送的图片';
-    bubble.appendChild(img);
+  if (images && images.length) {
+    const wrap = el('div', 'sent-images');
+    images.forEach((src) => {
+      const img = el('img', 'sent-image');
+      img.src = src;
+      img.alt = '发送的图片';
+      wrap.appendChild(img);
+    });
+    bubble.appendChild(wrap);
   }
   if (text) {
     const box = el('div', 'text');
@@ -765,9 +768,9 @@ async function refreshContext() {
    静默太久就自己掐掉，把状态放出来。 */
 const STREAM_IDLE_MS = 60000;
 
-async function streamChat(id, message, onEvent, image) {
+async function streamChat(id, message, onEvent, images) {
   const body = { session_id: id, message, thinking: thinkingOn() };
-  if (image) body.image = image;
+  if (images && images.length) body.images = images;
 
   const controller = new AbortController();
   let idleTimer = null;
@@ -912,7 +915,7 @@ window.addEventListener('pageshow', (e) => { if (e.persisted) resume(); });
 
 /* ---------------- 发送 ---------------- */
 
-async function send(text, image) {
+async function send(text, images) {
   if (busy) return;
   busy = true;
   sentCount += 1;
@@ -921,13 +924,13 @@ async function send(text, image) {
   inputEl.value = '';
   autosize();
   statusEl.textContent = '正在思考喵…';
-  addUser(text, image);
+  addUser(text, images);
   clearImage();
 
   const turn = addAgent();
   try {
     const id = await ensureSession();
-    await streamChat(id, text, (event) => handleEvent(turn, event), image);
+    await streamChat(id, text, (event) => handleEvent(turn, event), images);
   } catch (err) {
     errorBubble(turn, err && err.message ? err.message : String(err));
   } finally {
@@ -955,53 +958,74 @@ function autosize() {
 
 inputEl.addEventListener('input', autosize);
 
-/* ---------------- 发图片 ----------------
-   图片只在浏览器里读成 data URL，随请求发上去；服务端不落盘，塔菲看完整轮
-   就把图片数据从对话历史里抹掉，所以不会在服务器上留下任何图片文件。 */
+/* ---------------- 发图片（可以多张） ----------------
+   图片只在浏览器里读成 data URL，随请求发上去；服务端先用魔术字节验一遍，
+   真图片才落到 workspace/uploads/，塔菲自己调 read_img 看——这样图片内容
+   会走「外部内容边界」，比直接塞多模态请求安全。这一轮结束服务端会把临时
+   图片删掉，服务器上不留原图。 */
 
-const IMAGE_MAX_BYTES = 4 * 1024 * 1024; // 原图上限，超了直接拦掉，别让 base64 撑爆请求
+const IMAGE_MAX_BYTES = 4 * 1024 * 1024; // 单张上限，超了直接拦掉，别让 base64 撑爆请求
+
+function renderAttachBar() {
+  attachBarEl.innerHTML = '';
+  if (!pendingImages.length) {
+    attachBarEl.hidden = true;
+    return;
+  }
+  pendingImages.forEach((src, index) => {
+    const item = el('div', 'attach-item');
+    const img = el('img', 'attach-preview');
+    img.src = src;
+    img.alt = '待发送的图片';
+    const del = el('button', 'attach-remove');
+    del.type = 'button';
+    del.textContent = '×';
+    del.setAttribute('aria-label', '移除这张图片');
+    del.addEventListener('click', () => {
+      pendingImages.splice(index, 1);
+      renderAttachBar();
+      inputEl.focus();
+    });
+    item.append(img, del);
+    attachBarEl.appendChild(item);
+  });
+  attachBarEl.hidden = false;
+}
 
 function clearImage() {
-  pendingImage = null;
+  pendingImages = [];
   imageInputEl.value = '';
-  attachPreviewEl.removeAttribute('src');
+  attachBarEl.innerHTML = '';
   attachBarEl.hidden = true;
 }
 
 pickImageEl.addEventListener('click', () => imageInputEl.click());
 
 imageInputEl.addEventListener('change', () => {
-  const file = imageInputEl.files && imageInputEl.files[0];
-  if (!file) return;
-  if (!file.type.startsWith('image/')) {
-    statusEl.textContent = '只能发图片喵';
-    clearImage();
-    return;
+  const files = Array.from(imageInputEl.files || []);
+  imageInputEl.value = '';
+  if (!files.length) return;
+  let rejected = 0;
+  files.forEach((file) => {
+    if (pendingImages.length >= IMAGE_MAX_COUNT) { rejected += 1; return; }
+    if (!file.type.startsWith('image/')) { rejected += 1; return; }
+    if (file.size > IMAGE_MAX_BYTES) { rejected += 1; return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (pendingImages.length >= IMAGE_MAX_COUNT) return;
+      pendingImages.push(reader.result);
+      renderAttachBar();
+      statusEl.textContent = `已选 ${pendingImages.length} 张喵`;
+      inputEl.focus();
+    };
+    reader.onerror = () => { statusEl.textContent = '读图片失败喵'; };
+    reader.readAsDataURL(file);
+  });
+  if (rejected) {
+    statusEl.textContent = `有 ${rejected} 张没加上（不是图片 / 超过 4MB / 最多 ${IMAGE_MAX_COUNT} 张）`;
   }
-  if (file.size > IMAGE_MAX_BYTES) {
-    statusEl.textContent = '图片太大了喵，限 4MB';
-    clearImage();
-    return;
-  }
-  const reader = new FileReader();
-  reader.onload = () => {
-    pendingImage = reader.result;
-    attachPreviewEl.src = pendingImage;
-    attachBarEl.hidden = false;
-    statusEl.textContent = '在线喵';
-    inputEl.focus();
-  };
-  reader.onerror = () => {
-    statusEl.textContent = '读图片失败喵';
-    clearImage();
-  };
-  reader.readAsDataURL(file);
 });
 
-attachRemoveEl.addEventListener('click', () => {
-  clearImage();
-  inputEl.focus();
-});
 
 /* ---------------- 保存上下文 ----------------
    存成服务器上的一个 txt（见 taffy/web/sessions_store.py），历史不留在内存里。
@@ -1242,8 +1266,8 @@ loadUuidEl.addEventListener('keydown', (event) => {
 formEl.addEventListener('submit', (e) => {
   e.preventDefault();
   const text = inputEl.value.trim();
-  if ((!text && !pendingImage) || busy) return;
-  send(text, pendingImage);
+  if ((!text && !pendingImages.length) || busy) return;
+  send(text, pendingImages.slice());
 });
 
 newChatEl.addEventListener('click', async () => {

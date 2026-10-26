@@ -46,18 +46,13 @@
 </div>
 
 <form id="composer" class="composer">
-  <div class="attach-bar" id="attach-bar" hidden>
-    <div class="attach-item">
-      <img id="attach-preview" alt="待发送的图片">
-      <button type="button" id="attach-remove" class="attach-remove" aria-label="移除图片">×</button>
-    </div>
-  </div>
+  <div class="attach-bar" id="attach-bar" hidden></div>
   <div class="composer-row">
     <button type="button" id="pick-image" class="icon-btn" aria-label="发送图片" title="发送图片">🖼</button>
     <textarea id="input" rows="1" placeholder="和塔菲说点什么喵…" autocomplete="off"></textarea>
     <button id="send" type="submit" aria-label="发送">发送</button>
   </div>
-  <input type="file" id="image-input" accept="image/*" hidden>
+  <input type="file" id="image-input" accept="image/*" multiple hidden>
 </form>
 
 <div class="modal" id="save-modal" hidden>
