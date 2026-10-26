@@ -163,15 +163,15 @@ python -m pytest -q --cov=deck --cov-report=term-missing   # 看覆盖率
 
 ```bash
 # 只跑 Python（镜像小，约 200MB）
-docker build -t taffy-agent .
+docker build -t agent-deck .
 docker run --rm -p 8000:8000 --env-file .env \
     -v "$PWD/workspace:/app/workspace" \
     -v "$PWD/knowledge:/app/knowledge" \
     -v "$PWD/.cache:/app/.cache" \
-    taffy-agent
+    agent-deck
 
 # 想让它能跑 run_code 的 C/C++ / Java / Node（镜像大约多 300MB）
-docker build --build-arg WITH_TOOLCHAINS=1 -t taffy-agent:full .
+docker build --build-arg WITH_TOOLCHAINS=1 -t agent-deck:full .
 
 # 或者用 compose
 docker compose up -d --build
@@ -361,7 +361,7 @@ python -m deck.web
 - 上限 40000 字（`settings.PROMPT_LIMIT`），超了直接拒绝——`admin.json` 每次都是整份读写，塞个几兆进去会把后台拖慢。
 - 内置那份里标着「【重要】」的都是硬规矩（每轮必须发表情包、代码要完整写进回答、workspace 不许留临时文件、数学式子不许用 LaTeX、只准碰 workspace 里的文件……）。**删掉这些规矩它就真会照做**，改之前建议先把内置那份复制出来备份。
 
-> 命令行那版（`python -m taffy`）用的是同一份 `admin.json`，所以后台改完，终端里新开的会话也是新的人设。
+> 命令行那版（`python agent.py`）用的是同一份 `admin.json`，所以后台改完，终端里新开的会话也是新的人设。
 
 #### 表情包库
 
