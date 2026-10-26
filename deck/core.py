@@ -11,6 +11,7 @@ from . import context, settings, uploads
 from .config import EXIT_WORDS, MAX_ROUNDS, RESUME_INSTRUCTION, RESUME_WORDS, STICKER_LIMIT
 from .llm import stream_chat
 from .tools import active_specs, execute
+from .tools.render import append_marks, strip_marks
 from .tools.sticker import MOODS
 
 # 内联图片只认 data:image/...;base64,... 这种。上限按 base64 字符串长度算，
@@ -211,12 +212,18 @@ def _sendable(messages):
     历史里万一混进过这种空消息（旧版本遇到过：思考吃光 max_tokens，正文没输出），
     整个会话之后每次都会 400，这里过滤一下让它自己恢复，不用重开会话。
     """
-    return [
-        message for message in messages
-        if message.get("role") != "assistant"
-        or message.get("content")
-        or message.get("tool_calls")
-    ]
+    out = []
+    for message in messages:
+        if message.get("role") == "assistant" and isinstance(message.get("content"), str):
+            # 正文里可能有画图产物标记（给前端渲染卡片用），模型不需要看到
+            if "[[artifact:" in message["content"]:
+                message = dict(message)
+                message["content"] = strip_marks(message["content"])
+        if (message.get("role") != "assistant"
+                or message.get("content")
+                or message.get("tool_calls")):
+            out.append(message)
+    return out
 
 
 class DeckAgent:
@@ -415,11 +422,17 @@ class DeckAgent:
                         except Exception:
                             payload = {}
                         if payload.get("artifact_id"):
-                            yield {
-                                "type": "artifact",
-                                "id": payload["artifact_id"],
-                                "title": payload.get("title") or "",
-                            }
+                            aid = payload["artifact_id"]
+                            title = payload.get("title") or ""
+                            yield {"type": "artifact", "id": aid, "title": title}
+                            # 把产物标记写进「刚调工具的那条 assistant」正文末尾：
+                            # 刷新后卡片才会回到原来的位置（在那段话之后、后文之前），
+                            # 而不是被统一追加到整条回复的最末尾。
+                            for item in reversed(self.messages):
+                                if item.get("role") == "assistant":
+                                    item["content"] = append_marks(
+                                        item.get("content") or "", [(aid, title)])
+                                    break
 
                     if name == "send_sticker":
                         # 一次调用可以带多张（moods 数组），逐个发出去。

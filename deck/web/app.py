@@ -558,18 +558,8 @@ def chat(req: ChatRequest, request: Request):
             finally:
                 # 不管正常结束、报错还是浏览器中途断开，都把这次跑出来的历史落库
                 try:
+                    # 产物标记 core 已经写进对应那条 assistant 了（位置才准），这里只落库
                     messages = list(agent.messages[1:])
-                    if artifacts and messages:
-                        # 标记拼到最后一条 assistant 正文末尾，跟流式时的卡片位置基本一致
-                        last = messages[-1]
-                        if isinstance(last, dict) and last.get("role") == "assistant":
-                            last = dict(last)
-                            last["content"] = render_tool.append_marks(
-                                last.get("content") or "", artifacts)
-                            messages[-1] = last
-                        elif isinstance(last, dict):
-                            messages.append({"role": "assistant",
-                                             "content": render_tool.append_marks("", artifacts)})
                     store.save_messages(
                         req.session_id, messages, agent.cut_off,
                         first_user_text=(req.message if is_first else ""),
