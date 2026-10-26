@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ffb7d5">
-<title>登录 · 永雏塔菲</title>
-<link rel="icon" href="/static/avatar.jpg">
+<title>登录 · Agent Deck</title>
+<link rel="icon" href="/static/avatar.jpg" id="auth-icon">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="auth-body">
 
 <main class="auth-card">
-  <img class="auth-avatar" src="/static/avatar.jpg" alt="塔菲">
-  <h1 class="auth-title">永雏塔菲</h1>
-  <p class="auth-sub">先登录才能跟塔菲聊天喵</p>
+  <img class="auth-avatar" src="/static/avatar.jpg" alt="头像" id="auth-avatar">
+  <h1 class="auth-title" id="auth-title">Agent Deck</h1>
+  <p class="auth-sub" id="auth-sub">先登录才能开始聊天喵</p>
 
   <div class="auth-tabs" role="tablist">
     <button type="button" class="auth-tab on" id="tab-login" role="tab">登录</button>
@@ -50,7 +50,7 @@
     <label class="auth-field">
       <span>邀请码</span>
       <input id="reg-invite" type="text" maxlength="16" required
-             placeholder="找已经在用的雏草姬要一个">
+             placeholder="找已经在用的人要一个" id="reg-invite">
     </label>
     <label class="auth-field">
       <span>图形验证码（点图换一张）</span>
@@ -80,6 +80,62 @@
   const msgEl = document.getElementById('auth-msg');
 
   let captchaId = '';
+
+  /* 登录页也跟身份卡走：标题、头像、名字、欢迎语、网页图标、主题色都从 /api/persona 拿 */
+  function mixColor(hex, target, ratio) {
+    const value = String(hex || '').replace('#', '');
+    if (value.length !== 6) return hex;
+    const num = parseInt(value, 16);
+    const base = [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+    const to = target === 'white' ? 255 : 0;
+    const out = base.map((v) => Math.round(v + (to - v) * ratio));
+    return '#' + out.map((n) => n.toString(16).padStart(2, '0')).join('');
+  }
+
+  function applyPersonaBranding(info) {
+    if (!info) return;
+    const name = info.name || 'Agent';
+    document.title = `登录 · ${name}`;
+    const titleEl = document.getElementById('auth-title');
+    if (titleEl) titleEl.textContent = name;
+    const avatarEl = document.getElementById('auth-avatar');
+    if (avatarEl && info.avatar) {
+      avatarEl.src = info.avatar;
+      avatarEl.alt = name;
+    }
+    const subEl = document.getElementById('auth-sub');
+    if (subEl) subEl.textContent = `先登录才能跟${name}聊天喵`;
+    const inviteEl = document.getElementById('reg-invite');
+    if (inviteEl && info.user_name) {
+      inviteEl.placeholder = `找已经在用的${info.user_name}要一个`;
+    }
+    if (info.icon) {
+      // 和聊天页一样：删旧 link 再建新的，绕开浏览器图标缓存
+      const full = info.icon + (info.icon.includes('?') ? '&' : '?') + 'v=' + Date.now();
+      document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]').forEach((n) => n.remove());
+      const link = document.createElement('link');
+      link.rel = 'icon';
+      link.href = full;
+      document.head.appendChild(link);
+    }
+    if (/^#[0-9a-fA-F]{6}$/.test(info.theme || '')) {
+      const root = document.documentElement.style;
+      root.setProperty('--pink', mixColor(info.theme, 'white', 0.25));
+      root.setProperty('--pink-dark', info.theme);
+      root.setProperty('--pink-deep', mixColor(info.theme, 'black', 0.3));
+      root.setProperty('--pink-pale', mixColor(info.theme, 'white', 0.45));
+      root.setProperty('--pink-mist', mixColor(info.theme, 'white', 0.78));
+      root.setProperty('--bg', mixColor(info.theme, 'white', 0.93));
+      root.setProperty('--line', mixColor(info.theme, 'white', 0.7));
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.content = info.theme;
+    }
+  }
+
+  fetch('/api/persona', { cache: 'no-store' })
+    .then((resp) => (resp.ok ? resp.json() : null))
+    .then((info) => { if (info) applyPersonaBranding(info); })
+    .catch(() => { /* 拿不到就用内置文案，不影响登录 */ });
 
   function showMsg(text, ok) {
     msgEl.hidden = !text;
