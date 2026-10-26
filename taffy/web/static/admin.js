@@ -409,8 +409,16 @@ async function loadBranding() {
       avatarEl.src = info.avatar;
       avatarEl.alt = name;
     }
-    const iconEl = document.getElementById('page-icon');
-    if (iconEl && info.icon) iconEl.href = info.icon;
+    if (info.icon) {
+      // 和聊天页一样：重建 link + 时间戳，不然浏览器会一直用旧的图标
+      const full = info.icon + (info.icon.includes('?') ? '&' : '?') + 'v=' + Date.now();
+      document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"], link[rel^="icon"]')
+        .forEach((node) => node.remove());
+      const link = document.createElement('link');
+      link.rel = 'icon';
+      link.href = full;
+      document.head.appendChild(link);
+    }
     if (info.theme) {
       applyThemeColor(info.theme);
       const meta = document.querySelector('meta[name="theme-color"]');

@@ -16,6 +16,19 @@ let personaInfo = null;
 const onlineText = () => (personaInfo && personaInfo.status_online) || '在线喵';
 const thinkingText = () => (personaInfo && personaInfo.status_thinking) || '正在思考喵…';
 
+/* 换网页图标：删掉旧的 link 再新建一个（带时间戳绕开缓存），最稳 */
+function setFavicon(url) {
+  if (!url) return;
+  const full = url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now();
+  document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"], link[rel^="icon"]')
+    .forEach((node) => node.remove());
+  const link = document.createElement('link');
+  link.rel = 'icon';
+  link.type = full.includes('.png') || full.includes('/api/persona/icon') ? 'image/png' : '';
+  link.href = full;
+  document.head.appendChild(link);
+}
+
 /* 主题色：把一个 #rrggbb 往白 / 黑方向混，得到浅色档和深色档 */
 function mixColor(hex, target, ratio) {
   const value = String(hex || '').replace('#', '');
@@ -53,16 +66,8 @@ function applyPersona(info) {
   if (themeMeta && /^#[0-9a-fA-F]{6}$/.test(info.theme || '')) {
     themeMeta.content = info.theme;
   }
-  // 网页图标跟着身份卡换
-  if (info.icon) {
-    let link = document.querySelector('link[rel="icon"]');
-    if (!link) {
-      link = document.createElement('link');
-      link.rel = 'icon';
-      document.head.appendChild(link);
-    }
-    link.href = info.icon;
-  }
+  // 网页图标跟着身份卡换（favicon 浏览器缓存很凶，重建 link + 加时间戳才换得动）
+  if (info.icon) setFavicon(info.icon);
   if (info.avatar) AVATAR = info.avatar;
   document.querySelectorAll('img.avatar, img.side-avatar, img.user-avatar').forEach((img) => {
     img.src = AVATAR;

@@ -7,6 +7,7 @@
 那套口令，不跟用户账号混在一起。
 """
 import base64
+import io
 import json
 import os
 import threading
@@ -328,11 +329,37 @@ def persona_avatar(pid: str = ""):
     return FileResponse(path, headers={"Cache-Control": "public, max-age=300"})
 
 
+_ICON_CACHE = {}
+
+
 @app.get("/api/persona/icon")
 def persona_icon(pid: str = ""):
-    """网页图标（favicon）：跟着身份卡换。"""
+    """网页图标（favicon）：跟着身份卡换。
+
+    统一转成 PNG 再返回——很多浏览器（尤其是微信/X 浏览器内核）对 webp 的
+    favicon 支持不稳，会直接不显示或者显示成旧图。顺手把尺寸压到 256 以内。
+    """
     path = persona_mod.icon_path(pid or None)
-    return FileResponse(path, headers={"Cache-Control": "public, max-age=300"})
+    try:
+        stat = os.stat(path)
+        key = (path, stat.st_mtime)
+        cached = _ICON_CACHE.get(key)
+        if cached is None:
+            from PIL import Image
+
+            with Image.open(path) as img:
+                img = img.convert("RGBA")
+                img.thumbnail((256, 256))
+                buf = io.BytesIO()
+                img.save(buf, "PNG")
+            cached = buf.getvalue()
+            _ICON_CACHE.clear()
+            _ICON_CACHE[key] = cached
+        return Response(content=cached, media_type="image/png",
+                        headers={"Cache-Control": "no-cache"})
+    except Exception:                      # noqa: BLE001
+        # 转不了就退回原图，至少不是 500
+        return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/persona/sticker/{name}")
