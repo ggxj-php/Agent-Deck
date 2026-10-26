@@ -1,5 +1,5 @@
 """文档工具里的纯逻辑：页码解析。"""
-from taffy.tools import docs
+from deck.tools import docs
 
 
 def test_页码范围():

@@ -1,5 +1,5 @@
 """访问统计：站点归类、机房识别、口径别名。"""
-from taffy.web import traffic
+from deck.web import traffic
 
 
 def test_站点别名():

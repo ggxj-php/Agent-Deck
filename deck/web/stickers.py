@@ -6,7 +6,7 @@
 心情只能是这八个之一：happy / think / confused / proud / cry / angry / sleepy / love。
 认不出心情的文件会被列在「没归类的」里，不会硬塞进某个心情。
 
-图片就放在 taffy/web/static/stickers/，跟网页静态目录在一起，直接由 /static 提供，
+图片就放在 deck/web/static/stickers/，跟网页静态目录在一起，直接由 /static 提供，
 所以网页那边只要换个文件名就能显示——png / jpg / gif / webp 都行，gif 会自己动。
 
 内存：上传是流式落盘的（见 admin.py），压缩包也是一个个读、一个个写，不会把整个包

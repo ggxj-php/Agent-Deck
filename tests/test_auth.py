@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from taffy import auth, db
+from deck import auth, db
 
 
 @pytest.fixture(autouse=True)

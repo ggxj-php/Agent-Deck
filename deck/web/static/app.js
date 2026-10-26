@@ -1027,11 +1027,16 @@ function renderSessionList() {
       const index = sessions.findIndex((row) => row.id === item.id);
       const wasCurrent = item.id === sessionId;
       const resp = await fetch(`/api/sessions/${item.id}`, { method: 'DELETE' });
-      if (!resp.ok) {
+      // 404 说明它本来就已经没了（别的设备删过），也按删成功处理
+      if (!resp.ok && resp.status !== 404) {
         statusEl.textContent = `删不掉喵（HTTP ${resp.status}）`;
         return;
       }
-      await loadSessions();
+      // 先从本地列表摘掉，别等网络刷新：万一 loadSessions 失败，
+      // 后面就会拿着一个已经不存在的 id 去 switchSession，直接 404
+      sessions = sessions.filter((row) => row.id !== item.id);
+      renderSessionList();
+      await loadSessions();          // 跟服务端对齐；失败也不影响上面的本地摘除
       if (!wasCurrent) {
         // 删的不是当前会话：列表刷新一下就行
         closeSidebar();
@@ -1042,6 +1047,7 @@ function renderSessionList() {
         const target = sessions[Math.min(Math.max(index, 0), sessions.length - 1)];
         if (target) {
           await switchSession(target.id);
+          closeSidebar();
           return;
         }
       }
@@ -1073,6 +1079,30 @@ async function switchSession(id) {
   try {
     const resp = await fetch(`/api/sessions/${id}/messages`, { cache: 'no-store' });
     if (!resp.ok) {
+      if (resp.status === 404) {
+        // 这条会话已经没了（别的设备删过 / 本地列表过期）：
+        // 从列表里摘掉，别留着它一直 404；当前指向它也一并清掉
+        sessions = sessions.filter((row) => row.id !== id);
+        renderSessionList();
+        if (sessionId === id) {
+          sessionId = null;
+          sessionStorage.removeItem(STORAGE_KEY);
+        }
+        statusEl.textContent = '这条会话已经不在了喵';
+        if (!sessionId) {
+          if (sessions.length) {
+            await switchSession(sessions[0].id);
+          } else {
+            try {
+              await ensureSession(true);
+              welcome();
+            } catch (err) {
+              statusEl.textContent = '建会话失败：' + ((err && err.message) || '未知原因');
+            }
+          }
+        }
+        return;
+      }
       statusEl.textContent = `切不过去喵（HTTP ${resp.status}），刷新一下试试`;
       return;
     }
@@ -1285,7 +1315,7 @@ document.getElementById('pass-form').addEventListener('submit', async (event) =>
 });
 
 /* ---------------- 上下文占用 ----------------
-   后端按「中文 1 字 1 token、英文 4 字符 1 token」粗估（见 taffy/context.py），
+   后端按「中文 1 字 1 token、英文 4 字符 1 token」粗估（见 deck/context.py），
    所以这个百分比是估的，不是 API 报的真实用量；够用来提醒「快满了」。
    用到窗口的八成时后端会自动把旧历史压成摘要，压完这个数会掉下来。 */
 

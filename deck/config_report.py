@@ -80,7 +80,7 @@ _ITEMS = [
          get=lambda: cfg.SITE_API, default="api.example.com", restart=True,
          desc="同上，one-api 那套"),
     dict(group="服务器", key="db_path", label="SQLite 库文件", source=".env TAFFY_DB_PATH",
-         get=lambda: __import__("taffy.db", fromlist=["DB_PATH"]).DB_PATH,
+         get=lambda: __import__("deck.db", fromlist=["DB_PATH"]).DB_PATH,
          default=".cache/taffy.db", restart=True,
          desc="用户 / 会话 / 消息都在这；备份直接拷这个文件"),
     dict(group="服务器", key="knowledge_dir", label="知识库目录", source="磁盘",
@@ -92,7 +92,7 @@ _ITEMS = [
          desc="所有文件工具 / 跑代码都只能在这里动手"),
     dict(group="服务器", key="admin_name", label="默认管理员用户名",
          source=".env TAFFY_ADMIN_NAME",
-         get=lambda: __import__("taffy.auth", fromlist=["DEFAULT_ADMIN_NAME"]).DEFAULT_ADMIN_NAME,
+         get=lambda: __import__("deck.auth", fromlist=["DEFAULT_ADMIN_NAME"]).DEFAULT_ADMIN_NAME,
          default="admin", restart=True,
          desc="只在第一次启动建库时生效（已有管理员就不动了）"),
 
@@ -108,7 +108,7 @@ _ITEMS = [
          desc="超过就淘汰最早的；产物在内存里，重启就没了"),
     dict(group="运行参数", key="upload_ttl", label="上传图片保留时长",
          source="uploads.py TTL_SECONDS",
-         get=lambda: __import__("taffy.uploads", fromlist=["TTL_SECONDS"]).TTL_SECONDS // 3600,
+         get=lambda: __import__("deck.uploads", fromlist=["TTL_SECONDS"]).TTL_SECONDS // 3600,
          default=24, restart=True, desc="单位小时，过期自动清"),
 ]
 

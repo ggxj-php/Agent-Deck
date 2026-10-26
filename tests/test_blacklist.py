@@ -1,7 +1,7 @@
 """IP 黑名单的准入校验：绝不能允许把自己锁在门外。"""
 import pytest
 
-from taffy.web import blacklist
+from deck.web import blacklist
 
 
 @pytest.mark.parametrize("ip", [

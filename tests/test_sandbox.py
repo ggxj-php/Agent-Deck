@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from taffy import sandbox
+from deck import sandbox
 
 
 @pytest.fixture(autouse=True)

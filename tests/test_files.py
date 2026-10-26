@@ -1,8 +1,8 @@
 """文件工具：只能在 workspace 里读写删。"""
 import pytest
 
-from taffy import sandbox
-from taffy.tools import files
+from deck import sandbox
+from deck.tools import files
 
 
 @pytest.fixture(autouse=True)

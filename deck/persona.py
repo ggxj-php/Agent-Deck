@@ -22,7 +22,7 @@ from .config import PROJECT_ROOT, STICKERS_DIR, SYSTEM_PROMPT
 
 PERSONAS_DIR = os.path.join(PROJECT_ROOT, "personas")
 DEFAULT_ID = "taffy"
-STATIC_STICKERS = "@static"          # 指回 taffy/web/static/stickers
+STATIC_STICKERS = "@static"          # 指回 deck/web/static/stickers
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,23}$")
 NAME_MAX = 24

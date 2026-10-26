@@ -1,4 +1,4 @@
-"""pytest 入口：把仓库根目录塞进 sys.path，测试里才能 import taffy。"""
+"""pytest 入口：把仓库根目录塞进 sys.path，测试里才能 import deck。"""
 import os
 import sys
 

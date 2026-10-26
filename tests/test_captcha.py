@@ -1,7 +1,7 @@
 """图形验证码：答案对才放行、一次一用、错多了作废、过期作废。"""
 import pytest
 
-from taffy import captcha
+from deck import captcha
 
 
 @pytest.fixture()

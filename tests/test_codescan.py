@@ -1,5 +1,5 @@
 """非 Python 代码的跑前静态审查：危险头文件 / 包 / 越界路径字符串要被拦。"""
-from taffy.tools import _codescan
+from deck.tools import _codescan
 
 
 def check(tmp_path, name, text, ext):

@@ -1,5 +1,5 @@
 """配置总览：能生成、每项字段齐全、密钥不裸奔。"""
-from taffy import config_report
+from deck import config_report
 
 
 def test_报告能生成():

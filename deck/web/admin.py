@@ -520,7 +520,7 @@ def save_embed(req: EmbedRequest, request: Request):
 
 
 # ---------- 对话上下文 ----------
-# 模型的上下文窗口有多大。聊天页那个「上下文 xx%」和自动压缩（见 taffy/context.py）
+# 模型的上下文窗口有多大。聊天页那个「上下文 xx%」和自动压缩（见 deck/context.py）
 # 都按这个数算，改完立刻生效，不用重启。
 
 CONTEXT_MIN = 4096

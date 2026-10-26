@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "taffy-agent"
+name = "agent-deck"
 version = "1.0.0"
 description = "永雏塔菲风格的 Agent：工具循环 + 知识库 + 网页版 + 后台"
 readme = "README.md"
@@ -30,7 +30,7 @@ dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.6"]
 [tool.setuptools]
 # 只声明包，不真的往下发 wheel；这么写是为了让 pip install -e . 能识别项目
 py-modules = ["agent"]
-packages = ["taffy", "taffy.kb", "taffy.tools", "taffy.web"]
+packages = ["deck", "deck.kb", "deck.tools", "deck.web"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

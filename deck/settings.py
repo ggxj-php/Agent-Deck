@@ -415,7 +415,7 @@ def set_update_remote(name):
 
 
 # ---------- 对话上下文 ----------
-# 模型能吃多少 token。聊天页那个「上下文 xx%」和自动压缩都按它算（见 taffy/context.py）。
+# 模型能吃多少 token。聊天页那个「上下文 xx%」和自动压缩都按它算（见 deck/context.py）。
 
 def context_limit():
     """当前生效的上下文窗口大小（token）。后台没配过就用 config.py / .env 里的。"""

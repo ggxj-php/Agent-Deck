@@ -27,7 +27,7 @@ Agent-Deck/
 ├── tests/                   # pytest 测试（安全沙箱、上传校验、路由、身份卡…）
 ├── .env                     # 密钥（已 gitignore，不进仓库）
 ├── admin.json               # 后台改过的模型 / key / 接口地址 / 上下文上限 / 人设提示词（已 gitignore，改过才生成）
-├── taffy/
+├── deck/
 │   ├── config.py            # 模型、运行参数、人设提示词的默认值
 │   ├── settings.py          # 后台可改的配置（模型、key、接口地址、上下文上限、系统提示词），覆盖 .env
 │   ├── sandbox.py           # 工作区沙箱：路径越界检查
@@ -77,7 +77,7 @@ Agent-Deck/
 │       ├── traffic.py       # 访问日志统计：PV / 独立 IP / 地区 / 路径 / 状态码 + 风险粗筛
 │       ├── blacklist.py     # IP 黑名单：写 UFW（带本机 / 内网 / 操作者自己的 IP 护栏）
 │       ├── update.py        # 检查更新：git fetch 比对 + 一键 ff-only 拉取并重启（缺 remote 时走镜像地址兜底）
-│       ├── __main__.py      # python -m taffy.web
+│       ├── __main__.py      # python -m deck.web
 │       └── static/          # 前端：index.html / app.js / style.css
 │           ├── admin.html   # 后台页面（/admin），配 admin.js
 │           ├── login.html   # 登录 / 邀请码注册页
@@ -125,8 +125,8 @@ pip install -r requirements.lock.txt
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
-python -m pytest -q          # 68 个用例，几秒跑完
-python -m pytest -q --cov=taffy --cov-report=term-missing   # 看覆盖率
+python -m pytest -q          # 113 个用例，十几秒跑完
+python -m pytest -q --cov=deck --cov-report=term-missing   # 看覆盖率
 ```
 
 测试重点覆盖**安全相关**的部分（这部分最不该没测试）：
@@ -242,9 +242,9 @@ SEARCH_PROXY=http://127.0.0.1:7897
 
 `-static` 是默认带的，编译出来的临时可执行文件不依赖编译器目录下的 dll。
 
-单次回复最多输出多少 token，在 `taffy/config.py` 里的 `MAX_TOKENS` 调，现在是 **16384**。带思考的模型（deepseek 这类）思维链也占这个额度，卡太小会出现「思考到一半戛然而止、这一轮完全没有正文」——官方默认的 4096 在复杂问题上就很容易被思考吃光，所以这里放得比较宽。想省钱可以往下调，只是复杂问题更容易撞上这种情况（真撞上了它会明确说这轮作废，不会把会话弄坏）。
+单次回复最多输出多少 token，在 `deck/config.py` 里的 `MAX_TOKENS` 调，现在是 **16384**。带思考的模型（deepseek 这类）思维链也占这个额度，卡太小会出现「思考到一半戛然而止、这一轮完全没有正文」——官方默认的 4096 在复杂问题上就很容易被思考吃光，所以这里放得比较宽。想省钱可以往下调，只是复杂问题更容易撞上这种情况（真撞上了它会明确说这轮作废，不会把会话弄坏）。
 
-**上下文快满时会自动压缩**（详见「上下文与自动压缩」），三个旋钮都在 `taffy/config.py`，也都能用环境变量覆盖：
+**上下文快满时会自动压缩**（详见「上下文与自动压缩」），三个旋钮都在 `deck/config.py`，也都能用环境变量覆盖：
 
 ```
 CONTEXT_LIMIT=1000000        # 模型窗口大概多大（token）。默认 1M，按你实际用的模型改
@@ -277,7 +277,7 @@ Agent: 跑通啦～一共 25 个
 ### 网页版
 
 ```bash
-python -m taffy.web
+python -m deck.web
 ```
 
 监听 `0.0.0.0:8000`，本机开 http://127.0.0.1:8000 就行；手机连同一个 wifi，访问 `http://<电脑局域网IP>:8000` 也能用。
@@ -355,7 +355,7 @@ python -m taffy.web
 身份卡的「人设」就是系统提示词——每个新会话历史里的第一条。点开这张卡能**整段改**：
 
 - 框里显示的是**当前身份卡**的提示词（`personas/<id>/prompt.md`）。
-- **所有身份卡共用的硬约束**在「人设 → 共享约束」里改（内置 26 条，见 [config.py](taffy/config.py) 的 `CORE_PROMPT`），换身份卡不会把它换掉。
+- **所有身份卡共用的硬约束**在「人设 → 共享约束」里改（内置 26 条，见 [config.py](deck/config.py) 的 `CORE_PROMPT`），换身份卡不会把它换掉。
 - **保存后新开的会话立刻生效，不用重启服务**。已经在聊的会话还留着旧的（第一条消息在开会话时就定下来了），想让它换人设就点聊天页右上角的「新会话」。
 - 改过的存在 `admin.json` 里（不进 git），所以**更新代码不会把它冲掉**；点「恢复内置的」就回到 `config.py` 那份（二次确认，别点错）。
 - 上限 40000 字（`settings.PROMPT_LIMIT`），超了直接拒绝——`admin.json` 每次都是整份读写，塞个几兆进去会把后台拖慢。
@@ -365,7 +365,7 @@ python -m taffy.web
 
 #### 表情包库
 
-图片放在 `taffy/web/static/stickers/`（由 `/static` 直接提供，前端和后台用的是同一批）。**文件名就是它的情绪**，命名规则：
+图片放在 `deck/web/static/stickers/`（由 `/static` 直接提供，前端和后台用的是同一批）。**文件名就是它的情绪**，命名规则：
 
 ```
 心情 + 序号 + 后缀        例：happy1.gif、love_02.png、think-3.webp
@@ -401,7 +401,7 @@ python -m taffy.web
 选 Gitee / GitHub（**默认 Gitee**）→ 后台 `git fetch` 一下，比较本地 `HEAD` 和远端分支：
 
 - **有更新**：列出落后的提交和条数，点「立即更新」执行 `git pull --ff-only`——**只快进，绝不 force / reset / stash**，本地改过的东西不会被冲掉；冲突会如实报错，不会硬来。
-- **拉完自动重启**：先 `systemctl is-active <服务名>` 判断能不能自动重启（能就 `systemctl --no-block restart`，2 秒后执行，好让当前这个 HTTP 响应先发出去）；**不是 systemd 起来的**（比如你自己 `python -m taffy.web` 跑的）就把重启命令显示出来，要你自己动手。
+- **拉完自动重启**：先 `systemctl is-active <服务名>` 判断能不能自动重启（能就 `systemctl --no-block restart`，2 秒后执行，好让当前这个 HTTP 响应先发出去）；**不是 systemd 起来的**（比如你自己 `python -m deck.web` 跑的）就把重启命令显示出来，要你自己动手。
 - 服务名默认 `taffy-agent`，用环境变量 `TAFFY_SERVICE_NAME` 可以改。
 - 远端按 **URL 里有没有 `gitee.com` / `github.com`** 自动认（不认 remote 叫什么名字）；选的那家会记在 `admin.json` 里，下次打开还是它。
 - **只 clone 了其中一家也能拉另一家（镜像兜底）**：服务器上往往只 `git clone` 了 Gitee 或 GitHub 其中一个，另配的 remote 只有一个——切到没配过的那边就会「没有远端地址」。所以 `config.py` 里留了一份 `GIT_MIRRORS`（Gitee / GitHub 各一个地址，能用 `GITEE_URL` / `GITHUB_URL` 覆盖）：仓库里找不到对应厂家的 remote 时，直接拿这个地址 `git fetch <url> <分支>` / `git pull --ff-only <url> <分支>`（**只读，不改你本地的 remote 配置**，ref 用 `FETCH_HEAD`）。
@@ -411,7 +411,7 @@ python -m taffy.web
 >
 > **拉下来 ≠ 立刻生效**：新代码要等进程重启才跑得起来。不是 systemd 管的话，面板会明确告诉你「自己重启一下」——**不重启的话，静态文件已经是新的、后端还是旧的**，就会看到「接口 404」「知识库那行数字显示成 —」这类怪事（后台现在会把这种 404 直接翻译成「多半是没重启」，不会只甩一句 `Not Found`）。重启完记得刷新一下页面。
 >
-> **更新不会动你自己传的东西**：`.cache/`（含数据库）/ `admin.json` / `.env` / `workspace/` 都不在 git 里，不受影响；**后台传的表情包**（`taffy/web/static/stickers/`、`personas/<id>/stickers/`）、**身份卡**（`personas/`）和**知识库文档**（`knowledge/`）都是**未跟踪文件**，`git pull --ff-only` 碰都不会碰。唯一会被拦的情况是**你手动删改过仓库里本来就有、已被 git 跟踪的文件**，那 git 会拒绝快进并报错（提示 `local changes` / `would be overwritten` / `untracked`），**不会硬来覆盖**；想继续就先自己 `git stash` 或提交。
+> **更新不会动你自己传的东西**：`.cache/`（含数据库）/ `admin.json` / `.env` / `workspace/` 都不在 git 里，不受影响；**后台传的表情包**（`deck/web/static/stickers/`、`personas/<id>/stickers/`）、**身份卡**（`personas/`）和**知识库文档**（`knowledge/`）都是**未跟踪文件**，`git pull --ff-only` 碰都不会碰。唯一会被拦的情况是**你手动删改过仓库里本来就有、已被 git 跟踪的文件**，那 git 会拒绝快进并报错（提示 `local changes` / `would be overwritten` / `untracked`），**不会硬来覆盖**；想继续就先自己 `git stash` 或提交。
 
 ## 想改成自己的？
 
@@ -424,7 +424,7 @@ python -m taffy.web
 | 关掉用不上的工具 | 后台「工具开关」，按组开关（关掉的模型看不见）|
 | 看所有配置在哪 | 后台「配置总览」，20 项带「在哪改 / 要不要重启」|
 | 换台服务器 | 后台会自动探测能力：没有 nginx 日志 / ufw / systemd 就隐藏对应面板 |
-| 加自己的工具 | `taffy/tools/` 新建模块 → 加进 `_MODULES` → 归组 |
+| 加自己的工具 | `deck/tools/` 新建模块 → 加进 `_MODULES` → 归组 |
 
 身份卡存在 `personas/<id>/`（`persona.json` + `prompt.md` + `stickers/`），
 **在 `.gitignore` 里**，属于部署数据；默认那张 `taffy` 第一次启动自动生成。
@@ -578,9 +578,9 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 
 | 语言 | 机制 | 拦什么 |
 |---|---|---|
-| `.py` | [_pyguard.py](taffy/tools/_pyguard.py) 审计钩子（`sys.addaudithook`） | 读写 workspace 外的文件、联网、起进程、`ctypes` 后门；钩子装了就摘不掉 |
+| `.py` | [_pyguard.py](deck/tools/_pyguard.py) 审计钩子（`sys.addaudithook`） | 读写 workspace 外的文件、联网、起进程、`ctypes` 后门；钩子装了就摘不掉 |
 | `.js` | Node 权限模型 `--permission --allow-fs-read/write=<workspace>` | 文件读写锁死在 workspace；不给 `--allow-child-process` / `--allow-worker` / `--allow-addons`，这些就用不了 |
-| `.c` / `.cpp` / `.java` | [_codescan.py](taffy/tools/_codescan.py) 跑前静态审查 | 危险头文件（`windows.h` 等）、危险调用（`system`、`Runtime.exec`、`require('net')`…）、绝对路径和 `..` 路径字符串 |
+| `.c` / `.cpp` / `.java` | [_codescan.py](deck/tools/_codescan.py) 跑前静态审查 | 危险头文件（`windows.h` 等）、危险调用（`system`、`Runtime.exec`、`require('net')`…）、绝对路径和 `..` 路径字符串 |
 
 另外**子进程环境变量会被过滤**：名字里含 `KEY` / `TOKEN` / `SECRET` / `PASSWORD` / `AUTH` 的一律抹掉，免得生成的代码把 `.env` 里的 API Key 读出来打印到回话里。
 
@@ -697,7 +697,7 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 
 这一路**只在英文内容里找**（按块判语言，中文字符占字母两成以上就算中文块）：中文资料里混着不少英文术语（`data`、`structure`、`memory` 这种），不挡掉的话同一段内容会在两路里各得一次分，反倒把真正的英文教材挤下去。
 
-另外还有两层便宜的兜底：一张中英术语表（[lexicon.py](taffy/kb/lexicon.py)，原查询那一路会自动补上对应英文词，想加词往 `TERMS` 里添一行）和上面说的英文词干还原。
+另外还有两层便宜的兜底：一张中英术语表（[lexicon.py](deck/kb/lexicon.py)，原查询那一路会自动补上对应英文词，想加词往 `TERMS` 里添一行）和上面说的英文词干还原。
 
 **翻译这一路的开销**：每问一个问题多一次接口调用（只输出一行的短请求，几百毫秒到几秒，看用的是哪个模型，带思考的模型会慢一点）；同一个问题再问走进程内缓存，不再请求。翻译失败（没配 key / 接口挂了 / 模型回了中文）就当这一路不存在，只用原查询，绝不影响检索。
 
@@ -709,12 +709,12 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 
 #### 块长会跟着模型的「单条输入上限」自动收口
 
-分块本来是按**字数**切的（`KB_CHUNK_SIZE = 500` 字、重叠 80 字，见 [config.py](taffy/config.py#L64)），跟向量模型能吃多长原本**毫无关系**。可中文 500 字差不多 400~600 token，而英文 500 字符才 ~120 token——碰上小窗口的向量模型（bge-small-zh 512、一些本地模型 256 / 128），中文块就会超。超了两种下场：
+分块本来是按**字数**切的（`KB_CHUNK_SIZE = 500` 字、重叠 80 字，见 [config.py](deck/config.py#L64)），跟向量模型能吃多长原本**毫无关系**。可中文 500 字差不多 400~600 token，而英文 500 字符才 ~120 token——碰上小窗口的向量模型（bge-small-zh 512、一些本地模型 256 / 128），中文块就会超。超了两种下场：
 
 - **接口 400**：`kb/index.py` 接住后会把**整个向量那一路关掉**（不是只跳过那一块），检索退回纯词匹配；
 - **接口静默截断**（很多服务商这么干）：拿到的是前半段的向量，**块的尾巴永远搜不到，还一声不响**——这个最难查。
 
-所以建索引时会先确定一个「单条输入上限」，再按它把块收口（[kb/embed.py](taffy/kb/embed.py)）：
+所以建索引时会先确定一个「单条输入上限」，再按它把块收口（[kb/embed.py](deck/kb/embed.py)）：
 
 - **后台「向量模型」卡里可以自己填**（token 数），填了就直接用；
 - **留空就是自动探测**：先发一条约 900 token 的文本探顶档——过得去（绝大多数 8K 窗口的模型都过得去，因为块最长才 ~580 token）就直接收工，块长**一点不变**；过不去就往下按 512 / 384 / 256 / 192 / 128 找。判断"截没截断"的办法是**再发一条三倍长的，比它自己报的 `usage.prompt_tokens`**：涨了说明没截断，不涨（或三倍那条直接报太长）说明它把输入掐住了——那就再在中间**二分 3 次**，找「它确实收下的最大那个数」，而不是保守地只取第一个数（实测某 512 上限的模型：只取第一个数会算成 352 白切小三分之一，二分后是 440）；
@@ -784,7 +784,7 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 
 对话历史全在内存里，聊得越久越长，早晚会撞上模型窗口上限——要么请求直接报错，要么模型开始忘事。所以每轮开口之前会先量一下这段对话大概占多少 token，**快到线了就把前面聊过的压成一段摘要**，后面接着聊。
 
-三个参数（`taffy/config.py`，也能用同名环境变量覆盖）：
+三个参数（`deck/config.py`，也能用同名环境变量覆盖）：
 
 | 参数 | 默认 | 意思 |
 |---|---|---|
@@ -812,7 +812,7 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 
 ## 人设提示词
 
-提示词分两层，都在 [config.py](taffy/config.py) 和 `personas/` 里：
+提示词分两层，都在 [config.py](deck/config.py) 和 `personas/` 里：
 
 - **共享约束**（`CORE_PROMPT`，26 条）：所有身份卡共用的硬规矩，后台「人设 → 共享约束」改，换卡不会丢
 - **身份卡提示词**（`personas/<id>/prompt.md`）：只写「你是谁、什么语气」，后台「人设 → 系统提示词」改
@@ -835,7 +835,7 @@ JSON 不合法：Expecting ':' delimiter（第 3 行第 7 列）
 
 ## 新增一个工具
 
-1. 在 `taffy/tools/` 下新建模块，写一个 `SPECS` 列表（OpenAI function calling 的 schema）和同名函数：
+1. 在 `deck/tools/` 下新建模块，写一个 `SPECS` 列表（OpenAI function calling 的 schema）和同名函数：
 
 ```python
 SPECS = [
@@ -860,7 +860,7 @@ def say_hi(name: str) -> str:
     return f"你好 {name} 喵"
 ```
 
-2. 把它加进 `taffy/tools/__init__.py` 的 `_MODULES`。
+2. 把它加进 `deck/tools/__init__.py` 的 `_MODULES`。
 
 注册表按约定工作：**schema 里的 `name` 要和函数名一致**，它会自动把函数挂到 `TOOL_MAP` 上。
 
@@ -875,4 +875,4 @@ def say_hi(name: str) -> str:
 
 ## 参考
 
-模型名 `deepseek-v4-flash`、接口地址 `https://api.deepseek.com/v1`，都在 `taffy/config.py` 里，换模型改那里就行。
+模型名 `deepseek-v4-flash`、接口地址 `https://api.deepseek.com/v1`，都在 `deck/config.py` 里，换模型改那里就行。

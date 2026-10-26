@@ -1,6 +1,6 @@
 """网页后端：登录鉴权 + SSE 聊天 + 会话持久化。
 
-会话历史存在 SQLite 里（见 taffy/store.py），**不再常驻内存**——每轮请求现读现跑现写，
+会话历史存在 SQLite 里（见 deck/store.py），**不再常驻内存**——每轮请求现读现跑现写，
 内存只跟「同时有几个请求」有关，跟「有多少个会话」无关。
 
 所有页面和接口默认都要登录，只有下面 PUBLIC_* 里的白名单例外；后台 /admin 走它自己
@@ -151,7 +151,7 @@ def _user_of(request):
 async def lifespan(_app):
     db.init()                        # 建表（幂等）
     try:
-        # 第一次启动建默认人设（老的 prompt 会迁到 personas/taffy/）
+        # 第一次启动建默认人设（老的 prompt 会迁到 personas/deck/）
         if persona_mod.ensure_default():
             print("[persona] 已生成默认人设 personas/taffy", flush=True)
     except Exception as exc:         # noqa: BLE001

@@ -1,7 +1,7 @@
 """工具分组开关：分组表完整、过滤生效、关掉的工具硬调会被拦。"""
 import pytest
 
-from taffy import settings, tools
+from deck import settings, tools
 
 
 @pytest.fixture(autouse=True)

@@ -1,5 +1,5 @@
 """能力探测：不炸、字段齐全、缺什么要给得出人话说明。"""
-from taffy import capabilities
+from deck import capabilities
 
 
 def test_probe_结构():

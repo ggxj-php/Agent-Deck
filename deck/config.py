@@ -4,7 +4,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# 项目根目录（taffy/ 的上一层）
+# 项目根目录（deck/ 的上一层）
 PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 
 # API Key 从项目根目录的 .env 读取，不要写死在代码里
@@ -169,7 +169,7 @@ TRANSLATE_API_KEY = os.environ.get("TRANSLATE_API_KEY", "").strip()
 
 # ---------- 对话上下文 ----------
 # 模型的上下文窗口有多大（token）。历史快填满时塔菲会自动把旧的那段压成摘要
-# （见 taffy/context.py），免得请求被模型直接拒掉（超了就是 400，那一轮就废了）。
+# （见 deck/context.py），免得请求被模型直接拒掉（超了就是 400，那一轮就废了）。
 # 填的是「这个模型能吃多少」，不是「想留多少」；拿不准就照官方文档写。
 # 平时在网页后台「模型」那张卡里改更方便，改完立刻生效。
 #   注意：填**大了**的危害是把压缩推迟到模型吃不下的地方，超了那一轮直接 400；
@@ -189,7 +189,7 @@ CONTEXT_KEEP_RECENT = int(os.environ.get("CONTEXT_KEEP_RECENT", "12") or 12)
 SESSIONS_DIR = os.path.join(PROJECT_ROOT, "sessions")
 
 # 表情包库目录。挂在 static 下面，所以网页和后台都直接由 /static/stickers/ 提供。
-STICKERS_DIR = os.path.join(PROJECT_ROOT, "taffy", "web", "static", "stickers")
+STICKERS_DIR = os.path.join(PROJECT_ROOT, "deck", "web", "static", "stickers")
 
 # 后台「检查更新」用哪个 systemd 服务名重启自己（拉完新代码要重启才生效）。
 SERVICE_NAME = os.environ.get("TAFFY_SERVICE_NAME", "").strip() or "taffy-agent"

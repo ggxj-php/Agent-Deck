@@ -30,7 +30,7 @@
 
 ```
 personas/
-  taffy/                  ← 默认身份卡（第一次启动自动生成）
+  deck/                  ← 默认身份卡（第一次启动自动生成）
     persona.json          ← 名字、称呼、欢迎语这些
     prompt.md             ← 提示词正文（后台编辑的就是它）
     stickers/             ← 这张卡自己的表情包（默认卡指回 static/stickers）
@@ -102,8 +102,8 @@ git clone <你的仓库> && cd Agent-Deck
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
 cp .env.example .env      # 没有就自己写一个，见 README「配置」
 echo "TAFFY_ADMIN_PASSWORD=你的密码" >> .env
-.venv/bin/python -m taffy.auth create 管理员名 密码   # 第一个管理员
-.venv/bin/python -m taffy.web                          # 或者交给 systemd / docker
+.venv/bin/python -m deck.auth create 管理员名 密码   # 第一个管理员
+.venv/bin/python -m deck.web                          # 或者交给 systemd / docker
 ```
 
 数据库是纯 SQLite（`.cache/taffy.db`），**备份就拷这一个文件**。
@@ -126,8 +126,8 @@ knowledge/
 
 ## 6. 想加自己的工具（改代码）
 
-1. 在 `taffy/tools/` 下新建一个模块，写 `SPECS = [ {function: {...}} ]` 和同名函数
-2. 加进 `taffy/tools/__init__.py` 的 `_MODULES`
+1. 在 `deck/tools/` 下新建一个模块，写 `SPECS = [ {function: {...}} ]` 和同名函数
+2. 加进 `deck/tools/__init__.py` 的 `_MODULES`
 3. 在 `TOOL_GROUPS` 里给它归个组（不然它会默认归到 `base`）
 
 工具返回值会自动过两层保护：
@@ -148,5 +148,5 @@ knowledge/
 ## 还改不了什么
 
 - 前端深层的提示文案（错误信息、按钮文字）还写死中文，没抽成配置
-- 主题色 / 字体：改 `taffy/web/static/style.css`，`--line` 这些变量在主色附近
+- 主题色 / 字体：改 `deck/web/static/style.css`，`--line` 这些变量在主色附近
 - 头像：身份卡目前用内置的 `static/avatar.jpg`；想换就覆盖那个文件

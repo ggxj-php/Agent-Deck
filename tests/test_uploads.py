@@ -7,7 +7,7 @@ import time
 import pytest
 from PIL import Image
 
-from taffy import uploads
+from deck import uploads
 
 
 @pytest.fixture(autouse=True)

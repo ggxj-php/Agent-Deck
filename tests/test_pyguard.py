@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from taffy.tools import _pyguard
+from deck.tools import _pyguard
 
 GUARD = _pyguard.__file__
 

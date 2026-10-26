@@ -4,7 +4,7 @@
 - 密码用 bcrypt（已在依赖里）存哈希；没装 bcrypt 就退回标准库的 scrypt，绝不存明文。
 - 登录态是随机 token，**库里只存它的 sha256**——万一库被拖走，也拿不到能用的 token。
 - 邀请制注册：每个用户注册时自动分到一个独一无二的邀请码，注册时必须填一个存在的邀请码。
-  第一个用户用命令行建（`python -m taffy.auth create <用户名> <密码>`）。
+  第一个用户用命令行建（`python -m deck.auth create <用户名> <密码>`）。
 """
 import hashlib
 import hmac
@@ -363,8 +363,8 @@ def revoke_all(user_id):
 # ---------------- 命令行 ----------------
 
 _USAGE = """用法：
-  python -m taffy.auth create <用户名> <密码>    # 建用户（第一个用户这么建）
-  python -m taffy.auth list                      # 看现有用户和邀请码
+  python -m deck.auth create <用户名> <密码>    # 建用户（第一个用户这么建）
+  python -m deck.auth list                      # 看现有用户和邀请码
 """
 
 
@@ -390,7 +390,7 @@ def main(argv):
                 "SELECT id, name, invite_code, invited_by, created_at, is_admin, disabled, ban_until "
                 "FROM users ORDER BY id").fetchall()
         if not rows:
-            print("还没有用户。用 `python -m taffy.auth create <用户名> <密码>` 建第一个。")
+            print("还没有用户。用 `python -m deck.auth create <用户名> <密码>` 建第一个。")
             return 0
         print(f"{'ID':<4} {'用户名':<14} {'邀请码':<10} {'邀请人':<12} 注册时间")
         for row in rows:

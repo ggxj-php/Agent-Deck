@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from taffy import persona, settings
+from deck import persona, settings
 
 
 @pytest.fixture(autouse=True)

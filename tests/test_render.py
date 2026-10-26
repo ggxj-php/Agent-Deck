@@ -1,6 +1,6 @@
 """render_html：清洗层必须把危险标签干掉，内联脚本要留着（动画要用）。"""
 
-from taffy.tools import render
+from deck.tools import render
 
 
 def test_CSP_是沙箱策略():

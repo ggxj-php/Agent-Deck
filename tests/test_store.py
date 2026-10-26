@@ -1,7 +1,7 @@
 """会话持久化：增删改查、消息往返、按用户隔离、标题自动取第一句。"""
 import pytest
 
-from taffy import auth, db, store
+from deck import auth, db, store
 
 
 @pytest.fixture(autouse=True)

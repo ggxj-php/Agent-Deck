@@ -265,7 +265,7 @@ class DeckAgent:
           cut         {reason}                     回复被截断/中断了，可以发「继续」接着写
           done        {context}                    这一轮结束（附带当前上下文用量）
         """
-        # 历史快把模型的上下文窗口填满时，先把旧的那段压成摘要（见 taffy/context.py）。
+        # 历史快把模型的上下文窗口填满时，先把旧的那段压成摘要（见 deck/context.py）。
         # 放在追加用户消息之前：这句刚说的话不该被压掉。压失败也照常往下走。
         squeezed = context.compress_if_needed(self.messages)
         if squeezed and squeezed.get("ok"):

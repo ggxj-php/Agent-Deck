@@ -31,13 +31,13 @@ jobs:
           pip install -r requirements.txt -r requirements-dev.txt
 
       - name: 语法检查（全量编译）
-        run: python -m compileall -q taffy agent.py
+        run: python -m compileall -q deck agent.py
 
       - name: 跑测试
         run: python -m pytest -q
 
       - name: 覆盖率报告
-        run: python -m pytest -q --cov=taffy --cov-report=term-missing
+        run: python -m pytest -q --cov=deck --cov-report=term-missing
         continue-on-error: true
 
   lint:
@@ -57,4 +57,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: 构建镜像
-        run: docker build -t taffy-agent:ci .
+        run: docker build -t agent-deck:ci .
