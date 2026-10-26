@@ -1560,7 +1560,8 @@ body.admin .card input[type="file"] { padding: 8px 10px; font-size: 13px; }
 /* ---------- 内联 SVG 卡片（结构化图）---------- */
 .artifact-svg {
   padding: 10px 12px 12px;
-  overflow-x: auto;
+  max-height: 70vh;
+  overflow: auto;
   -webkit-overflow-scrolling: touch;
 }
 .artifact-svg svg {

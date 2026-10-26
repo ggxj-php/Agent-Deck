@@ -1266,7 +1266,31 @@ function buildArtifactCard(id, titleText) {
     fitArtifactFrame(frame);
     setTimeout(() => fitArtifactFrame(frame), 300);
   });
+  // 刷新后历史消息只剩 id（实时流里才带 svg）：把 SVG 再拉回来换掉 iframe，
+  // 免得又出现「卡片里一大片空白、以为没画出来」
+  inlineSvgFromServer(wrap, id);
   return wrap;
+}
+
+/* 从服务端取产物的 <svg> 并内联；拿不到就保留原来的 iframe */
+async function inlineSvgFromServer(wrap, id) {
+  try {
+    const resp = await fetch(`/api/artifact/${id}/svg`, { cache: 'no-store' });
+    if (!resp.ok) return;
+    const svg = await resp.text();
+    if (!svg || svg.indexOf('<svg') < 0) return;
+    const frame = wrap.querySelector('iframe.artifact-frame');
+    if (!frame) return;
+    const body = el('div', 'artifact-svg');
+    body.innerHTML = DOMPurify.sanitize(svg, {
+      USE_PROFILES: { svg: true, svgFilters: true },
+      ADD_TAGS: ['use'],
+    });
+    frame.replaceWith(body);
+    wrap.classList.add('artifact-inline');
+  } catch (err) {
+    /* 取不到就继续用 iframe */
+  }
 }
 
 /* 可视高度上限：别让一张图把整个聊天窗铺满，最多占七成 */

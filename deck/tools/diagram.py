@@ -915,7 +915,7 @@ def _dot_flow(data):
     edges = _norm_edges(data.get("edges"))
     if not nodes:
         return ""
-    lines = [_dot_graph(rankdir="TB", splines="ortho", ranksep=0.5)]
+    lines = [_dot_graph(rankdir="TB", splines="polyline", nodesep=0.5, ranksep=0.75)]
     for n in nodes:
         kind = (n.get("kind") or "process").strip().lower()
         attrs = {"label": _dot_label(n["label"])}
@@ -932,6 +932,8 @@ def _dot_flow(data):
         lines.append(f'  "n_{_dot_label(n["id"])}" [{_dot_attr(attrs)}];')
     for a, b, label in edges:
         attrs = {"label": _dot_label(label)} if label else {}
+        if label:
+            attrs.update({"fontsize": "10", "labeldistance": "1.2", "labelangle": "0"})
         lines.append(f'  "n_{_dot_label(a)}" -> "n_{_dot_label(b)}" [{_dot_attr(attrs)}];')
     lines.append("}")
     return "\n".join(lines)
@@ -960,7 +962,9 @@ def _dot_dataflow(data):
     edges = _norm_edges(data.get("edges"))
     if not nodes:
         return ""
-    lines = [_dot_graph(rankdir="LR", splines="ortho", nodesep=0.5, ranksep=0.75)]
+    # 注意：splines=ortho 会把连线绕成很远的大折线，边上的标签就跟着飘到奇怪位置，
+    # 看起来像「字全错位」。用 polyline 走短路径，标签自然贴着线。
+    lines = [_dot_graph(rankdir="LR", splines="polyline", nodesep=0.6, ranksep=0.95)]
     for n in nodes:
         k = _dfd_kind(n)
         attrs = {"label": _dot_label(n["label"])}

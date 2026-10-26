@@ -10,6 +10,7 @@ import base64
 import io
 import json
 import os
+import re
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -428,6 +429,26 @@ def get_artifact(artifact_id: str):
             "Content-Security-Policy": render_tool.ARTIFACT_CSP,
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "no-referrer",
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.get("/api/artifact/{artifact_id}/svg")
+def get_artifact_svg(artifact_id: str):
+    """只取产物里的 <svg>：刷新后历史消息也能内联显示，不用 iframe（不会留大片空白）。"""
+    item = render_tool.get_artifact(artifact_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="这张图过期或者不存在了")
+    match = re.search(r"<svg[\s\S]*?</svg>", item.get("html") or "")
+    if not match:
+        raise HTTPException(status_code=404, detail="这张图不是矢量图")
+    return Response(
+        content=match.group(0),
+        media_type="image/svg+xml; charset=utf-8",
+        headers={
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+            "X-Content-Type-Options": "nosniff",
             "Cache-Control": "no-store",
         },
     )
