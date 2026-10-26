@@ -115,7 +115,7 @@ def list_personas():
 
 def current_id():
     """当前用的人设 id。"""
-    from . import settings          # 延迟导入，避免循环依赖
+    from . import settings  # 延迟导入，避免循环依赖
 
     pid = safe_id(settings.persona_id())
     if pid and exists(pid):

@@ -24,7 +24,8 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import auth, captcha, context, db, persona as persona_mod, settings, store, uploads
+from .. import auth, captcha, context, db, settings, store, uploads
+from .. import persona as persona_mod
 from ..config import CONTEXT_COMPRESS_AT
 from ..core import TaffyAgent
 from ..kb import warmup

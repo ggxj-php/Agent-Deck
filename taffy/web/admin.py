@@ -6,14 +6,11 @@
 
 默认管理员在第一次启动时自动创建（见 auth.ensure_default_admin）。
 """
+import io
 import json
 import os
 import threading
 import time
-
-import io
-import json
-import os
 import zipfile
 
 from fastapi import APIRouter, HTTPException, Request
