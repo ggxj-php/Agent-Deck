@@ -9,7 +9,37 @@ const STORAGE_KEY = 'taffy_session_id';
 /* 「深度思考」开关存 localStorage（跟会话 id 不一样：这个希望同一个浏览器
    里所有标签页共用、刷新也在）。默认是开。 */
 const THINK_KEY = 'taffy_thinking';
-const AVATAR = '/static/avatar.jpg';
+let AVATAR = '/static/avatar.jpg';
+/* 当前人设（名字、头像、欢迎语、输入框提示、状态文案都从后端拿，换人设不用改前端） */
+let personaInfo = null;
+
+const onlineText = () => (personaInfo && personaInfo.status_online) || '在线喵';
+const thinkingText = () => (personaInfo && personaInfo.status_thinking) || '正在思考喵…';
+
+function applyPersona(info) {
+  if (!info) return;
+  personaInfo = info;
+  const name = info.name || '塔菲';
+  document.title = `${name} · Agent`;
+  if (info.avatar) AVATAR = info.avatar;
+  document.querySelectorAll('img.avatar, img.side-avatar, img.user-avatar').forEach((img) => {
+    img.src = AVATAR;
+    img.alt = name;
+  });
+  const topName = document.getElementById('top-name');
+  if (topName) topName.textContent = name;
+  if (info.placeholder) inputEl.placeholder = info.placeholder;
+}
+
+async function loadPersona() {
+  try {
+    const resp = await fetch('/api/persona', { cache: 'no-store' });
+    if (!resp.ok) return;
+    applyPersona(await resp.json());
+  } catch (err) {
+    /* 拿不到就用内置文案，不影响聊天 */
+  }
+}
 
 /* 表情包清单从后端读（后台可以增删，加了新的刷新一下就有）。
    读不到就用下面这份内置的兜底，反正不能因为接口挂了就不发表情包。
@@ -733,7 +763,7 @@ function stickerImg(mood) {
   if (!pool.length) return null;
   const name = pool[Math.floor(Math.random() * pool.length)];
   const img = el('img', 'sticker');
-  img.src = `/static/stickers/${encodeURIComponent(name)}`;
+  img.src = `/api/persona/sticker/${encodeURIComponent(name)}`;
   img.alt = mood;
   img.loading = 'lazy';
   img.addEventListener('error', () => img.remove());
@@ -1012,7 +1042,7 @@ async function switchSession(id) {
     paintContext(data.context);
     renderSessionList();
     pinToBottom();            // 切会话后稳稳吸底
-    statusEl.textContent = '在线喵';
+    statusEl.textContent = onlineText();
   } catch (err) {
     statusEl.textContent = '切不过去喵：' + ((err && err.message) || '未知原因');
   }
@@ -1030,7 +1060,7 @@ sideNewEl.addEventListener('click', async () => {
     await ensureSession(true);
     welcome();
     loadSessions();
-    statusEl.textContent = '在线喵';
+    statusEl.textContent = onlineText();
   } catch (err) {
     statusEl.textContent = '开新会话失败：' + ((err && err.message) || '未知原因');
   }
@@ -1381,7 +1411,7 @@ async function resume() {
   for (let i = 0; i < RECONNECT_TRIES; i += 1) {
     try {
       if (await reachable()) {
-        if (!busy) statusEl.textContent = '在线喵';
+        if (!busy) statusEl.textContent = onlineText();
         return;
       }
     } catch (err) {
@@ -1407,7 +1437,7 @@ async function send(text, images) {
   pickImageEl.disabled = true;
   inputEl.value = '';
   autosize();
-  statusEl.textContent = '正在思考喵…';
+  statusEl.textContent = thinkingText();
   addUser(text, images);
   clearImage();
 
@@ -1423,7 +1453,7 @@ async function send(text, images) {
     busy = false;
     sendEl.disabled = false;
     pickImageEl.disabled = false;
-    statusEl.textContent = '在线喵';
+    statusEl.textContent = onlineText();
     refreshContext();     // 这一轮又添了几条，顺便把上下文占用刷新一下
     loadSessions();       // 首句聊完，标题会从「新会话」变成那句话
     inputEl.focus();
@@ -1533,7 +1563,7 @@ newChatEl.addEventListener('click', async () => {
     welcome();
     pinToBottom();
     refreshContext();
-    statusEl.textContent = '在线喵';
+    statusEl.textContent = onlineText();
   } catch (err) {
     statusEl.textContent = '开新会话失败：' + ((err && err.message) || '未知原因');
   }
@@ -1569,6 +1599,10 @@ paintThinking();
 
 function welcome() {
   const turn = addAgent();
+  if (personaInfo && personaInfo.welcome) {
+    contentChunk(turn, personaInfo.welcome);
+    return;
+  }
   contentChunk(
     turn,
     '雏草姬来啦喵～我是永雏塔菲，有什么想聊的直接说就好喵。\n\n' +
@@ -1635,6 +1669,7 @@ armLeaveGuard();
 
 (async function init() {
   loadStickerLib();   // 不等它，表情包清单到了就用新的，没到就用兜底那份
+  loadPersona();      // 同理：名字/头像/欢迎语拿到了就换，没到先用内置文案
   try {
     await loadMe();                 // 没登录会直接跳 /login
     await loadSessions();

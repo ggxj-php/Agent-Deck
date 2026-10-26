@@ -16,7 +16,7 @@ import os
 import re
 import zipfile
 
-from ..config import STICKERS_DIR
+from .. import persona
 from ..tools.sticker import MOODS
 
 # 允许的图片后缀。gif 放进来是为了动图——前端用 <img> 直接显示，浏览器自己会播。
@@ -30,7 +30,11 @@ MAX_IMPORT_BYTES = 200 * 1024 * 1024      # 解压后总量上限（挡 zip 炸�
 # 去掉后缀后开头的字母串就是心情：happy1 / happy_02 / happy-x 都算 happy
 _LEADING = re.compile(r"^([a-z]+)")
 
-os.makedirs(STICKERS_DIR, exist_ok=True)
+def _dir():
+    """当前人设的表情包目录（每次现算，后台切人设立刻生效）。"""
+    path = persona.stickers_dir()
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def mood_of(name):
@@ -60,10 +64,10 @@ def check_name(name):
 def free_path(name):
     """给一个不冲突的目标路径：重名就加 -2、-3……（不会覆盖已有的表情包）。"""
     stem, ext = os.path.splitext(name)
-    target = os.path.join(STICKERS_DIR, name)
+    target = os.path.join(_dir(), name)
     index = 2
     while os.path.exists(target):
-        target = os.path.join(STICKERS_DIR, f"{stem}-{index}{ext}")
+        target = os.path.join(_dir(), f"{stem}-{index}{ext}")
         index += 1
     return target
 
@@ -76,11 +80,11 @@ def library():
     moods = {mood: [] for mood in MOODS}
     other = []
     try:
-        names = os.listdir(STICKERS_DIR)
+        names = os.listdir(_dir())
     except OSError:
         names = []
     for name in names:
-        full = os.path.join(STICKERS_DIR, name)
+        full = os.path.join(_dir(), name)
         if not os.path.isfile(full) or name.startswith("."):
             continue
         ext = os.path.splitext(name)[1].lower()
@@ -107,7 +111,7 @@ def _safe_existing(name):
     base = os.path.basename((name or "").replace("\\", "/")).strip()
     if not base or base != (name or "").strip():
         raise ValueError("文件名不对喵")
-    full = os.path.join(STICKERS_DIR, base)
+    full = os.path.join(_dir(), base)
     if not os.path.isfile(full):
         raise ValueError(f"没有这张表情包喵：{base}")
     return full

@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 
-from .. import auth, db, llm, settings, store
+from .. import auth, capabilities, config_report, db, llm, persona, settings, store, tools
 from ..config import CONTEXT_COMPRESS_AT, EMBED_DIM
 from ..kb import stats as kb_stats
 from . import blacklist, sysinfo, traffic, update
@@ -554,12 +554,15 @@ class PromptRequest(BaseModel):
 
 
 def _prompt_payload():
-    """当前生效的提示词 + 它是哪来的 + 上限。单独走一个接口，不塞进 _state()——
-    整段提示词有几千字，每次刷配置都带一遍太浪费。"""
-    custom = settings.prompt_text()
+    """当前人设的提示词 + 它属于哪个人设 + 上限。
+
+    单独走一个接口，不塞进 _state()——整段提示词有几千字，每次刷配置都带一遍太浪费。
+    """
+    cur = persona.current()
     return {
-        "text": settings.system_prompt(),
-        "custom": bool(custom),
+        "text": persona.system_prompt(),
+        "persona": cur["id"],
+        "persona_name": cur.get("name") or cur["id"],
         "limit": settings.PROMPT_LIMIT,
     }
 
@@ -572,11 +575,11 @@ def prompt_state(request: Request):
 
 @router.post("/api/admin/prompt")
 def save_prompt(req: PromptRequest, request: Request):
+    """存的是**当前人设**的提示词。"""
     _require(request)
-    try:
-        settings.set_prompt(req.text)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    meta, err = persona.save(persona.current_id(), {"prompt": req.text})
+    if err:
+        raise HTTPException(status_code=400, detail=err)
     return _prompt_payload()
 
 # ---------------- 用户管理 ----------------
@@ -705,3 +708,130 @@ def delete_user(user_id: int, request: Request):
     with db.cursor() as conn:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
     return {"ok": True}
+
+
+# ---------------- 人设管理 ----------------
+
+class PersonaRequest(BaseModel):
+    id: str = ""
+    name: str = ""
+    self_name: str = ""
+    user_name: str = ""
+    welcome: str = ""
+    placeholder: str = ""
+    status_online: str = ""
+    status_thinking: str = ""
+    stickers: str = ""
+    prompt: str | None = None
+
+
+@router.get("/api/admin/personas")
+def personas_list(request: Request):
+    _require(request)
+    return {"current": persona.current_id(), "personas": persona.list_personas()}
+
+
+@router.get("/api/admin/personas/{pid}")
+def persona_detail(pid: str, request: Request):
+    _require(request)
+    if not persona.exists(pid):
+        raise HTTPException(status_code=404, detail="没有这个人设喵")
+    meta = persona._meta(pid)
+    meta["is_current"] = pid == persona.current_id()
+    meta["stickers_count"] = len(persona.sticker_files(pid))
+    return meta
+
+
+@router.post("/api/admin/personas")
+def persona_create(req: PersonaRequest, request: Request):
+    _require(request)
+    if not persona.safe_id(req.id):
+        raise HTTPException(status_code=400,
+                            detail="id 只能是 2~24 位小写字母 / 数字 / _ -，且以字母开头")
+    if persona.exists(req.id):
+        raise HTTPException(status_code=409, detail="这个人设 id 已经有了喵")
+    data = req.model_dump()
+    data.pop("id", None)
+    meta, err = persona.save(req.id, data)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {"ok": True, "persona": meta}
+
+
+@router.patch("/api/admin/personas/{pid}")
+def persona_update(pid: str, req: PersonaRequest, request: Request):
+    _require(request)
+    if not persona.exists(pid):
+        raise HTTPException(status_code=404, detail="没有这个人设喵")
+    data = req.model_dump()
+    data.pop("id", None)
+    meta, err = persona.save(pid, data)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {"ok": True, "persona": meta}
+
+
+@router.post("/api/admin/personas/{pid}/activate")
+def persona_activate(pid: str, request: Request):
+    _require(request)
+    try:
+        persona.set_current(pid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "current": persona.current_id(), "persona": persona.public()}
+
+
+@router.delete("/api/admin/personas/{pid}")
+def persona_delete(pid: str, request: Request):
+    _require(request)
+    ok, err = persona.delete(pid)
+    if not ok:
+        raise HTTPException(status_code=400, detail=err)
+    return {"ok": True, "current": persona.current_id()}
+
+
+# ---------------- 服务器能力 ----------------
+
+@router.get("/api/admin/capabilities")
+def capabilities_state(request: Request):
+    """这台机器能提供哪些运维功能（流量 / 黑名单 / 一键更新 / 境外拦截）。
+
+    后台按这个隐藏用不了的面板，换台机器部署也不会满屏报错。
+    """
+    _require(request)
+    return capabilities.cached()
+
+
+# ---------------- 工具开关 ----------------
+
+class ToolGroupsRequest(BaseModel):
+    groups: list[str] = []
+
+
+@router.get("/api/admin/tools")
+def tools_state(request: Request):
+    """工具分组开关：每组有哪些工具、开没开、现在一共开了几个。"""
+    _require(request)
+    return tools.groups_payload()
+
+
+@router.post("/api/admin/tools")
+def tools_save(req: ToolGroupsRequest, request: Request):
+    _require(request)
+    settings.set_tool_groups(req.groups)
+    return tools.groups_payload()
+
+
+# ---------------- 配置总览 ----------------
+
+@router.get("/api/admin/config")
+def config_overview(request: Request):
+    """把散在 .env / admin.json / config.py 里的配置汇总成一张表（只读）。
+
+    每项都标了「在哪改」「要不要重启」，省得猜。
+    """
+    _require(request)
+    try:
+        return config_report.report()
+    except Exception as exc:          # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"配置总览生成失败：{exc}")

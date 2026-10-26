@@ -81,6 +81,11 @@ def _load():
         "embed_enabled": raw.get("embed_enabled"),
         # 后台改过的系统提示词（人设）。空串 = 没改过，用 config.py 里内置的那份
         "prompt": str(raw.get("prompt") or ""),
+        # 当前用的人设 id（见 persona.py）。空 = 用默认人设
+        "persona": str(raw.get("persona") or ""),
+        # 开启的工具分组；None = 没配过（= 全开）
+        "tool_groups": (raw.get("tool_groups")
+                        if isinstance(raw.get("tool_groups"), list) else None),
         "context_limit": raw.get("context_limit") or 0,
         "model_history": [m for m in history if isinstance(m, str)] if isinstance(history, list) else [],
     }
@@ -98,6 +103,36 @@ def _write(data):
     with os.fdopen(fd, "w", encoding="utf-8") as fp:
         json.dump(data, fp, ensure_ascii=False, indent=2)
     os.replace(tmp, SETTINGS_PATH)
+
+
+# ---------- 工具分组 ----------
+
+def tool_groups():
+    """后台开启的工具分组；没配过返回 None（= 全开）。"""
+    return _load()["tool_groups"]
+
+
+def set_tool_groups(groups):
+    """存工具分组开关。传 None / 空列表 = 全关。"""
+    with _lock:
+        data = _load()
+        data["tool_groups"] = [str(g) for g in (groups or [])]
+        _write(data)
+
+
+# ---------- 人设 ----------
+
+def persona_id():
+    """当前用的人设 id（没配过就是空串）。"""
+    return _load()["persona"]
+
+
+def set_persona(pid):
+    """切人设。_load() 返回的就是缓存本身，改完写盘即可。"""
+    with _lock:
+        data = _load()
+        data["persona"] = (pid or "").strip().lower()
+        _write(data)
 
 
 # ---------- 模型 ----------
@@ -399,8 +434,17 @@ def prompt_text():
 
 
 def system_prompt():
-    """实际生效的系统提示词：后台改过就用改过的，否则用 config.py 里内置的那份。"""
-    return prompt_text() or SYSTEM_PROMPT
+    """实际生效的系统提示词。
+
+    现在提示词归「人设」管（persona.py），每个身份卡一份；这里保留函数名，
+    是为了让 core.py / admin.py 那些老调用点不用改。
+    """
+    from . import persona
+
+    try:
+        return persona.system_prompt()
+    except Exception:                    # noqa: BLE001
+        return prompt_text() or SYSTEM_PROMPT
 
 
 def set_prompt(text):

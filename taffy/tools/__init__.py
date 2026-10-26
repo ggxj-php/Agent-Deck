@@ -52,6 +52,63 @@ def _wrap_untrusted(name, text):
     return _WRAP_HEAD + text + _WRAP_TAIL
 
 
+# 工具分组：后台可以按组开关（不需要取证 / 嵌入式那套就关掉，省 token 也少误导模型）。
+# 每个工具**只属于一个组**；组名只是给人看的标签。
+TOOL_GROUPS = {
+    "base": {
+        "label": "基础",
+        "desc": "时间、文件读写删、发表情包",
+        "tools": ("get_time", "list_files", "read_file", "write_file", "delete_file",
+                  "send_sticker"),
+    },
+    "web": {
+        "label": "联网",
+        "desc": "搜索、打开网页读正文",
+        "tools": ("web_search", "open_url"),
+    },
+    "kb": {
+        "label": "知识库",
+        "desc": "检索 knowledge/ 里的资料",
+        "tools": ("search_knowledge",),
+    },
+    "docs": {
+        "label": "文档与图片",
+        "desc": "读 PDF / Word / 图片（图片会走视觉模型，花钱）",
+        "tools": ("read_pdf", "read_doc", "read_img"),
+    },
+    "code": {
+        "label": "跑代码 / 画图",
+        "desc": "编译运行代码、写 HTML 渲染成卡片",
+        "tools": ("run_code", "render_html"),
+    },
+    "forensics": {
+        "label": "数字取证",
+        "desc": "哈希、类型识别、字符串、雕复、元数据",
+        "tools": ("hash_file", "identify_file", "extract_strings", "carve_files",
+                  "file_metadata"),
+    },
+    "embedded": {
+        "label": "嵌入式 / 单片机",
+        "desc": "16 位 CPU、8086 汇编、单片机外设、逻辑仿真",
+        "tools": ("asm_sim", "asm86", "mcu_calc", "logic_sim"),
+    },
+    "math": {
+        "label": "计算 / 进制",
+        "desc": "高精度计算、进制 / 补码 / 位运算",
+        "tools": ("number_convert", "sci_calc"),
+    },
+    "text": {
+        "label": "文本处理",
+        "desc": "正则调试、文本 diff、JSON 处理",
+        "tools": ("regex_test", "diff_text", "json_tool"),
+    },
+}
+
+TOOL_GROUP_OF = {}
+for _group, _info in TOOL_GROUPS.items():
+    for _name in _info["tools"]:
+        TOOL_GROUP_OF[_name] = _group
+
 TOOLS = []
 TOOL_MAP = {}
 for _module in _MODULES:
@@ -60,6 +117,48 @@ for _module in _MODULES:
         TOOLS.append(_spec)
         # 约定：工具名和函数名一致，直接按名字取
         TOOL_MAP[_name] = getattr(_module, _name)
+
+
+def enabled_groups():
+    """当前开启的组。后台没配过就是全开。"""
+    from .. import settings
+
+    saved = settings.tool_groups()
+    if saved is None:
+        return set(TOOL_GROUPS)
+    return {g for g in saved if g in TOOL_GROUPS}
+
+
+def group_of(name):
+    return TOOL_GROUP_OF.get(name, "base")
+
+
+def is_enabled(name):
+    return group_of(name) in enabled_groups()
+
+
+def active_specs():
+    """给模型看的工具清单（按后台开关过滤）。"""
+    groups = enabled_groups()
+    return [spec for spec in TOOLS if group_of(spec["function"]["name"]) in groups]
+
+
+def groups_payload():
+    """后台「工具开关」面板用：每个组有哪些工具、开没开。"""
+    groups = enabled_groups()
+    out = []
+    for name, info in TOOL_GROUPS.items():
+        out.append({
+            "id": name,
+            "label": info["label"],
+            "desc": info["desc"],
+            "tools": list(info["tools"]),
+            "enabled": name in groups,
+            "count": len(info["tools"]),
+        })
+    return {"groups": out, "total": len(TOOLS),
+            "active": sum(1 for spec in TOOLS
+                          if group_of(spec["function"]["name"]) in groups)}
 
 
 def execute(name: str, raw_arguments: str):
@@ -77,6 +176,9 @@ def execute(name: str, raw_arguments: str):
     try:
         if name not in TOOL_MAP:
             return args, f"错误：没有名为 {name} 的工具"
+        if not is_enabled(name):
+            return args, (f"错误：{name} 属于「{TOOL_GROUPS[group_of(name)]['label']}」这组工具，"
+                          f"现在被后台关掉了，换个办法或者跟雏草姬说一声喵")
         return args, _wrap_untrusted(name, str(TOOL_MAP[name](**args)))
     except Exception as e:
         return args, f"工具 {name} 执行失败：{e}"

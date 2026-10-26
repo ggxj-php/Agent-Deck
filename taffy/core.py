@@ -10,7 +10,7 @@ import sys
 from . import context, settings, uploads
 from .config import EXIT_WORDS, MAX_ROUNDS, RESUME_INSTRUCTION, RESUME_WORDS, STICKER_LIMIT
 from .llm import stream_chat
-from .tools import TOOLS, execute
+from .tools import active_specs, execute
 from .tools.sticker import MOODS
 
 # 内联图片只认 data:image/...;base64,... 这种。上限按 base64 字符串长度算，
@@ -329,7 +329,7 @@ class TaffyAgent:
                 guard = _LeakGuard(settings.system_prompt())
                 try:
                     for kind, payload in stream_chat(
-                        _sendable(_rehydrate(self.messages)), TOOLS, model,
+                        _sendable(_rehydrate(self.messages)), active_specs(), model,
                         api_key=api_key, base_url=base_url, thinking=think,
                     ):
                         if kind == "message":

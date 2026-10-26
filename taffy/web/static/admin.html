@@ -55,6 +55,12 @@
           <button type="button" class="nav-item" data-view="embed" title="向量模型">
             <span class="nav-text">向量模型</span>
           </button>
+          <button type="button" class="nav-item" data-view="tools" title="工具开关">
+            <span class="nav-text">工具开关</span>
+          </button>
+          <button type="button" class="nav-item" data-view="config" title="配置总览">
+            <span class="nav-text">配置总览</span>
+          </button>
         </div>
       </section>
 
@@ -64,6 +70,9 @@
           <i class="caret" aria-hidden="true"></i>
         </button>
         <div class="nav-items">
+          <button type="button" class="nav-item" data-view="personas" title="身份卡">
+            <span class="nav-text">身份卡</span>
+          </button>
           <button type="button" class="nav-item" data-view="prompt" title="系统提示词">
             <span class="nav-text">系统提示词</span>
           </button>
@@ -336,6 +345,86 @@
       </section>
 
       <!-- ---------- 系统提示词（人设） ---------- -->
+      <!-- ---------- 配置总览 ---------- -->
+      <section class="view" data-view="config" hidden>
+        <div class="card">
+          <h2>配置总览</h2>
+          <p class="hint">
+            所有「部署时可调」的设置都在这儿，<b>只读</b>。每项都标了：
+            当前值 · 默认值 · 在哪改 · 改完要不要重启。<br>
+            <b>重启</b> = 改完得 restart 服务（后台「检查更新」里能重启，或者命令行
+            <code>systemctl restart taffy-agent</code>）。
+          </p>
+          <p class="hint" id="config-msg" hidden></p>
+          <div id="config-groups"></div>
+        </div>
+      </section>
+
+      <!-- ---------- 工具开关 ---------- -->
+      <section class="view" data-view="tools" hidden>
+        <div class="card">
+          <h2>工具开关</h2>
+          <p class="hint">
+            工具是多轮对话里的「手」。用不上的组关掉，模型就不会乱调、也省 token。
+            <b>关掉之后模型看不到这些工具的定义</b>，硬调也会被拦。<br>
+            基础组建议别关（读写文件、发表情包都靠它）。改完下一轮对话立刻生效。
+          </p>
+          <div class="tool-groups" id="tool-groups"></div>
+          <p class="hint" id="tools-msg" hidden></p>
+          <div class="row-buttons">
+            <button type="button" id="tools-save">保存</button>
+            <button type="button" id="tools-all" class="ghost">全开</button>
+          </div>
+          <p class="hint" id="tools-summary"></p>
+        </div>
+      </section>
+
+      <!-- ---------- 身份卡（人设） ---------- -->
+      <section class="view" data-view="personas" hidden>
+        <div class="card">
+          <h2>身份卡</h2>
+          <p class="hint">
+            一张身份卡 = 一套人设：名字、称呼、欢迎语、状态文案、提示词、表情包。
+            切到哪张，聊天页就变成哪张。<b>塔菲是默认身份卡</b>，删不掉正在用的那张。<br>
+            表情包在「素材 → 表情包库」里管理，跟着当前身份卡走。
+          </p>
+          <div class="table-wrap">
+            <table class="user-table">
+              <thead>
+                <tr><th>ID</th><th>名字</th><th>称呼用户</th><th>表情包</th><th>状态</th><th>操作</th></tr>
+              </thead>
+              <tbody id="persona-rows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 id="persona-form-title">新建身份卡</h2>
+          <p class="hint" id="persona-form-hint">
+            ID 建完不能改（小写字母开头，2~24 位）。提示词留空就用内置那份。
+          </p>
+          <div class="persona-form">
+            <label>ID <input id="persona-id" placeholder="例如 neko" maxlength="24"></label>
+            <label>名字 <input id="persona-name" placeholder="例如 猫猫" maxlength="24"></label>
+            <label>自称 <input id="persona-self" placeholder="例如 猫猫" maxlength="24"></label>
+            <label>称呼用户 <input id="persona-user" placeholder="例如 铲屎官" maxlength="24"></label>
+            <label>欢迎语 <input id="persona-welcome" placeholder="聊天页第一条欢迎语"></label>
+            <label>输入框提示 <input id="persona-placeholder" placeholder="和猫猫说点什么喵…"></label>
+            <label>在线文案 <input id="persona-online" placeholder="在线喵"></label>
+            <label>思考文案 <input id="persona-thinking" placeholder="正在思考喵…"></label>
+          </div>
+          <label class="persona-prompt-label">提示词（留空 = 用内置那份）
+            <textarea id="persona-prompt" rows="10"
+                      placeholder="你是…（整段人设提示词）"></textarea>
+          </label>
+          <p class="hint" id="persona-msg" hidden></p>
+          <div class="row-buttons">
+            <button type="button" id="persona-save">创建</button>
+            <button type="button" id="persona-cancel" class="ghost" hidden>取消编辑</button>
+          </div>
+        </div>
+      </section>
+
       <section class="view" data-view="prompt" hidden>
         <div class="card">
           <h2>系统提示词（人设）</h2>

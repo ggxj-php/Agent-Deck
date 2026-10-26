@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .. import auth, captcha, context, db, settings, store, uploads
+from .. import persona as persona_mod
 from ..config import CONTEXT_COMPRESS_AT
 from ..core import TaffyAgent
 from ..kb import warmup
@@ -106,7 +107,7 @@ def _session_lock(session_id):
 PUBLIC_PREFIXES = (
     "/static/", "/admin", "/api/admin",
     "/api/auth/login", "/api/auth/register", "/api/auth/captcha",
-    "/api/ping", "/api/stickers", "/favicon.ico",
+    "/api/ping", "/api/stickers", "/api/persona", "/favicon.ico",
 )
 PUBLIC_EXACT = {"/login"}
 
@@ -148,6 +149,12 @@ def _user_of(request):
 @asynccontextmanager
 async def lifespan(_app):
     db.init()                        # 建表（幂等）
+    try:
+        # 第一次启动建默认人设（老的 prompt 会迁到 personas/taffy/）
+        if persona_mod.ensure_default():
+            print("[persona] 已生成默认人设 personas/taffy", flush=True)
+    except Exception as exc:         # noqa: BLE001
+        print(f"[persona] 初始化默认人设失败：{exc}", flush=True)
     try:
         # 第一次启动建默认管理员（密码见 .env 的 TAFFY_ADMIN_PASSWORD，没配就随机生成并打日志）
         auth.ensure_default_admin()
@@ -303,6 +310,33 @@ def me(request: Request):
 def ping():
     """前端从后台切回来时探活用，不碰会话。"""
     return {"ok": True}
+
+
+@app.get("/api/persona")
+def persona_info():
+    """当前人设的公开信息：名字、称呼、头像、欢迎语、状态文案。
+
+    是公开的——聊天页拿它来渲染标题、欢迎语和输入框提示。
+    """
+    return persona_mod.public()
+
+
+@app.get("/api/persona/avatar")
+def persona_avatar(pid: str = ""):
+    """当前（或指定）人设的头像。"""
+    path = persona_mod.avatar_path(pid or None)
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=300"})
+
+
+@app.get("/api/persona/sticker/{name}")
+def persona_sticker(name: str):
+    """当前人设的表情包文件。"""
+    base = persona_mod.stickers_dir()
+    safe = os.path.basename(name.replace("\\", "/"))
+    full = os.path.join(base, safe)
+    if not safe or not os.path.isfile(full):
+        raise HTTPException(status_code=404, detail="没有这张表情包喵")
+    return FileResponse(full, headers={"Cache-Control": "public, max-age=300"})
 
 
 @app.get("/api/stickers")

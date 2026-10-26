@@ -294,6 +294,9 @@ function showView(name) {
 }
 
 const VIEW_HOOKS = {
+  config: loadConfig,
+  tools: loadTools,
+  personas: loadPersonas,
   users: loadUsers,
   dashboard: refreshSysinfo,
   traffic: loadTraffic,
@@ -390,9 +393,32 @@ function render(state) {
   }
 }
 
+/* 能力探测：这台机器没有的功能，导航里就不显示（换台机器部署也不会满屏报错） */
+async function loadCapabilities() {
+  try {
+    const data = await api('/api/admin/capabilities');
+    const caps = data.capabilities || {};
+    const notes = data.notes || {};
+    const map = { traffic: 'traffic', update: 'update' };
+    Object.entries(map).forEach(([view, cap]) => {
+      const item = document.querySelector(`#nav .nav-item[data-view="${view}"]`);
+      if (!item) return;
+      item.hidden = !caps[cap];
+      if (!caps[cap] && notes[cap]) item.title = notes[cap];
+    });
+    // 整个「系统」组都没有可用项就整组藏起来
+    const updateItem = document.querySelector('#nav .nav-item[data-view="update"]');
+    const group = updateItem && updateItem.closest('.nav-group');
+    if (group) group.hidden = Boolean(updateItem.hidden);
+  } catch (err) {
+    /* 探测失败就当都有，别把后台弄坏 */
+  }
+}
+
 async function load(message) {
   try {
     render(await api('/api/admin/state'));
+    loadCapabilities();
     flash(message || '已登录喵', true);
   } catch (err) {
     showLogin(err && err.status === 401 ? '先输口令喵' : err.message);
@@ -1919,3 +1945,283 @@ document.getElementById('user-create').addEventListener('click', async () => {
     userMsg(err && err.message ? err.message : '建不了喵', false);
   }
 });
+
+/* ---------------- 身份卡（人设） ----------------
+   一张身份卡 = 一套人设：名字、称呼、欢迎语、状态文案、提示词、表情包。
+   切到哪张，聊天页就变成哪张；表情包跟着当前身份卡走。 */
+
+let personaList = [];
+let editingPersona = '';
+
+function personaMsg(text, ok) {
+  const node = document.getElementById('persona-msg');
+  if (!node) return;
+  node.hidden = !text;
+  node.textContent = text || '';
+  node.classList.toggle('ok', Boolean(ok));
+}
+
+function personaFormEls() {
+  return {
+    id: document.getElementById('persona-id'),
+    name: document.getElementById('persona-name'),
+    self: document.getElementById('persona-self'),
+    user: document.getElementById('persona-user'),
+    welcome: document.getElementById('persona-welcome'),
+    placeholder: document.getElementById('persona-placeholder'),
+    online: document.getElementById('persona-online'),
+    thinking: document.getElementById('persona-thinking'),
+    prompt: document.getElementById('persona-prompt'),
+  };
+}
+
+function resetPersonaForm() {
+  editingPersona = '';
+  const els = personaFormEls();
+  Object.values(els).forEach((el) => { if (el) el.value = ''; });
+  if (els.id) els.id.disabled = false;
+  document.getElementById('persona-form-title').textContent = '新建身份卡';
+  document.getElementById('persona-save').textContent = '创建';
+  document.getElementById('persona-cancel').hidden = true;
+  personaMsg('');
+}
+
+async function loadPersonas() {
+  try {
+    const data = await api('/api/admin/personas');
+    personaList = data.personas || [];
+    renderPersonas(data.current);
+  } catch (err) {
+    personaMsg(err && err.message ? err.message : '身份卡拉不到', false);
+  }
+}
+
+function renderPersonas(currentId) {
+  const tbody = document.getElementById('persona-rows');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  personaList.forEach((item) => {
+    const tr = document.createElement('tr');
+    const isCurrent = item.id === currentId;
+    tr.innerHTML = `
+      <td><code>${escapeHtml(item.id)}</code></td>
+      <td class="user-name">${escapeHtml(item.name || item.id)}</td>
+      <td>${escapeHtml(item.user_name || '—')}</td>
+      <td>${item.stickers_count}</td>
+      <td>${isCurrent ? '<span class="persona-badge">正在用</span>' : '—'}</td>`;
+    const ops = document.createElement('td');
+    ops.className = 'user-ops';
+    ops.append(
+      userOp(isCurrent ? '已启用' : '启用', () => activatePersona(item), isCurrent),
+      userOp('编辑', () => editPersona(item), false),
+      userOp('删掉', () => removePersona(item), isCurrent, true),
+    );
+    tr.appendChild(ops);
+    tbody.appendChild(tr);
+  });
+}
+
+async function activatePersona(item) {
+  try {
+    await api(`/api/admin/personas/${item.id}/activate`, {}, 'POST');
+    await loadPersonas();
+    personaMsg(`已经切到「${item.name || item.id}」喵，刷新聊天页就能看到`, true);
+  } catch (err) {
+    personaMsg(err && err.message ? err.message : '切不了喵', false);
+  }
+}
+
+async function editPersona(item) {
+  try {
+    const detail = await api(`/api/admin/personas/${item.id}`);
+    const els = personaFormEls();
+    editingPersona = item.id;
+    els.id.value = detail.id || item.id;
+    els.id.disabled = true;
+    els.name.value = detail.name || '';
+    els.self.value = detail.self_name || '';
+    els.user.value = detail.user_name || '';
+    els.welcome.value = detail.welcome || '';
+    els.placeholder.value = detail.placeholder || '';
+    els.online.value = detail.status_online || '';
+    els.thinking.value = detail.status_thinking || '';
+    els.prompt.value = detail.prompt || '';
+    document.getElementById('persona-form-title').textContent = `编辑「${detail.name || detail.id}」`;
+    document.getElementById('persona-save').textContent = '保存修改';
+    document.getElementById('persona-cancel').hidden = false;
+    personaMsg('');
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  } catch (err) {
+    personaMsg(err && err.message ? err.message : '读不出这张身份卡', false);
+  }
+}
+
+async function removePersona(item) {
+  if (!window.confirm(`删掉身份卡「${item.name || item.id}」喵？提示词和表情包一起没`)) return;
+  try {
+    await api(`/api/admin/personas/${item.id}`, undefined, 'DELETE');
+    await loadPersonas();
+    personaMsg('删掉了喵', true);
+  } catch (err) {
+    personaMsg(err && err.message ? err.message : '删不掉喵', false);
+  }
+}
+
+async function savePersona() {
+  const els = personaFormEls();
+  const payload = {
+    name: els.name.value.trim(),
+    self_name: els.self.value.trim(),
+    user_name: els.user.value.trim(),
+    welcome: els.welcome.value.trim(),
+    placeholder: els.placeholder.value.trim(),
+    status_online: els.online.value.trim(),
+    status_thinking: els.thinking.value.trim(),
+    prompt: els.prompt.value,
+  };
+  if (!payload.name) {
+    personaMsg('名字得填喵', false);
+    return;
+  }
+  try {
+    if (editingPersona) {
+      await api(`/api/admin/personas/${editingPersona}`, payload, 'PATCH');
+      personaMsg('改好啦喵', true);
+    } else {
+      payload.id = els.id.value.trim().toLowerCase();
+      if (!payload.id) {
+        personaMsg('ID 得填喵（小写字母开头）', false);
+        return;
+      }
+      await api('/api/admin/personas', payload, 'POST');
+      personaMsg('建好啦喵，点「启用」就能用', true);
+    }
+    resetPersonaForm();
+    await loadPersonas();
+  } catch (err) {
+    personaMsg(err && err.message ? err.message : '存不下来喵', false);
+  }
+}
+
+document.getElementById('persona-save').addEventListener('click', savePersona);
+document.getElementById('persona-cancel').addEventListener('click', resetPersonaForm);
+
+/* ---------------- 工具开关 ---------------- */
+
+let toolGroupsCache = [];
+
+function toolsMsg(text, ok) {
+  const node = document.getElementById('tools-msg');
+  if (!node) return;
+  node.hidden = !text;
+  node.textContent = text || '';
+  node.classList.toggle('ok', Boolean(ok));
+}
+
+async function loadTools() {
+  try {
+    const data = await api('/api/admin/tools');
+    toolGroupsCache = data.groups || [];
+    renderTools(data);
+  } catch (err) {
+    toolsMsg(err && err.message ? err.message : '工具列表拉不到', false);
+  }
+}
+
+function renderTools(data) {
+  const box = document.getElementById('tool-groups');
+  if (!box) return;
+  box.innerHTML = '';
+  const active = new Set((data.groups || []).filter((g) => g.enabled).map((g) => g.id));
+  (data.groups || []).forEach((group) => {
+    const card = document.createElement('div');
+    card.className = 'tool-group' + (active.has(group.id) ? ' on' : '');
+    const tools = group.tools.map((t) => `<code>${escapeHtml(t)}</code>`).join('');
+    card.innerHTML = `
+      <label>
+        <input type="checkbox" data-group="${escapeHtml(group.id)}"
+               ${active.has(group.id) ? 'checked' : ''}>
+        ${escapeHtml(group.label)}（${group.count}）
+      </label>
+      <div class="tg-desc">${escapeHtml(group.desc || '')}</div>
+      <div>${tools}</div>`;
+    const checkbox = card.querySelector('input');
+    checkbox.addEventListener('change', () => {
+      card.classList.toggle('on', checkbox.checked);
+    });
+    box.appendChild(card);
+  });
+  const summary = document.getElementById('tools-summary');
+  if (summary) {
+    summary.textContent = `模型现在能看到 ${data.active} / ${data.total} 个工具`;
+  }
+  toolsMsg('');
+}
+
+async function saveTools() {
+  const checked = Array.from(document.querySelectorAll('#tool-groups input:checked'))
+    .map((el) => el.dataset.group);
+  try {
+    const data = await api('/api/admin/tools', { groups: checked }, 'POST');
+    renderTools(data);
+    toolsMsg('存好了喵，下一轮对话就按这个走', true);
+  } catch (err) {
+    toolsMsg(err && err.message ? err.message : '存不下来喵', false);
+  }
+}
+
+document.getElementById('tools-save').addEventListener('click', saveTools);
+document.getElementById('tools-all').addEventListener('click', async () => {
+  document.querySelectorAll('#tool-groups input').forEach((el) => {
+    el.checked = true;
+    el.closest('.tool-group').classList.add('on');
+  });
+  await saveTools();
+});
+
+/* ---------------- 配置总览（只读） ---------------- */
+
+async function loadConfig() {
+  const box = document.getElementById('config-groups');
+  const msg = document.getElementById('config-msg');
+  if (!box) return;
+  try {
+    const data = await api('/api/admin/config');
+    box.innerHTML = '';
+    (data.groups || []).forEach((group) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'config-group';
+      const title = document.createElement('h3');
+      title.textContent = group.name;
+      wrap.appendChild(title);
+      (group.items || []).forEach((item) => {
+        const row = document.createElement('div');
+        row.className = 'config-item';
+        const label = document.createElement('div');
+        label.className = 'ci-label';
+        label.textContent = item.label;
+        const right = document.createElement('div');
+        const value = document.createElement('div');
+        value.className = 'ci-value';
+        value.textContent = item.value || '（空）';
+        const meta = document.createElement('div');
+        meta.className = 'ci-meta';
+        meta.innerHTML =
+          `改法：${escapeHtml(item.source)} · 默认：${escapeHtml(item.default || '—')}` +
+          (item.restart ? '<span class="ci-badge">改完要重启</span>' : '') +
+          (item.secret ? '<span class="ci-badge">密钥</span>' : '') +
+          (item.desc ? `<br>${escapeHtml(item.desc)}` : '');
+        right.append(value, meta);
+        row.append(label, right);
+        wrap.appendChild(row);
+      });
+      box.appendChild(wrap);
+    });
+    if (msg) msg.hidden = true;
+  } catch (err) {
+    if (msg) {
+      msg.hidden = false;
+      msg.textContent = err && err.message ? err.message : '配置拉不到';
+    }
+  }
+}
