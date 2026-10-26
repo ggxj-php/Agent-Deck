@@ -1455,6 +1455,9 @@ body.admin .card input[type="file"] { padding: 8px 10px; font-size: 13px; }
   .think-toggle.on .think-toggle-knob { transform: translateX(11px); }
 }
 
+/* 增量渲染的两个容器：稳定段落 / 正在写的尾巴；空的时候不占位 */
+.md-head:empty, .md-tail:empty { display: none; }
+
 /* 「正在想…」占位：发出消息后、首字还没回来的那段时间 */
 .bubble-loading {
   display: flex;

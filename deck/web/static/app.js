@@ -584,18 +584,70 @@ function enhance(root) {
    长代码块下每帧对整个 raw 重跑 marked+hljs 是 O(n²)，再加一道时间闸：
    两次渲染之间至少隔 RENDER_MIN_MS，期间的增量合并进这一帧（读的是最新 raw），
    收尾时 send() 会再排一次，最后的内容不会漏画。 */
-const RENDER_MIN_MS = 80;
+const RENDER_MIN_MS = 60;
 
+/* 增量渲染：
+ *   以前每来一小段就 innerHTML = renderMarkdown(整段)，回复越长每次越慢，
+ *   长回复 + 表情包图片一多，主线程直接被占满 → 卡一下然后内容「一股脑」冒出来。
+ *   现在把正文分两段：
+ *     head —— 已经稳定的段落（以空行/代码块结束为界），只追加渲染一次，不重排；
+ *     tail —— 最后一个还没写完的段落，每帧只重渲这一小段。
+ */
 function scheduleRender(block) {
   if (block.pending) return;
   block.pending = true;
+  // 越长间隔越大，进一步压住长回复的重绘次数
+  const delay = Math.min(180, RENDER_MIN_MS + Math.floor(block.raw.length / 400) * 20);
   setTimeout(() => requestAnimationFrame(() => {
     block.pending = false;
-    block.el.innerHTML = renderMarkdown(block.raw);
-    enhance(block.el);
-    hydrateStickers(block.el, block.turn ? block.turn.stickers : []);
+    renderBlockIncremental(block);
     updateToBottom();
-  }), RENDER_MIN_MS);
+  }), delay);
+}
+
+/* 找「稳定切分点」：最后一个空行，且不在没闭合的代码块里 */
+function stableSplit(text) {
+  let fence = 0;
+  let cut = -1;
+  for (let i = 0; i < text.length; i += 1) {
+    if (text.startsWith('```', i)) {
+      fence ^= 1;
+      i += 2;
+      continue;
+    }
+    if (!fence && text[i] === '\n' && text[i + 1] === '\n') cut = i + 2;
+  }
+  return cut;
+}
+
+function renderBlockIncremental(block) {
+  const raw = block.raw || '';
+  if (!block.head) {
+    const head = el('div', 'md-head');
+    const tail = el('div', 'md-tail');
+    block.el.append(head, tail);
+    block.head = head;
+    block.tail = tail;
+    block.rendered = 0;
+  }
+  const moods = block.turn ? block.turn.stickers : [];
+
+  const cut = stableSplit(raw);
+  if (cut > block.rendered) {
+    // 稳定段落：渲染一次后整块搬进 head，后面不再碰它
+    const holder = document.createElement('div');
+    holder.innerHTML = renderMarkdown(raw.slice(block.rendered, cut));
+    enhance(holder);
+    hydrateStickers(holder, moods);
+    while (holder.firstChild) block.head.appendChild(holder.firstChild);
+    block.rendered = cut;
+  }
+
+  // 尾巴：只渲染还没稳定的那一小段
+  const tailText = raw.slice(block.rendered);
+  block.tail.innerHTML = renderMarkdown(tailText);
+  enhance(block.tail);
+  hydrateStickers(block.tail, moods);
 }
 
 /* ---------------- 滚动 ---------------- */
