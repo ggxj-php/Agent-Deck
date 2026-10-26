@@ -163,6 +163,96 @@ def _norm_nodes(raw):
     return nodes
 
 
+# ---------------- 公共：分层排版（按节点实际尺寸）----------------
+LEVEL_GAP = 108          # 层与层之间的垂直距离
+ROW_GAP = 34             # 同一层里节点之间的水平距离
+
+
+def _layered_positions(nodes, edges, start=None):
+    """按边做分层，返回 (pos, sizes, rows)。
+
+    pos[id] = (cx, cy)；行内按实际节点宽度居中排布，避免「固定坐标」导致重叠。
+    """
+    ids = [n["id"] for n in nodes]
+    index = {nid: i for i, nid in enumerate(ids)}
+    preds = {nid: [] for nid in ids}
+    succs = {nid: [] for nid in ids}
+    for a, b, _ in edges:
+        if a in index and b in index:
+            succs[a].append(b)
+            preds[b].append(a)
+
+    root = str(start) if start and str(start) in index else None
+    if root is None:
+        roots = [nid for nid in ids if not preds[nid]] or [ids[0]]
+        root = roots[0]
+
+    level = {root: 0}
+    queue = [root]
+    while queue:
+        cur = queue.pop(0)
+        for nxt in succs.get(cur, []):
+            if nxt not in level:
+                level[nxt] = level[cur] + 1
+                queue.append(nxt)
+    # 环 / 孤岛：按前驱层级往上顶
+    for _ in range(len(ids) + 1):
+        changed = False
+        for nid in ids:
+            if nid not in level:
+                level[nid] = 0
+                changed = True
+            want = max([level.get(p, 0) + 1 for p in preds[nid]] + [0])
+            if level[nid] < want:
+                level[nid] = want
+                changed = True
+        if not changed:
+            break
+
+    rows = {}
+    for nid in ids:
+        rows.setdefault(level[nid], []).append(nid)
+
+    sizes = {n["id"]: _node_size(n["label"]) for n in nodes}
+    max_row = 0.0
+    for nids in rows.values():
+        total = sum(sizes[nid][0] for nid in nids) + ROW_GAP * (len(nids) - 1)
+        max_row = max(max_row, total)
+
+    pos = {}
+    for lvl, nids in rows.items():
+        total = sum(sizes[nid][0] for nid in nids) + ROW_GAP * (len(nids) - 1)
+        cursor = PAD + (max_row - total) / 2
+        cy = PAD + 34 + lvl * LEVEL_GAP
+        for nid in nids:
+            w = sizes[nid][0]
+            pos[nid] = (cursor + w / 2, cy)
+            cursor += w + ROW_GAP
+    width = max_row + PAD * 2
+    height = PAD * 2 + 34 + max(0, max(level.values())) * LEVEL_GAP + NODE_H
+    return pos, sizes, width, height
+
+
+def _orth_arrow(x1, y1, x2, y2, label="", color=LINE):
+    """正交折线箭头：从下沿出发 → 中间水平段 → 目标上沿。
+
+    以前是「中心点直连 + 写死偏移」，节点一宽就穿进节点里；改成按节点边界走折线，
+    文字标签也移到水平段旁边，不再压在节点或线上。
+    """
+    mid_y = (y1 + y2) / 2 if abs(y2 - y1) > 40 else y1
+    d = (f"M {x1:.1f} {y1:.1f} L {x1:.1f} {mid_y:.1f} "
+         f"L {x2:.1f} {mid_y:.1f} L {x2:.1f} {y2:.1f}")
+    parts = [f'<path d="{d}" fill="none" stroke="{color}" stroke-width="1.5"/>']
+    parts.append(_arrow(x2, mid_y, x2, y2, "", color=color))
+    if label:
+        lx = (x1 + x2) / 2
+        ly = mid_y - 7
+        parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="12" fill="#5a6480" '
+                     f'text-anchor="middle" font-family="system-ui, sans-serif">'
+                     f'{_esc(label)}</text>')
+    return "".join(parts)
+
+
 # ---------------- 1. 树 ----------------
 def draw_tree(data, title=""):
     nodes = _norm_nodes(data.get("nodes"))
@@ -229,96 +319,38 @@ def draw_tree(data, title=""):
     return _canvas(width, height, "".join(body), title)
 
 
-# ---------------- 2. 流程图 / 图（分层布局）----------------
-def _layered(nodes, edges, root=None):
-    ids = [n["id"] for n in nodes]
-    index = {nid: i for i, nid in enumerate(ids)}
-    preds = {nid: [] for nid in ids}
-    succs = {nid: [] for nid in ids}
-    for a, b, _ in edges:
-        if a in index and b in index:
-            succs[a].append(b)
-            preds[b].append(a)
-    start = str(root) if root and str(root) in index else None
-    if start is None:
-        starts = [nid for nid in ids if not preds[nid]] or [ids[0]]
-        start = starts[0]
-
-    level = {start: 0}
-    queue = [start]
-    while queue:
-        cur = queue.pop(0)
-        for nid in succs.get(cur, []):
-            want = level[cur] + 1
-            if nid not in level or level[nid] < want:
-                level[nid] = want
-                queue.append(nid)
-    # 没走到的（环 / 孤岛）按前驱最大层级放
-    for nid in ids:
-        if nid not in level:
-            level[nid] = 0
-    for _ in range(len(ids) + 1):
-        changed = False
-        for nid in ids:
-            want = max([level.get(p, 0) for p in preds[nid]] + [0])
-            if nid not in level or level[nid] < want:
-                level[nid] = want
-                changed = True
-        if not changed:
-            break
-
-    rows = {}
-    for nid in ids:
-        rows.setdefault(level[nid], []).append(nid)
-    return rows, succs, preds
-
-
+# ---------------- 2. 流程图 ----------------
 def draw_flow(data, title=""):
     nodes = _norm_nodes(data.get("nodes"))
     edges = _norm_edges(data.get("edges"))
     if not nodes:
         raise ValueError("nodes 是空的，至少给一个节点")
-    rows, succs, _ = _layered(nodes, edges, data.get("start"))
-    label_of = {n["id"]: n["label"] for n in nodes}
-    sizes = {nid: _node_size(label_of[nid]) for nid in label_of}
 
-    pos = {}
-    max_row_w = 0
-    for lvl, nids in rows.items():
-        total = sum(sizes[nid][0] for nid in nids) + GAP_X * (len(nids) - 1)
-        max_row_w = max(max_row_w, total)
-    for lvl, nids in rows.items():
-        total = sum(sizes[nid][0] for nid in nids) + GAP_X * (len(nids) - 1)
-        cursor = PAD + (max_row_w - total) / 2
-        y = PAD + 40 + lvl * LEVEL_H
-        for nid in nids:
-            w, _ = sizes[nid]
-            pos[nid] = (cursor + w / 2, y)
-            cursor += w + GAP_X
-
+    pos, sizes, width, height = _layered_positions(nodes, edges, data.get("start"))
     body = []
     for a, b, label in edges:
         if a not in pos or b not in pos:
             continue
         x1, y1 = pos[a]
         x2, y2 = pos[b]
+        w1, h1 = sizes[a]
+        w2, h2 = sizes[b]
         if abs(y2 - y1) < 1:                     # 同一层：水平箭头
-            body.append(_arrow(x1 + sizes[a][0] / 2, y1, x2 - sizes[b][0] / 2, y2, label))
+            body.append(_arrow(x1 + w1 / 2 + 4, y1, x2 - w2 / 2 - 6, y2, label))
         else:
-            body.append(_arrow(x1, y1 + NODE_H / 2, x2, y2 - NODE_H / 2, label))
+            body.append(_orth_arrow(x1, y1 + h1 / 2, x2, y2 - h2 / 2, label))
     for n in nodes:
         x, y = pos[n["id"]]
-        w, h = _node_size(n["label"])
-        kind = n.get("kind") or "process"
+        w, h = sizes[n["id"]]
+        kind = (n.get("kind") or "process").strip().lower()
         if kind in ("start", "end", "起", "止"):
-            body.append(_box(x, y, w, h, n["label"], n.get("color") or "green", shape="pill"))
+            body.append(_box(x, y, w + 16, h, n["label"], n.get("color") or "green",
+                             shape="pill"))
         elif kind in ("decision", "判断", "条件"):
-            body.append(_diamond(x, y, w + 30, h + 16, n["label"], n.get("color")))
+            body.append(_diamond(x, y, w + 34, h + 18, n["label"], n.get("color")))
         else:
             body.append(_box(x, y, w, h, n["label"], n.get("color")))
-    height = PAD * 2 + 40 + max(y for _, y in pos.values()) + NODE_H
-    width = max(max_row_w + PAD * 2, 260)
-    return _canvas(width, height, "".join(body), title)
+    return _canvas(max(width, 300), max(height, 220), "".join(body), title)
 
 
 # ---------------- 3. 通用图（可给坐标，否则环形布局）----------------
@@ -364,86 +396,66 @@ def draw_graph(data, title=""):
 
 
 # ---------------- 4. 数据流图（DFD）----------------
-DFD_COLS = {"entity": 0, "process": 1, "store": 2}
+def _dfd_kind(n):
+    k = (n.get("kind") or "").strip().lower()
+    if k in ("entity", "external", "外部实体", "实体"):
+        return "entity"
+    if k in ("store", "datastore", "数据存储", "存储"):
+        return "store"
+    return "process"
 
 
 def draw_dataflow(data, title=""):
+    """数据流图：先按连线分层（一般就是 外部实体 → 处理 → 数据存储），
+    再把同层节点按实际宽度排开，连线走正交折线，避免以前写死坐标互相压。"""
     nodes = _norm_nodes(data.get("nodes"))
     edges = _norm_edges(data.get("edges"))
     if not nodes:
-        raise ValueError("nodes 是空的")
+        raise ValueError("nodes 是空的，至少给一个节点")
 
-    def kind_of(n):
-        k = (n.get("kind") or "").strip().lower()
-        if k in ("entity", "external", "外部实体", "实体"):
-            return "entity"
-        if k in ("store", "datastore", "数据存储", "存储"):
-            return "store"
-        return "process"
-
-    cols = {0: [], 1: [], 2: []}
-    for n in nodes:
-        cols[DFD_COLS[kind_of(n)]].append(n)
-
-    # 每列等距排布，列内垂直居中
-    col_w = {"entity": 120, "process": 140, "store": 130}
-    gap = 70
-    x_of = {0: PAD + col_w["entity"] / 2,
-            1: PAD + col_w["entity"] + gap + col_w["process"] / 2,
-            2: PAD + col_w["entity"] + gap + col_w["process"] + gap + col_w["store"] / 2}
-    count = max(len(v) for v in cols.values()) or 1
-    height_needed = PAD * 2 + 60 + count * LEVEL_H
-    pos = {}
-    for ci, item_list in cols.items():
-        total_h = len(item_list) * LEVEL_H
-        start_y = PAD + 50 + (height_needed - PAD * 2 - 60 - total_h) / 2 + LEVEL_H / 2
-        for i, n in enumerate(item_list):
-            pos[n["id"]] = (x_of[ci], start_y + i * LEVEL_H)
-
+    pos, sizes, width, height = _layered_positions(nodes, edges, data.get("start"))
     body = []
+
     for a, b, label in edges:
         if a not in pos or b not in pos:
             continue
         x1, y1 = pos[a]
         x2, y2 = pos[b]
-        if abs(y1 - y2) < 1:
-            body.append(_arrow(x1 + 60, y1, x2 - 65, y2, label))
+        w1, h1 = sizes[a]
+        w2, h2 = sizes[b]
+        if abs(y2 - y1) < 1:                       # 同一层：水平箭头
+            body.append(_arrow(x1 + w1 / 2 + 4, y1, x2 - w2 / 2 - 6, y2, label))
         else:
-            mid_x = (x1 + x2) / 2
-            body.append(
-                f'<path d="M {x1 + 60:.1f} {y1:.1f} L {mid_x:.1f} {y1:.1f} '
-                f'L {mid_x:.1f} {y2:.1f} L {x2 - 68:.1f} {y2:.1f}" fill="none" '
-                f'stroke="{LINE}" stroke-width="1.5"/>')
-            body.append(_arrow(x2 - 76, y2, x2 - 68, y2, label))
+            body.append(_orth_arrow(x1, y1 + h1 / 2, x2, y2 - h2 / 2, label))
+
     for n in nodes:
         x, y = pos[n["id"]]
-        k = kind_of(n)
-        label = n["label"]
-        w, h = _node_size(label)
+        w, h = sizes[n["id"]]
+        k = _dfd_kind(n)
         if k == "entity":
-            body.append(_box(x, y, col_w["entity"], h, label, n.get("color") or "blue"))
+            body.append(_box(x, y, w + 24, h, n["label"], n.get("color") or "blue"))
         elif k == "store":
-            # 数据存储：左右两条竖线 + 中间标签（经典 DFD 画法）
+            # 经典 DFD 数据存储画法：右侧开口的矩形（左右双竖线）
             fill, stroke, text_color = _color_of(n.get("color") or "gray")
-            left, right = x - col_w["store"] / 2, x + col_w["store"] / 2
+            left, right = x - (w + 24) / 2, x + (w + 24) / 2
             body.append(
-                f'<rect x="{left:.1f}" y="{y - h / 2:.1f}" width="{col_w["store"]}" '
-                f'height="{h}" fill="{fill}" stroke="none"/>'
-                f'<line x1="{left:.1f}" y1="{y - h / 2:.1f}" x2="{left:.1f}" y2="{y + h / 2:.1f}" '
-                f'stroke="{stroke}" stroke-width="2"/>'
-                f'<line x1="{left + 8:.1f}" y1="{y - h / 2:.1f}" x2="{left + 8:.1f}" '
-                f'y2="{y + h / 2:.1f}" stroke="{stroke}" stroke-width="1.4"/>'
-                f'<line x1="{right - 8:.1f}" y1="{y - h / 2:.1f}" x2="{right - 8:.1f}" '
-                f'y2="{y + h / 2:.1f}" stroke="{stroke}" stroke-width="1.4"/>'
-                f'<line x1="{right:.1f}" y1="{y - h / 2:.1f}" x2="{right:.1f}" y2="{y + h / 2:.1f}" '
-                f'stroke="{stroke}" stroke-width="2"/>'
+                f'<rect x="{left:.1f}" y="{y - h / 2:.1f}" width="{w + 24:.1f}" height="{h}" '
+                f'fill="{fill}" stroke="none"/>'
+                f'<line x1="{left:.1f}" y1="{y - h / 2:.1f}" x2="{left:.1f}" '
+                f'y2="{y + h / 2:.1f}" stroke="{stroke}" stroke-width="2"/>'
+                f'<line x1="{left + 7:.1f}" y1="{y - h / 2:.1f}" x2="{left + 7:.1f}" '
+                f'y2="{y + h / 2:.1f}" stroke="{stroke}" stroke-width="1.2"/>'
+                f'<line x1="{right - 7:.1f}" y1="{y - h / 2:.1f}" x2="{right - 7:.1f}" '
+                f'y2="{y + h / 2:.1f}" stroke="{stroke}" stroke-width="1.2"/>'
+                f'<line x1="{right:.1f}" y1="{y - h / 2:.1f}" x2="{right:.1f}" '
+                f'y2="{y + h / 2:.1f}" stroke="{stroke}" stroke-width="2"/>'
                 f'<text x="{x:.1f}" y="{y + 4.5:.1f}" font-size="{FONT}" fill="{text_color}" '
-                f'text-anchor="middle" font-family="system-ui, sans-serif">{_esc(label)}</text>')
+                f'text-anchor="middle" font-family="system-ui, sans-serif">{_esc(n["label"])}</text>')
         else:
-            body.append(_box(x, y, col_w["process"], h, label, n.get("color") or "green",
-                             shape="circle"))
-    width = x_of[2] + col_w["store"] / 2 + PAD
-    return _canvas(width, height_needed, "".join(body), title)
+            # 处理：圆角矩形（以前画圆，标签一长就溢出来）
+            body.append(_box(x, y, w + 20, h, n["label"], n.get("color") or "green",
+                             shape="rect"))
+    return _canvas(max(width, 320), max(height, 220), "".join(body), title)
 
 
 # ---------------- 5. 架构图（分层）----------------
@@ -698,17 +710,26 @@ def draw_er(data, title=""):
         cursor += w + col_gap
     total_w = cursor - col_gap + PAD
 
+    row_count = (count + cols - 1) // cols
+    row_h = [0.0] * row_count
+    for i, it in enumerate(items):
+        r = i // cols
+        row_h[r] = max(row_h[r], it["h"])
+    row_y = []
+    acc = PAD + 40
+    for h in row_h:
+        row_y.append(acc + h / 2)
+        acc += h + row_gap
+
     pos = {}
-    row_y = {}
     for i, it in enumerate(items):
         c, r = i % cols, i // cols
-        y = PAD + 40 + row_y.get(r, 0) + it["h"] / 2
-        row_y[r] = row_y.get(r, 0) + it["h"] + row_gap
         x = starts[c] + it["w"] / 2
+        y = row_y[r]
         pos[it["name"]] = (x, y)
         it["x"], it["y"] = x, y
 
-    total_h = PAD * 2 + 40 + max(row_y.values() or [0])
+    total_h = acc + PAD
 
     body = []
     # 先画关系线，再画实体框（框压线，更像正规 ER 图）
@@ -836,7 +857,7 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
     if not isinstance(data, dict) or not data:
         return json.dumps({"error": "data 是空的，至少要给节点/层/条目"}, ensure_ascii=False)
     try:
-        svg = drawer(data, str(title or "").strip())
+        svg = drawer(data, "")      # 图名由卡片标题显示，SVG 里不再重复画
     except ValueError as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
     except Exception as exc:                     # noqa: BLE001

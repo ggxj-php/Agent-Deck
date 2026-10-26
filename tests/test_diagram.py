@@ -111,3 +111,72 @@ def test_ER图():
     assert out["ok"]
     html = diagram.render.get_artifact(out["artifact_id"])["html"]
     assert "用户" in html and "订单" in html and "下单" in html
+
+
+def _rects(svg):
+    """取出画布里所有节点矩形（跳过 fill=none 的整张画布背景）。"""
+    import re
+    out = []
+    for m in re.finditer(
+            r'<rect x="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="([-\d.]+)" '
+            r'[^>]*?fill="([^"]+)"', svg):
+        x, y, w, h, fill = m.groups()
+        if fill == "none":
+            continue
+        out.append((float(x), float(y), float(w), float(h)))
+    return out
+
+
+def test_数据流图节点不重叠():
+    """回归：以前固定三列坐标 + 写死连线偏移，节点/标签会压在一起。"""
+    out = json.loads(diagram.draw_diagram("dataflow", {
+        "nodes": [
+            {"id": "s1", "label": "读者", "kind": "entity"},
+            {"id": "s2", "label": "图书馆管理员", "kind": "entity"},
+            {"id": "p1", "label": "1 查询图书信息", "kind": "process"},
+            {"id": "p2", "label": "2 办理借书登记", "kind": "process"},
+            {"id": "d1", "label": "D1 图书信息库", "kind": "store"},
+            {"id": "d2", "label": "D2 借阅记录库", "kind": "store"},
+        ],
+        "edges": [["s1", "p1", "查询请求"], ["p1", "d1", "结果"],
+                  ["s2", "p2", "借阅请求"], ["p2", "d2", "记录"]],
+    }, "0 层数据流图"))
+    svg = diagram.render.get_artifact(out["artifact_id"])["html"]
+    rects = [r for r in _rects(svg) if r[2] > 20 and r[3] > 20]
+    for i in range(len(rects)):
+        for j in range(i + 1, len(rects)):
+            x1, y1, w1, h1 = rects[i]
+            x2, y2, w2, h2 = rects[j]
+            overlap_x = min(x1 + w1, x2 + w2) - max(x1, x2)
+            overlap_y = min(y1 + h1, y2 + h2) - max(y1, y2)
+            assert overlap_x <= 1 or overlap_y <= 1, f"节点重叠: {rects[i]} / {rects[j]}"
+
+
+def test_ER图节点不重叠():
+    out = json.loads(diagram.draw_diagram("er", {
+        "entities": [
+            {"name": "用户", "attributes": [{"name": "id", "pk": True},
+                                            {"name": "昵称"}, {"name": "手机号"}]},
+            {"name": "订单", "attributes": [{"name": "id", "pk": True},
+                                            {"name": "用户id", "fk": True}]},
+            {"name": "商品", "attributes": [{"name": "id", "pk": True},
+                                            {"name": "名称"}, {"name": "价格"}]},
+            {"name": "订单明细", "attributes": [{"name": "订单id", "pk": True},
+                                                {"name": "商品id", "fk": True}]},
+        ],
+        "relations": [
+            {"from": "用户", "to": "订单", "label": "下单", "cardinality": "1:N"},
+            {"from": "订单", "to": "订单明细", "label": "包含", "cardinality": "1:N"},
+            {"from": "商品", "to": "订单明细", "label": "属于", "cardinality": "1:N"},
+        ],
+    }, "电商 ER 图"))
+    svg = diagram.render.get_artifact(out["artifact_id"])["html"]
+    # 只看实体主体框（标题栏是叠在主体上的，高度 30，这里排除掉）
+    rects = [r for r in _rects(svg) if r[2] > 20 and r[3] > 45]
+    for i in range(len(rects)):
+        for j in range(i + 1, len(rects)):
+            x1, y1, w1, h1 = rects[i]
+            x2, y2, w2, h2 = rects[j]
+            overlap_x = min(x1 + w1, x2 + w2) - max(x1, x2)
+            overlap_y = min(y1 + h1, y2 + h2) - max(y1, y2)
+            assert overlap_x <= 1 or overlap_y <= 1, f"实体框重叠: {rects[i]} / {rects[j]}"
