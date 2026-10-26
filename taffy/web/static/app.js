@@ -598,6 +598,7 @@ function renderHistory(items) {
     }
     const tail = text.slice(last);
     if (tail) contentChunk(turn, tail);
+    flushStickers(turn);
     if (turn.content) scheduleRender(turn.content);
   });
 }
@@ -611,7 +612,7 @@ function addAgent() {
   row.append(avatar, bubble);
   messagesEl.appendChild(row);
   scrollToBottom();
-  return { row, bubble, thinking: null, content: null, tools: [] };
+  return { row, bubble, thinking: null, content: null, tools: [], pendingStickers: [] };
 }
 
 function thinkingChunk(turn, text) {
@@ -649,6 +650,11 @@ function contentChunk(turn, text) {
   }
   turn.content.raw += text;
   scheduleRender(turn.content);
+  // 之前攒的表情包，等这段话走到段落边界再放进去（别切进 markdown 里）
+  if (turn.pendingStickers && turn.pendingStickers.length
+      && PARAGRAPH_END.test(turn.content.raw)) {
+    flushStickers(turn);
+  }
 }
 
 function toolStart(turn, name, args) {
@@ -695,20 +701,40 @@ function toolEnd(turn, name, result) {
   updateToBottom();
 }
 
+/* 表情包是块级元素，直接插在句子/标题中间会把 markdown 切开——
+   比如「**第2题**」被拆成 `**` + 图 + `第2题**`，星号就原样露出来了。
+   所以先攒着，等正文到「段落边界」（空行）再插；一轮结束还没到边界就放到最后。 */
+const PARAGRAPH_END = /(^|\n)[ \t]*\n[ \t]*$/;
+
+function flushStickers(turn) {
+  const list = turn.pendingStickers || [];
+  if (!list.length) return;
+  turn.pendingStickers = [];
+  turn.content = null;                // 关掉当前正文块，表情包落在它后面
+  list.forEach((mood) => {
+    const pool = stickerPool(mood);
+    if (!pool.length) return;
+    const name = pool[Math.floor(Math.random() * pool.length)];
+    const img = el('img', 'sticker');
+    img.src = `/static/stickers/${encodeURIComponent(name)}`;
+    img.alt = mood;
+    img.loading = 'lazy';
+    img.addEventListener('error', () => img.remove());
+    turn.bubble.appendChild(img);
+  });
+  updateToBottom();
+}
+
 function addSticker(turn, mood) {
   settleThinking(turn);
-  turn.content = null;
   const safe = String(mood).replace(/[^a-z]/gi, '');
-  const pool = stickerPool(safe);
-  if (!pool.length) return;
-  const name = pool[Math.floor(Math.random() * pool.length)];
-  const img = el('img', 'sticker');
-  img.src = `/static/stickers/${encodeURIComponent(name)}`;
-  img.alt = mood;
-  img.loading = 'lazy';
-  img.addEventListener('error', () => img.remove());
-  turn.bubble.appendChild(img);
-  updateToBottom();
+  if (!stickerPool(safe).length) return;
+  if (!turn.pendingStickers) turn.pendingStickers = [];
+  turn.pendingStickers.push(safe);
+  // 正文还没开始，或者已经停在一个空行上，那就可以直接放
+  if (!turn.content || PARAGRAPH_END.test(turn.content.raw)) {
+    flushStickers(turn);
+  }
 }
 
 // 塔菲画的图：用沙箱 iframe 渲染，脚本能跑但摸不到父页面
@@ -1292,6 +1318,7 @@ function handleEvent(turn, event) {
         `${Math.round(event.after_tokens / 1000)}k），接着聊就好～`);
       break;
     case 'done':
+      flushStickers(turn);          // 结尾还没到段落边界的，最后补上
       if (event.context) paintContext(event.context);
       break;
     case 'error':
