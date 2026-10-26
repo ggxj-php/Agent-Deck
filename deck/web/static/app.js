@@ -947,7 +947,7 @@ async function ensureSession(force) {
       return sessionId;
     }
     if ([502, 503, 504].includes(resp.status) && attempt === 0) {
-      statusEl.textContent = '服务刚重启，等一秒再试喵…';
+      statusEl.textContent = t('restarting');
       await new Promise((resolve) => setTimeout(resolve, 1500));
       continue;
     }
@@ -1029,7 +1029,7 @@ function renderSessionList() {
       const resp = await fetch(`/api/sessions/${item.id}`, { method: 'DELETE' });
       // 404 说明它本来就已经没了（别的设备删过），也按删成功处理
       if (!resp.ok && resp.status !== 404) {
-        statusEl.textContent = `删不掉喵（HTTP ${resp.status}）`;
+        statusEl.textContent = t('deleteFailed', { code: resp.status });
         return;
       }
       // 先从本地列表摘掉，别等网络刷新：万一 loadSessions 失败，
@@ -1058,7 +1058,7 @@ function renderSessionList() {
         await ensureSession();
         welcome();
       } catch (err) {
-        statusEl.textContent = '建会话失败：' + ((err && err.message) || '未知原因');
+        statusEl.textContent = t('createSessionFailed', { reason: (err && err.message) || t('unknownReason') });
       }
       closeSidebar();
     });
@@ -1070,7 +1070,7 @@ function renderSessionList() {
 async function switchSession(id) {
   // 塔菲正在回话的时候切会话会让两段流搅在一起，先拦一下并说明原因
   if (busy) {
-    statusEl.textContent = '塔菲还在回话喵，等这一轮说完再切会话';
+    statusEl.textContent = t('busySwitch');
     closeSidebar();
     return;
   }
@@ -1088,7 +1088,7 @@ async function switchSession(id) {
           sessionId = null;
           sessionStorage.removeItem(STORAGE_KEY);
         }
-        statusEl.textContent = '这条会话已经不在了喵';
+        statusEl.textContent = t('sessionGone');
         if (!sessionId) {
           if (sessions.length) {
             await switchSession(sessions[0].id);
@@ -1097,13 +1097,13 @@ async function switchSession(id) {
               await ensureSession(true);
               welcome();
             } catch (err) {
-              statusEl.textContent = '建会话失败：' + ((err && err.message) || '未知原因');
+              statusEl.textContent = t('createSessionFailed', { reason: (err && err.message) || t('unknownReason') });
             }
           }
         }
         return;
       }
-      statusEl.textContent = `切不过去喵（HTTP ${resp.status}），刷新一下试试`;
+      statusEl.textContent = t('switchFailed', { code: resp.status });
       return;
     }
     const data = await resp.json();
@@ -1121,7 +1121,7 @@ async function switchSession(id) {
     pinToBottom();            // 切会话后稳稳吸底
     statusEl.textContent = onlineText();
   } catch (err) {
-    statusEl.textContent = '切不过去喵：' + ((err && err.message) || '未知原因');
+    statusEl.textContent = t('switchFailedReason', { reason: (err && err.message) || t('unknownReason') });
   }
   inputEl.focus();
 }
@@ -1139,7 +1139,7 @@ sideNewEl.addEventListener('click', async () => {
     loadSessions();
     statusEl.textContent = onlineText();
   } catch (err) {
-    statusEl.textContent = '开新会话失败：' + ((err && err.message) || '未知原因');
+    statusEl.textContent = t('newSessionFailed', { reason: (err && err.message) || t('unknownReason') });
   }
   closeSidebar();
   inputEl.focus();
@@ -1150,9 +1150,9 @@ sideInviteEl.addEventListener('click', async () => {
   if (!code) return;
   try {
     await navigator.clipboard.writeText(code);
-    statusEl.textContent = '邀请码已复制喵';
+    statusEl.textContent = t('copyInvite');
   } catch (err) {
-    statusEl.textContent = '复制失败，手动记一下：' + code;
+    statusEl.textContent = t('copyFailed', { code });
   }
 });
 
@@ -1226,9 +1226,9 @@ userInviteEl.addEventListener('click', async () => {
   const code = (me && me.invite_code) || userInviteEl.textContent;
   try {
     await navigator.clipboard.writeText(code);
-    statusEl.textContent = '邀请码已复制喵';
+    statusEl.textContent = t('copyInvite');
   } catch (err) {
-    statusEl.textContent = '复制失败，手动记一下：' + code;
+    statusEl.textContent = t('copyFailed', { code });
   }
 });
 
@@ -1263,7 +1263,7 @@ document.getElementById('pass-form').addEventListener('submit', async (event) =>
     passNewEl.value = '';
     passConfirmEl.value = '';
     passMsg('密码改好啦喵（下次登录用新的）', true);
-    statusEl.textContent = '密码改好啦喵';
+    statusEl.textContent = t('passwordSaved');
   } catch (err) {
     passMsg('连不上服务器喵');
   }
@@ -1311,11 +1311,11 @@ document.getElementById('pass-form').addEventListener('submit', async (event) =>
     return;
   }
   closePassModal();
-  statusEl.textContent = '密码改好啦喵';
+  statusEl.textContent = t('passwordSaved');
 });
 
 /* ---------------- 上下文占用 ----------------
-   后端按「中文 1 字 1 token、英文 4 字符 1 token」粗估（见 deck/context.py），
+   后端按「中文 1 字 1 token、英文 4 字符 1 token」粗估（见 taffy/context.py），
    所以这个百分比是估的，不是 API 报的真实用量；够用来提醒「快满了」。
    用到窗口的八成时后端会自动把旧历史压成摘要，压完这个数会掉下来。 */
 
@@ -1494,10 +1494,10 @@ async function resume() {
     } catch (err) {
       /* 没连上，接着试 */
     }
-    statusEl.textContent = '重连中喵…';
+    statusEl.textContent = t('reconnecting');
     await new Promise((resolve) => setTimeout(resolve, RECONNECT_WAIT_MS));
   }
-  statusEl.textContent = '连不上服务喵，刷新一下吧';
+  statusEl.textContent = t('offlineRefresh');
 }
 
 document.addEventListener('visibilitychange', resume);
@@ -1607,14 +1607,14 @@ imageInputEl.addEventListener('change', () => {
       if (pendingImages.length >= IMAGE_MAX_COUNT) return;
       pendingImages.push(reader.result);
       renderAttachBar();
-      statusEl.textContent = `已选 ${pendingImages.length} 张喵`;
+      statusEl.textContent = t('imagesSelected', { n: pendingImages.length });
       inputEl.focus();
     };
-    reader.onerror = () => { statusEl.textContent = '读图片失败喵'; };
+    reader.onerror = () => { statusEl.textContent = t('readImageFailed'); };
     reader.readAsDataURL(file);
   });
   if (rejected) {
-    statusEl.textContent = `有 ${rejected} 张没加上（不是图片 / 超过 4MB / 最多 ${IMAGE_MAX_COUNT} 张）`;
+    statusEl.textContent = t('imagesRejected', { n: rejected, max: IMAGE_MAX_COUNT });
   }
 });
 
@@ -1642,7 +1642,7 @@ newChatEl.addEventListener('click', async () => {
     refreshContext();
     statusEl.textContent = onlineText();
   } catch (err) {
-    statusEl.textContent = '开新会话失败：' + ((err && err.message) || '未知原因');
+    statusEl.textContent = t('newSessionFailed', { reason: (err && err.message) || t('unknownReason') });
   }
   inputEl.focus();
 });
@@ -1775,7 +1775,7 @@ armLeaveGuard();
     renderSessionList();
     refreshContext();  // 刷新页面后把上下文用了几成接回来
   } catch (err) {
-    statusEl.textContent = '连不上服务喵';
+    statusEl.textContent = t('offline');
   }
   inputEl.focus();
 })();
