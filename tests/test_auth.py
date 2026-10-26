@@ -135,3 +135,47 @@ def test_封禁会立刻踢掉登录态():
     assert auth.resolve_token(token) is not None
     auth.set_ban(user["id"], 30)
     assert auth.resolve_token(token) is None         # token 被删了
+
+
+def test_登录能区分密码错还是被封():
+    user = make_user()
+    # 密码错：reason 是 bad，登录页提示「用户名或密码不对」
+    got, reason = auth.lookup(user["name"], "wrong-password")
+    assert got is None and reason == "bad"
+    # 用户名不存在也是 bad（不泄露账号是否存在）
+    got, reason = auth.lookup("no-such-user", "x")
+    assert got is None and reason == "bad"
+    # 正常的：reason 空
+    got, reason = auth.lookup(user["name"], "password123")
+    assert got and reason == ""
+
+
+def test_被封时返回解封时间():
+    user = make_user()
+    until = auth.set_ban(user["id"], 120)            # 封 2 小时
+    fresh = auth.find_by_id(user["id"])
+    got, reason = auth.lookup(user["name"], "password123")  # 密码对也要拦住
+    assert got and reason == "banned"
+
+    info = auth.ban_detail(fresh)
+    assert info["permanent"] is False
+    assert info["until"] == until
+    assert "解封时间" in info["text"]
+    assert "小时" in info["text"] or "分钟" in info["text"]
+
+
+def test_永久封禁的说明():
+    user = make_user()
+    auth.set_ban(user["id"], 0)                      # 0 = 永久
+    fresh = auth.find_by_id(user["id"])
+    info = auth.ban_detail(fresh)
+    assert info["permanent"] is True
+    assert info["until"] == 0
+    assert "永久封禁" in info["text"]
+
+
+def test_剩余时间是中文的():
+    assert auth._left_text(3 * 86400 + 2 * 3600) == "3 天 2 小时"
+    assert auth._left_text(5 * 3600 + 20 * 60) == "5 小时 20 分"
+    assert auth._left_text(8 * 60) == "8 分钟"
+    assert auth._left_text(10) == "1 分钟"           # 不足一分钟也说 1 分钟

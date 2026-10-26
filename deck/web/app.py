@@ -262,7 +262,21 @@ def login(req: AuthRequest, request: Request):
     ip = _client_ip(request)
     if not _login_limiter.ok(ip + "|" + (req.name or "")):
         raise HTTPException(status_code=429, detail="试太多次了喵，歇 10 分钟再来")
-    user = auth.authenticate(req.name, req.password)
+    user, reason = auth.lookup(req.name, req.password)
+    if reason == "banned":
+        # 403 而不是 401：密码可能没错，是账号被封。把解封时间也带上，
+        # 免得用户以为是自己记错密码。
+        info = auth.ban_detail(user)
+        return JSONResponse(
+            status_code=403,
+            content={
+                "ok": False,
+                "banned": True,
+                "permanent": info["permanent"],
+                "ban_until": info["until"],
+                "detail": info["text"],
+            },
+        )
     if not user:
         raise HTTPException(status_code=401, detail="用户名或密码不对喵")
     token = auth.issue_token(user["id"], ip, request.headers.get("user-agent", ""))

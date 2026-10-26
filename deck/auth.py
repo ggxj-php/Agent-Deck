@@ -171,23 +171,67 @@ def find_by_id(user_id):
     return dict(row) if row else None
 
 
-def authenticate(name, password):
+def lookup(name, password):
+    """登录校验：返回 (user, reason)。
+
+    reason 三种：
+      ""        登录成功
+      "banned"  账号被封（user 里带着 ban_until）
+      "bad"     用户名或密码不对
+
+    单独拆出来是为了让接口能区分「密码错」和「被封了」——以前两种情况
+    都返回 None，用户看到的是「用户名或密码不对」，不知道自己是被封了。
+    """
     user = find_by_name(name)
     if not user:
-        return None
+        return None, "bad"
     if user.get("disabled") and not is_banned(user):
         clear_ban(user["id"])          # 临时封禁到期了，顺手把标记清掉
         user["disabled"] = 0
         user["ban_until"] = 0
     if is_banned(user):
-        return None
+        return user, "banned"
     if not verify_password(password, user["password_hash"]):
-        return None
+        return None, "bad"
     with db.cursor() as conn:
         conn.execute("UPDATE users SET last_login = ? WHERE id = ?",
                      (time.time(), user["id"]))
     user["last_login"] = time.time()
-    return user
+    return user, ""
+
+
+def authenticate(name, password):
+    """老的入口：只回 user 或 None（被封也算 None）。"""
+    user, reason = lookup(name, password)
+    return user if reason == "" else None
+
+
+def _left_text(seconds):
+    """把剩余秒数说成人话：2 天 3 小时 / 5 小时 20 分 / 8 分钟。"""
+    seconds = max(0, int(seconds))
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes = rest // 60
+    if days:
+        return f"{days} 天" + (f" {hours} 小时" if hours else "")
+    if hours:
+        return f"{hours} 小时" + (f" {minutes} 分" if minutes else "")
+    return f"{max(1, minutes)} 分钟"
+
+
+def ban_detail(user, now=None):
+    """被封账号的说明：永久 / 到什么时候解封 / 还剩多久。
+
+    返回 {"permanent": bool, "until": 时间戳（永久为 0）, "text": 给用户看的一句话}
+    """
+    until = float(user.get("ban_until") or 0)
+    if until <= 0:
+        return {"permanent": True, "until": 0,
+                "text": "账号已被永久封禁，请联系管理员解封"}
+    now = now or time.time()
+    stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(until))
+    return {"permanent": False, "until": until,
+            "text": f"账号已被封禁，解封时间 {stamp}（还剩 {_left_text(until - now)}）"}
 
 
 def public_user(user):
