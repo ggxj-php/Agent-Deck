@@ -5,6 +5,7 @@
 """
 import json
 import re
+import sys
 
 from . import context, settings
 from .config import (EXIT_WORDS, MAX_ROUNDS, RESUME_INSTRUCTION, RESUME_WORDS,
@@ -24,6 +25,51 @@ _IMAGE_MAX_CHARS = 8 * 1024 * 1024
 # 后面没法再接正文，所以靠 send_sticker 工具永远做不出「文字-图-文字」。
 # 改成让模型在正文里写标记，服务端边收流边切成 sticker 事件，
 # 前端 contentChunk / addSticker 本来就是按顺序往气泡里追加，天然能交错。
+class _LeakGuard:
+    """挡住「把塔菲的底层设定 / 系统提示词原文吐出来」这种泄露。
+
+    流式输出没法等全文再检查，所以先扣住最后 HOLD 个字：每次新内容进来，
+    对整段缓冲（含上一轮扣下的尾巴）扫一遍，命中就把那段换成一句提示，
+    再把前面的正常内容放出去。扣 80 字足以让跨 chunk 的原文被拼齐。
+    """
+
+    HOLD = 80
+
+    def __init__(self, system_prompt=""):
+        pats = []
+        for piece in re.split(r"[。；\n]", system_prompt or ""):
+            piece = piece.strip()
+            # 太短的片段容易误伤正常回答，只认 20 字以上的原文
+            if len(piece) >= 20:
+                pats.append(piece)
+        pats.sort(key=len, reverse=True)   # 长的先替换，免得被短的切碎
+        self._pats = pats
+        self._buf = ""
+        self.hit = False
+
+    def feed(self, text):
+        if not self._pats or not text:
+            return text
+        self._buf = self._scrub(self._buf + text)
+        if len(self._buf) <= self.HOLD:
+            return ""
+        cut = len(self._buf) - self.HOLD
+        out, self._buf = self._buf[:cut], self._buf[cut:]
+        return out
+
+    def flush(self):
+        out = self._scrub(self._buf)
+        self._buf = ""
+        return out
+
+    def _scrub(self, text):
+        for pat in self._pats:
+            if pat in text:
+                self.hit = True
+                text = text.replace(pat, "…（这段像是塔菲的底层设定，不贴出来喵）")
+        return text
+
+
 _STICKER_MARK = re.compile(r"\[\s*sticker\s*:\s*([a-zA-Z_]+)\s*\]", re.I)
 _MARK_PREFIX = "[sticker:"
 
@@ -219,6 +265,8 @@ class TaffyAgent:
                 finish_reason = None
                 chunks = []
                 splitter = _StickerStream(STICKER_LIMIT, stickers_sent)
+                # 每轮都新起一个：工具轮之间各自 flush
+                guard = _LeakGuard(settings.system_prompt())
                 try:
                     for kind, payload in stream_chat(
                         _sendable(self.messages), TOOLS, model,
@@ -235,12 +283,21 @@ class TaffyAgent:
                             # 正文里可能夹着 [sticker:mood]，边收边切开
                             for ev, value in splitter.feed(payload):
                                 if ev == "content":
-                                    yield {"type": "content", "text": value}
+                                    out = guard.feed(value)
+                                    if out:
+                                        yield {"type": "content", "text": out}
                                 else:
                                     yield {"type": "sticker", "mood": value}
                     # 这一轮收尾了，把还没吐的尾巴补上
                     for ev, value in splitter.flush():
-                        yield {"type": "content", "text": value}
+                        if ev == "content":
+                            out = guard.flush()
+                            if out:
+                                yield {"type": "content", "text": out}
+                        else:
+                            yield {"type": "sticker", "mood": value}
+                    if guard.hit:
+                        print("[leak-guard] 拦下一段疑似系统提示原文", file=sys.stderr)
                 except Exception as exc:
                     last_round = "".join(chunks)
                     yield {"type": "error", "message": f"模型请求失败：{exc}"}
