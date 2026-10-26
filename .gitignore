@@ -2,6 +2,8 @@
 # .env* 覆盖所有备份（.env.before-xxx 这种同样含密钥）
 .env
 .env*
+# .env.example 是模板（不含密钥），要进仓库
+!.env.example
 
 # 后台管理存下来的配置（模型、key），同样不能提交
 admin.json
