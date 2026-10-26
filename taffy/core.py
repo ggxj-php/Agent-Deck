@@ -170,6 +170,41 @@ def _sticker_moods(args):
     return []
 
 
+_IMAGE_MARK = re.compile(r"\[图片 #([0-9a-f]{6,32})")
+
+
+def _rehydrate(messages, max_images=3, window=2):
+    """把最近一两轮里带 [图片 #id] 标记的消息，重新塞回图片（多模态）。
+
+    图片不常驻历史——几百 KB 的 base64 每轮重发太贵。但「刚从上下文里掉出去的图」
+    模型应该有短期记忆，所以最近一两轮由服务端自动放回去，不用它自己判断要不要重看。
+    超过这个窗口就只剩摘要了，细节得靠 read_img 回看原图。
+    """
+    seen_users = 0
+    for index in range(len(messages) - 1, 0, -1):
+        message = messages[index]
+        if message.get("role") != "user":
+            continue
+        seen_users += 1
+        if seen_users > window:
+            break
+        content = message.get("content")
+        if not isinstance(content, str) or "[图片 #" not in content:
+            continue
+        ids = _IMAGE_MARK.findall(content)[:max_images]
+        parts = [{"type": "text", "text": content}]
+        for aid in ids:
+            url = uploads.data_url(aid)
+            if url:
+                parts.append({"type": "image_url", "image_url": {"url": url}})
+        if len(parts) == 1:
+            return messages        # 一张都取不到（过期清掉了），原样发
+        out = list(messages)
+        out[index] = {"role": "user", "content": parts}
+        return out
+    return messages
+
+
 def _sendable(messages):
     """发请求前剔掉非法的 assistant 消息。
 
@@ -231,22 +266,35 @@ class TaffyAgent:
         resume = self.cut_off and _is_resume(user_input)
         self.cut_off = False
 
-        # 这一轮上传的图片先过一遍：校验魔术字节 → 落盘到 workspace/uploads/
-        # （只认真图片，data URL 上的 MIME 和扩展名都不信）
+        # 这一轮上传的图片：魔术字节校验 → 解码重编码（洗 polyglot、剥 EXIF）
+        # → 落盘到 workspace/uploads/ → 归一化后的图直接进多模态请求
         incoming = []
         if image:
             incoming.append(image)
         if images:
             incoming.extend(images)
-        saved_paths, image_notes = uploads.save_images(incoming)
-        image_hint = uploads.hint_text(saved_paths, image_notes)
+        refs, image_notes = uploads.save(incoming)
+        summaries = uploads.summarize(refs) if refs else {}
+        markers = uploads.marker_text(refs, summaries, image_notes)
 
+        image_slot = None
         if resume:
             self.messages.append({"role": "user", "content": RESUME_INSTRUCTION})
+        elif refs:
+            text = user_input or "看看这几张图喵"
+            if markers:
+                text = text + "\n\n" + markers
+            parts = [{"type": "text", "text": text}]
+            for ref in refs:
+                url = uploads.data_url(ref["id"])
+                if url:
+                    parts.append({"type": "image_url", "image_url": {"url": url}})
+            self.messages.append({"role": "user", "content": parts})
+            image_slot = len(self.messages) - 1
         else:
             content = user_input or ""
-            if image_hint:
-                content = (content + "\n\n" if content else "") + image_hint
+            if markers:
+                content = (content + "\n\n" if content else "") + markers
             self.messages.append({"role": "user", "content": content})
 
         # 带图这一轮整套走图片那套配置（模型 + key + 接口地址），纯文字走聊天那套，
@@ -254,9 +302,7 @@ class TaffyAgent:
         # 工具循环里图片还在历史里，所以整轮都用同一套，不会中途换来换去。
         # 网页上那个「思考」开关：不传就按「开」处理，跟以前的行为一致。
         think = True if thinking is None else bool(thinking)
-        # 图不再作为多模态内容进上下文了，一律走聊天模型；
-        # 真正「看图」发生在 read_img 工具里（那边用图片模型）
-        vision = False
+        vision = image_slot is not None
         model = settings.model_for(vision=vision)
         api_key = settings.key_for(vision=vision)
         base_url = settings.base_url_for(vision=vision)
@@ -274,7 +320,7 @@ class TaffyAgent:
                 guard = _LeakGuard(settings.system_prompt())
                 try:
                     for kind, payload in stream_chat(
-                        _sendable(self.messages), TOOLS, model,
+                        _sendable(_rehydrate(self.messages)), TOOLS, model,
                         api_key=api_key, base_url=base_url, thinking=think,
                     ):
                         if kind == "message":
@@ -400,9 +446,14 @@ class TaffyAgent:
             yield {"type": "content", "text": "喵呜…工具调太多次了，塔菲脑子转不动了喵"}
             yield {"type": "done", "context": self.context_usage()}
         finally:
-            # 这一轮结束（正常 / 报错 / 被取消）都把落盘的临时图片删干净，
-            # 服务器上不留雏草姬上传的原图
-            uploads.cleanup(saved_paths)
+            # 这一轮跑完，把多模态大块换成「标记 + 摘要」：
+            # 图还在 workspace/uploads/，最近一两轮会自动 rehydrate 回来，
+            # 更久远的只能靠摘要回忆，细节让塔菲自己 read_img 回看原图。
+            if image_slot is not None:
+                self.messages[image_slot] = {
+                    "role": "user",
+                    "content": ((user_input + "\n") if user_input else "") + markers,
+                }
 
             # 这一轮没正常结束（网络掐断 / 浏览器关了 / 生成器被取消）：
             # 把已经说出去的那段正文补进历史，用户发「继续」时模型才知道说到哪儿了。
