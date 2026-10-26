@@ -9,6 +9,7 @@
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import sys
 import time
@@ -73,14 +74,23 @@ def verify_password(password, stored):
 # ---------------- 校验 ----------------
 
 
+# 用户名只认这些字符：
+#   ASCII 字母数字 + _ -  → 英文名
+#   中日韩统一表意文字（含扩展 A / 兼容区）→ 中文名
+# 不用 str.isalnum()：它还会放行西里尔字母、希腊字母、全角字母，
+# 于是「аdmin」（а 是俄文字母）看起来和 admin 一模一样却能注册，属于同形字伪装。
+_NAME_CHARS = re.compile(
+    r"^[A-Za-z0-9_\-\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+$"
+)
+
+
 def check_name(name):
-    """用户名：3~20 位，中文 / 字母 / 数字 / _ - 。"""
+    """用户名：3~20 位，中文 / 英文字母 / 数字 / _ - 。"""
     name = (name or "").strip()
     if not (NAME_MIN <= len(name) <= NAME_MAX):
         return f"用户名要 {NAME_MIN}~{NAME_MAX} 个字"
-    for ch in name:
-        if not (ch.isalnum() or ch in "_-"):
-            return "用户名只能用中文 / 字母 / 数字 / _ - "
+    if not _NAME_CHARS.match(name):
+        return "用户名只能用中文 / 英文字母 / 数字 / _ -"
     return ""
 
 
@@ -121,9 +131,12 @@ def create_user(name, password, invited_by="", is_admin=False, note=""):
         return None, err
     now = time.time()
     with db.cursor() as conn:
-        exists = conn.execute("SELECT 1 FROM users WHERE name = ?", (name,)).fetchone()
+        # 大小写不同也当重名：Admin / admin 同时存在容易被冒充
+        exists = conn.execute(
+            "SELECT 1 FROM users WHERE lower(name) = lower(?)", (name,)
+        ).fetchone()
         if exists:
-            return None, "这个名字被占了"
+            return None, "这个名字被占了（大小写不同的也算同名）"
         code = new_invite_code()
         for _ in range(12):
             if not conn.execute("SELECT 1 FROM users WHERE invite_code = ?", (code,)).fetchone():

@@ -179,3 +179,24 @@ def test_剩余时间是中文的():
     assert auth._left_text(5 * 3600 + 20 * 60) == "5 小时 20 分"
     assert auth._left_text(8 * 60) == "8 分钟"
     assert auth._left_text(10) == "1 分钟"           # 不足一分钟也说 1 分钟
+
+
+def test_用户名只认中文和英文字母数字():
+    # 正常
+    assert auth.check_name("塔菲塔菲") == ""
+    assert auth.check_name("user_01-x") == ""
+    assert auth.check_name("123456") == ""
+    # 危险字符
+    for bad in ("<script>", 'a"b', "a'b", "admin';--", "../etc", "a b", "abc\ndef",
+                "ad\u200bmin", "塔菲😀"):
+        assert auth.check_name(bad), f"{bad!r} 应该被拒"
+    # 同形字：西里尔 / 希腊 / 全角，看着像 admin 但其实是别的字符
+    for bad in ("аdmin", "αdmin", "ａｄｍｉｎ"):
+        assert auth.check_name(bad), f"{bad!r} 应该被拒（同形字伪装）"
+
+
+def test_大小写不同的同名不能注册():
+    user, err = auth.create_user("Alice", "password123")
+    assert not err, err
+    dup, err = auth.create_user("alice", "password123")
+    assert dup is None and "被占" in err
