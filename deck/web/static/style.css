@@ -1557,6 +1557,20 @@ body.admin .card input[type="file"] { padding: 8px 10px; font-size: 13px; }
   background: #fff;
 }
 
+/* ---------- 内联 SVG 卡片（结构化图）---------- */
+.artifact-svg {
+  padding: 10px 12px 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.artifact-svg svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+}
+.artifact-inline .artifact-bar { border-bottom: 1px solid var(--line); }
+
 /* ---------- MathJax 公式 ---------- */
 .math-tex { font-size: 1.02em; }
 

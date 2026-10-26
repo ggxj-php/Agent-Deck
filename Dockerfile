@@ -30,6 +30,12 @@ RUN if [ "$WITH_TOOLCHAINS" = "1" ]; then \
         rm -rf /var/lib/apt/lists/*; \
     fi
 
+# draw_diagram 的排版依赖：graphviz 提供 dot，fonts-noto-cjk 让 dot 能正确量中文宽度
+# （没装也能跑，会自动退回内置简易布局）
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends graphviz fonts-noto-cjk && \
+    rm -rf /var/lib/apt/lists/*
+
 # 先装依赖，代码改动时不会把这一层缓存冲掉
 COPY requirements.txt requirements.lock.txt ./
 RUN python -m pip install --upgrade pip && pip install -r requirements.txt

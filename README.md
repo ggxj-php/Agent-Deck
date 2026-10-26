@@ -95,6 +95,10 @@ Agent-Deck/
 - 依赖：
 
 ```bash
+# 结构化画图（draw_diagram）想要最好的排版，装一下 graphviz + 中文字体：
+#   apt-get install -y graphviz fonts-noto-cjk
+# （不装也能跑，会自动退回内置布局）
+
 # 推荐：直接用依赖清单（范围版本）
 pip install -r requirements.txt
 
@@ -108,6 +112,8 @@ pip install -r requirements.lock.txt
 | `requests` | 联网搜索 / 打开链接 |
 | `python-dotenv` | 读 `.env` |
 | `pypdf` / `python-docx` | 知识库解析 PDF / DOCX；`read_pdf` / `read_doc` 也靠它们 |
+| `graphviz`（系统包）| **可选**，`draw_diagram` 的排版引擎：树 / 流程图 / ER / 数据流图 / 架构图交给 `dot` 自动布局。没装也能用（退回内置简易布局）。`apt-get install -y graphviz` |
+| `fonts-noto-cjk`（系统包）| **可选**，配合 graphviz：`dot` 靠它量中文文字宽度，缺了中文标签会算窄、框偏小。`apt-get install -y fonts-noto-cjk`（Dockerfile / CI 已自带）|
 | `pillow` | **抽 PDF 里的内嵌图必须装**（`pypdf` 的 `page.images` 依赖它；不装会静默返回「没有图」）；上传图片的解码 / 重编码 / 去 EXIF 也用它 |
 | `jieba` | 中文分词 |
 | `numpy` | 知识库的打分（倒排索引和向量都靠它） |
@@ -462,7 +468,7 @@ python -m deck.web
 | `read_pdf` | 按页抽 PDF 文字（带页码），`pages` 支持 `1-5` / `1,4,7`；扫描页和插图可交给视觉模型看 |
 | `read_doc` | 读 `.docx` 的段落、表格和内嵌图（老式 `.doc` 要先另存） |
 | `read_img` | 看工作区里的一张图，走和聊天发图同一条多模态链路，可带 prompt 指定重点 |
-| `draw_diagram` | **结构化画图**：树 / 流程图 / 关系图 / 数据流图 / 架构图 / 时序图 / 图表 / 时间线 / ER 图，模型只给几十 token 的节点数据，服务端生成 SVG（比手写 HTML 快一个数量级）|
+| `draw_diagram` | **结构化画图**：树 / 流程图 / 关系图 / 数据流图 / 架构图 / 时序图 / 图表 / 时间线 / ER 图。模型只给几十 token 的节点数据，服务端生成 SVG——树 / 流程 / 关系 / DFD / ER / 架构这几类交给 **Graphviz（dot）自动布局**，其余内置渲染；没装 graphviz 会自动退回内置布局（功能不丢）。比让模型手写整段 HTML 快一个数量级 |
 | `render_html` | 写一段 HTML 直接渲染成聊天气泡里的卡片（SVG / canvas / CSS 动画都行，四层 XSS 防护），用在创意海报 / 界面草图 / 动画这类自由排版 |
 
 ## 工程计算与教学仿真

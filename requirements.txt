@@ -1,5 +1,11 @@
 # 运行依赖（范围写法，方便装在不同 Python / 平台上）
 # 想复现线上那套精确版本，用 requirements.lock.txt
+#
+# 除 pip 包外，draw_diagram（结构化画图）还有两个**可选**系统依赖：
+#   graphviz        → 提供 /usr/bin/dot，负责树 / 流程图 / ER / DFD / 架构图的自动布局
+#   fonts-noto-cjk  → 中文字体，dot 量文字宽度靠它，缺了中文标签会算窄、框会偏小
+# 装法：apt-get install -y graphviz fonts-noto-cjk（Dockerfile / CI 已经带上了）
+# 没装也能跑：会自动退回内置的简易布局，功能不丢、排版差一点。
 
 openai>=1.30
 requests>=2.28

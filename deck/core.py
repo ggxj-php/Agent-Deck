@@ -12,6 +12,7 @@ from . import context, settings, uploads
 from .config import EXIT_WORDS, MAX_ROUNDS, RESUME_INSTRUCTION, RESUME_WORDS, STICKER_LIMIT
 from .llm import stream_chat
 from .tools import active_specs, execute
+from .tools import diagram as diagram_tool
 from .tools.render import append_marks, strip_marks
 from .tools.sticker import MOODS, pick_sticker
 
@@ -564,7 +565,14 @@ class DeckAgent:
                         if payload.get("artifact_id"):
                             aid = payload["artifact_id"]
                             title = payload.get("title") or ""
-                            yield {"type": "artifact", "id": aid, "title": title}
+                            event = {"type": "artifact", "id": aid, "title": title}
+                            if name == "draw_diagram":
+                                # 结构化图的 SVG 直接内联进气泡：不走 iframe，
+                                # 免得卡片里大片空白 / 高度算不对（用户会以为没画出来）
+                                svg = diagram_tool.svg_of(aid)
+                                if svg:
+                                    event["svg"] = svg
+                            yield event
                             # 产物标记写进「刚调工具的那条 assistant」正文末尾
                             for item in reversed(self.messages):
                                 if item.get("role") == "assistant":

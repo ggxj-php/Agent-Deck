@@ -1199,11 +1199,42 @@ function addArtifact(turn, event) {
   const id = String(event.id || '').replace(/[^0-9a-f]/gi, '');
   if (!id) return;
 
-  turn.bubble.appendChild(buildArtifactCard(id, event.title));
+  // 结构化图（draw_diagram）直接内联 SVG：iframe 那套要算高度、还会留大片空白，
+  // 手机上看着像「什么都没画」。内联后高度天然自适应，点「放大」还是走产物页。
+  if (event.svg) {
+    turn.bubble.appendChild(buildInlineSvgCard(id, event.title, event.svg));
+  } else {
+    turn.bubble.appendChild(buildArtifactCard(id, event.title));
+  }
   updateToBottom();
 }
 
 /* 画图产物卡片：流式时和刷新后渲染历史都走这一个函数 */
+/* 内联 SVG 卡片：标题栏 + 直接塞进气泡的 SVG（可点放大看原图） */
+function buildInlineSvgCard(id, titleText, svg) {
+  const wrap = el('div', 'artifact artifact-inline');
+  const bar = el('div', 'artifact-bar');
+  const title = el('span', 'artifact-title');
+  title.textContent = titleText || '画的图';
+  const open = el('a', 'artifact-open');
+  open.href = `/api/artifact/${id}`;
+  open.target = '_blank';
+  open.rel = 'noopener noreferrer';
+  open.textContent = '放大';
+  bar.appendChild(title);
+  bar.appendChild(open);
+
+  const body = el('div', 'artifact-svg');
+  // SVG 是服务端生成的，还是要过一遍净化（防标签/属性注入）
+  body.innerHTML = DOMPurify.sanitize(String(svg || ''), {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    ADD_TAGS: ['use'],
+  });
+  wrap.appendChild(bar);
+  wrap.appendChild(body);
+  return wrap;
+}
+
 function buildArtifactCard(id, titleText) {
   const wrap = el('div', 'artifact');
   const bar = el('div', 'artifact-bar');

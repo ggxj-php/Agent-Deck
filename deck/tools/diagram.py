@@ -10,6 +10,10 @@
 """
 import json
 import math
+import re
+import shutil
+import subprocess
+import threading
 
 from . import render
 
@@ -233,7 +237,20 @@ def _layered_positions(nodes, edges, start=None):
     return pos, sizes, width, height
 
 
-def _orth_arrow(x1, y1, x2, y2, label="", color=LINE):
+def _label_slots(edges_geom):
+    """同一条水平线上挤了好几条连线时，标签会叠成一团——按组错开。"""
+    groups = {}
+    slots = []
+    offsets = [0, 18, -18, 34, -34, 50, -50]
+    for geom in edges_geom:
+        key = round((geom[1] + geom[3]) / 2 / 12)
+        idx = groups.get(key, 0)
+        groups[key] = idx + 1
+        slots.append(offsets[idx % len(offsets)])
+    return slots
+
+
+def _orth_arrow(x1, y1, x2, y2, label="", color=LINE, label_dy=0, label_dx=0):
     """正交折线箭头：从下沿出发 → 中间水平段 → 目标上沿。
 
     以前是「中心点直连 + 写死偏移」，节点一宽就穿进节点里；改成按节点边界走折线，
@@ -245,8 +262,8 @@ def _orth_arrow(x1, y1, x2, y2, label="", color=LINE):
     parts = [f'<path d="{d}" fill="none" stroke="{color}" stroke-width="1.5"/>']
     parts.append(_arrow(x2, mid_y, x2, y2, "", color=color))
     if label:
-        lx = (x1 + x2) / 2
-        ly = mid_y - 7
+        lx = (x1 + x2) / 2 + label_dx
+        ly = mid_y - 7 + label_dy
         parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="12" fill="#5a6480" '
                      f'text-anchor="middle" font-family="system-ui, sans-serif">'
                      f'{_esc(label)}</text>')
@@ -328,17 +345,18 @@ def draw_flow(data, title=""):
 
     pos, sizes, width, height = _layered_positions(nodes, edges, data.get("start"))
     body = []
+    geom = []
     for a, b, label in edges:
-        if a not in pos or b not in pos:
-            continue
-        x1, y1 = pos[a]
-        x2, y2 = pos[b]
+        if a in pos and b in pos:
+            geom.append((a, b, pos[a][0], pos[a][1], pos[b][0], pos[b][1], label))
+    slots = _label_slots([(g[2], g[3], g[4], g[5]) for g in geom])
+    for (a, b, x1, y1, x2, y2, label), dy in zip(geom, slots):
         w1, h1 = sizes[a]
         w2, h2 = sizes[b]
         if abs(y2 - y1) < 1:                     # 同一层：水平箭头
             body.append(_arrow(x1 + w1 / 2 + 4, y1, x2 - w2 / 2 - 6, y2, label))
         else:
-            body.append(_orth_arrow(x1, y1 + h1 / 2, x2, y2 - h2 / 2, label))
+            body.append(_orth_arrow(x1, y1 + h1 / 2, x2, y2 - h2 / 2, label, label_dy=dy))
     for n in nodes:
         x, y = pos[n["id"]]
         w, h = sizes[n["id"]]
@@ -416,17 +434,19 @@ def draw_dataflow(data, title=""):
     pos, sizes, width, height = _layered_positions(nodes, edges, data.get("start"))
     body = []
 
+    geom = []
     for a, b, label in edges:
-        if a not in pos or b not in pos:
-            continue
-        x1, y1 = pos[a]
-        x2, y2 = pos[b]
+        if a in pos and b in pos:
+            geom.append((a, b, pos[a][0], pos[a][1], pos[b][0], pos[b][1], label))
+    slots = _label_slots([(g[2], g[3], g[4], g[5]) for g in geom])
+
+    for (a, b, x1, y1, x2, y2, label), dy in zip(geom, slots):
         w1, h1 = sizes[a]
         w2, h2 = sizes[b]
         if abs(y2 - y1) < 1:                       # 同一层：水平箭头
             body.append(_arrow(x1 + w1 / 2 + 4, y1, x2 - w2 / 2 - 6, y2, label))
         else:
-            body.append(_orth_arrow(x1, y1 + h1 / 2, x2, y2 - h2 / 2, label))
+            body.append(_orth_arrow(x1, y1 + h1 / 2, x2, y2 - h2 / 2, label, label_dy=dy))
 
     for n in nodes:
         x, y = pos[n["id"]]
@@ -794,6 +814,269 @@ def draw_er(data, title=""):
     return _canvas(total_w, total_h, "".join(body), "")
 
 
+# 最近画过的 SVG：前端要「内联显示」用，工具回执里不带（不然几千 token 白烧）
+_SVG_CACHE = {}
+_SVG_ORDER = []
+
+
+def svg_of(aid):
+    """按产物 id 取回 SVG 源码（卡片内联渲染用）。取不到返回空串。"""
+    return _SVG_CACHE.get(str(aid or ""), "")
+
+
+def _remember_svg(aid, svg):
+    _SVG_CACHE[aid] = svg
+    _SVG_ORDER.append(aid)
+    while len(_SVG_ORDER) > 200:
+        old_aid = _SVG_ORDER.pop(0)
+        _SVG_CACHE.pop(old_aid, None)
+
+
+
+# ---------------- Graphviz：布局交给专业工具 ----------------
+# 自己写分层/正交连线/标签避让永远有边角 bug，这类图 Graphviz 做了几十年。
+# 装了 dot 就用它排版；没装（或出错）就退回内置简易布局，功能不丢。
+DOT_FONT = "Noto Sans CJK SC"
+_DOT_BIN = shutil.which("dot")
+_DOT_LOCK = threading.Lock()
+
+
+def _dot_svg(dot_src, timeout=8):
+    """把 DOT 交给 dot 生成响应式 SVG（失败返回空串，调用方退回内置布局）。"""
+    if not _DOT_BIN:
+        return ""
+    try:
+        with _DOT_LOCK:
+            proc = subprocess.run([_DOT_BIN, "-Tsvg"], input=dot_src.encode("utf-8"),
+                                  capture_output=True, timeout=timeout)
+        if proc.returncode != 0:
+            return ""
+        svg = proc.stdout.decode("utf-8", "ignore")
+    except Exception:                        # noqa: BLE001
+        return ""
+    start = svg.find("<svg")
+    if start < 0:
+        return ""
+    svg = svg[start:]
+    head_end = svg.find(">")
+    head = svg[:head_end]
+    head = re.sub(r'\s(?:width|height)="[^"]*"', "", head)
+    head = head.replace("<svg", '<svg width="100%"', 1)
+    return head + svg[head_end:]
+
+
+def _dot_attr(attrs):
+    return " ".join(f'{k}="{v}"' for k, v in attrs.items() if v not in (None, ""))
+
+
+def _dot_colors(color):
+    fill, stroke, text = _color_of(color)
+    return {"fillcolor": fill, "color": stroke, "fontcolor": text}
+
+
+def _dot_label(text):
+    return (str(text if text is not None else "")
+            .replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n"))
+
+
+def _dot_graph(rankdir="TB", splines="ortho", nodesep=0.45, ranksep=0.6, pad=0.22):
+    return (
+        "digraph G {\n"
+        f'  graph [rankdir={rankdir}, bgcolor="transparent", splines={splines}, '
+        f'nodesep={nodesep}, ranksep={ranksep}, pad={pad}, fontname="{DOT_FONT}"];\n'
+        '  node [shape=box, style="rounded,filled", fontname="' + DOT_FONT + '", fontsize=13, '
+        'color="#9a9aae", fillcolor="#ffffff", fontcolor="#33333d", penwidth=1.4, '
+        'margin="0.16,0.09"];\n'
+        '  edge [color="#7d8396", fontname="' + DOT_FONT + '", fontsize=11, arrowsize=0.7, '
+        'penwidth=1.3, fontcolor="#4d5262"];\n'
+    )
+
+
+def _dot_tree(data):
+    nodes = _norm_nodes(data.get("nodes"))
+    edges = _norm_edges(data.get("edges"))
+    if not nodes:
+        return ""
+    lines = [_dot_graph(rankdir="TB", splines="polyline", ranksep=0.55)]
+    for n in nodes:
+        attrs = {"label": _dot_label(n["label"])}
+        attrs.update(_dot_colors(n.get("color")))
+        if len(n["label"]) <= 3:
+            attrs.update({"shape": "circle", "width": "0.62", "fixedsize": "false"})
+        lines.append(f'  "n_{_dot_label(n["id"])}" [{_dot_attr(attrs)}];')
+    for a, b, _ in edges:
+        lines.append(f'  "n_{_dot_label(a)}" -> "n_{_dot_label(b)}";')
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _dot_flow(data):
+    nodes = _norm_nodes(data.get("nodes"))
+    edges = _norm_edges(data.get("edges"))
+    if not nodes:
+        return ""
+    lines = [_dot_graph(rankdir="TB", splines="ortho", ranksep=0.5)]
+    for n in nodes:
+        kind = (n.get("kind") or "process").strip().lower()
+        attrs = {"label": _dot_label(n["label"])}
+        if kind in ("start", "end", "起", "止"):
+            attrs.update({"shape": "box", "style": "rounded,filled",
+                          "fillcolor": "#d8f3e0", "color": "#3f9a63",
+                          "fontcolor": "#1d5a36"})
+        elif kind in ("decision", "判断", "条件"):
+            attrs.update({"shape": "diamond", "style": "filled",
+                          "fillcolor": "#ffefc9", "color": "#c39327",
+                          "fontcolor": "#6b4d08", "margin": "0.04,0.02"})
+        else:
+            attrs.update(_dot_colors(n.get("color")))
+        lines.append(f'  "n_{_dot_label(n["id"])}" [{_dot_attr(attrs)}];')
+    for a, b, label in edges:
+        attrs = {"label": _dot_label(label)} if label else {}
+        lines.append(f'  "n_{_dot_label(a)}" -> "n_{_dot_label(b)}" [{_dot_attr(attrs)}];')
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _dot_graph_plain(data):
+    nodes = _norm_nodes(data.get("nodes"))
+    edges = _norm_edges(data.get("edges"))
+    if not nodes:
+        return ""
+    lines = [_dot_graph(rankdir="LR", splines="spline", ranksep=0.7)]
+    for n in nodes:
+        attrs = {"label": _dot_label(n["label"]),
+                 "shape": "ellipse" if n.get("kind") == "circle" else "box"}
+        attrs.update(_dot_colors(n.get("color")))
+        lines.append(f'  "n_{_dot_label(n["id"])}" [{_dot_attr(attrs)}];')
+    for a, b, label in edges:
+        attrs = {"label": _dot_label(label)} if label else {}
+        lines.append(f'  "n_{_dot_label(a)}" -> "n_{_dot_label(b)}" [{_dot_attr(attrs)}];')
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _dot_dataflow(data):
+    nodes = _norm_nodes(data.get("nodes"))
+    edges = _norm_edges(data.get("edges"))
+    if not nodes:
+        return ""
+    lines = [_dot_graph(rankdir="LR", splines="ortho", nodesep=0.5, ranksep=0.75)]
+    for n in nodes:
+        k = _dfd_kind(n)
+        attrs = {"label": _dot_label(n["label"])}
+        if k == "entity":
+            attrs.update({"shape": "box", "style": "rounded,filled",
+                          "fillcolor": "#dbe9ff", "color": "#3c73c4",
+                          "fontcolor": "#1d4076"})
+        elif k == "store":
+            attrs.update({"shape": "folder", "style": "filled",
+                          "fillcolor": "#eceef2", "color": "#a0a4b0",
+                          "fontcolor": "#3d404a"})
+        else:
+            attrs.update({"shape": "box", "style": "rounded,filled",
+                          "fillcolor": "#d8f3e0", "color": "#3f9a63",
+                          "fontcolor": "#1d5a36"})
+        lines.append(f'  "n_{_dot_label(n["id"])}" [{_dot_attr(attrs)}];')
+    for a, b, label in edges:
+        attrs = {"label": _dot_label(label)} if label else {}
+        lines.append(f'  "n_{_dot_label(a)}" -> "n_{_dot_label(b)}" [{_dot_attr(attrs)}];')
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _dot_er(data):
+    entities = data.get("entities") or data.get("tables") or []
+    relations = data.get("relations") or data.get("links") or []
+    if not entities:
+        return ""
+    lines = [_dot_graph(rankdir="LR", splines="spline", nodesep=0.6, ranksep=0.9)]
+    names = []
+    for ent in entities:
+        if isinstance(ent, dict):
+            name = str(ent.get("name") or ent.get("label") or "")
+            attrs_list = ent.get("attributes") or ent.get("fields") or []
+        else:
+            name, attrs_list = str(ent), []
+        names.append(name)
+        rows = ""
+        for attr in attrs_list[:12]:
+            if isinstance(attr, dict):
+                aname = str(attr.get("name") or attr.get("label") or "")
+                mark = "🔑 " if (attr.get("pk") or attr.get("primary")) else \
+                       ("FK " if (attr.get("fk") or attr.get("foreign")) else "")
+            else:
+                aname, mark = str(attr), ""
+            rows += f'<tr><td align="left" balign="left">{_esc(mark + aname)}</td></tr>'
+        if not rows:
+            rows = '<tr><td align="left">（暂无属性）</td></tr>'
+        label = (f'<<table border="0" cellborder="1" cellspacing="0" cellpadding="6" '
+                 f'bgcolor="white"><tr><td bgcolor="#dbe9ff"><b>{_esc(name)}</b></td></tr>'
+                 f'{rows}</table>>')
+        lines.append(f'  e{len(names) - 1} [shape=none, margin=0, label={label}];')
+    idx = {name: f"e{i}" for i, name in enumerate(names)}
+    for rel in relations:
+        if not isinstance(rel, dict):
+            continue
+        a, b = str(rel.get("from")), str(rel.get("to"))
+        if a not in idx or b not in idx:
+            continue
+        attrs = {}
+        if rel.get("label"):
+            attrs["label"] = _dot_label(rel.get("label"))
+        card = str(rel.get("cardinality") or "").strip()
+        if ":" in card:
+            tail, head = [x.strip() for x in card.split(":", 1)]
+            attrs["taillabel"] = tail
+            attrs["headlabel"] = head
+            attrs["labeldistance"] = "1.7"
+        lines.append(f'  {idx[a]} -> {idx[b]} [{_dot_attr(attrs)}];')
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _dot_arch(data):
+    layers = data.get("layers") or []
+    if not layers:
+        return ""
+    lines = [_dot_graph(rankdir="TB", splines="line", nodesep=0.35, ranksep=0.55)]
+    lines.append('  node [shape=box, style="rounded,filled", fillcolor="#dbe9ff", '
+                 'color="#3c73c4", fontcolor="#1d4076"];')
+    prev_ids = []
+    for li, layer in enumerate(layers):
+        if isinstance(layer, dict):
+            lname = str(layer.get("name") or layer.get("label") or "")
+            items = layer.get("items") or layer.get("nodes") or []
+        else:
+            lname, items = "", (layer if isinstance(layer, list) else [layer])
+        ids = []
+        for ii, item in enumerate(items[:8]):
+            text = str(item.get("label") if isinstance(item, dict) else item)
+            nid = f"l{li}_{ii}"
+            ids.append(nid)
+            lines.append(f'  {nid} [label="{_dot_label(_clip(text, 18))}"];')
+        if ids:
+            lines.append("  {rank=same; " + "; ".join(ids) + "}")
+        if lname:
+            lines.append(f'  subgraph cluster_{li} {{ label="{_dot_label(lname)}"; '
+                         f'style="rounded"; color="#d8e2f0"; fontcolor="#4d5262"; '
+                         + " ".join(ids) + " }")
+        for prev in prev_ids:
+            lines.append(f'  {prev} -> {ids[0]} [style=invis];')
+        prev_ids = ids
+    lines.append("}")
+    return "\n".join(lines)
+
+
+GRAPHVIZ_BUILDERS = {
+    "tree": _dot_tree,
+    "flow": _dot_flow,
+    "graph": _dot_graph_plain,
+    "dataflow": _dot_dataflow,
+    "er": _dot_er,
+    "arch": _dot_arch,
+}
+
+
 DRAWERS = {
     "tree": draw_tree,
     "flow": draw_flow,
@@ -856,12 +1139,24 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
                 if k in kwargs and kwargs[k] is not None}
     if not isinstance(data, dict) or not data:
         return json.dumps({"error": "data 是空的，至少要给节点/层/条目"}, ensure_ascii=False)
-    try:
-        svg = drawer(data, "")      # 图名由卡片标题显示，SVG 里不再重复画
-    except ValueError as exc:
-        return json.dumps({"error": str(exc)}, ensure_ascii=False)
-    except Exception as exc:                     # noqa: BLE001
-        return json.dumps({"error": f"画图失败：{type(exc).__name__}: {exc}"}, ensure_ascii=False)
+    svg = ""
+    builder = GRAPHVIZ_BUILDERS.get(key)
+    if builder:
+        try:
+            dot_src = builder(data)
+            if dot_src:
+                svg = _dot_svg(dot_src)
+        except Exception:                # noqa: BLE001
+            svg = ""
+    if not svg:
+        # 没装 graphviz（或它出错）时退回内置简易布局，功能不丢
+        try:
+            svg = drawer(data, "")      # 图名由卡片标题显示，SVG 里不再重复画
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception as exc:                 # noqa: BLE001
+            return json.dumps({"error": f"画图失败：{type(exc).__name__}: {exc}"},
+                              ensure_ascii=False)
 
     doc = (
         '<!doctype html><html><head><meta charset="utf-8">'
@@ -876,6 +1171,7 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
     if script:
         doc = doc.replace("</body>", f"<script>{script}</script></body>", 1)
     aid = render._store(doc, str(title or ""))
+    _remember_svg(aid, svg)
     return json.dumps({
         "ok": True,
         "artifact_id": aid,
