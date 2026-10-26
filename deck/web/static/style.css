@@ -2036,7 +2036,7 @@ sup, sub { font-size: 0.72em; line-height: 0; }
   align-items: center;
   justify-content: center;
   padding: 24px 16px;
-  background: linear-gradient(160deg, #ffe6f2, #fff7fb 45%, #eef4ff);
+  background: linear-gradient(160deg, var(--pink-pale), var(--pink-mist) 45%, var(--bg));
 }
 
 .auth-card {
@@ -2046,7 +2046,7 @@ sup, sub { font-size: 0.72em; line-height: 0; }
   border: 1px solid var(--line, #f0d9e6);
   border-radius: 22px;
   padding: 28px 24px 22px;
-  box-shadow: 0 18px 40px rgba(214, 122, 173, 0.16);
+  box-shadow: 0 18px 40px rgba(60, 40, 50, 0.12);
   text-align: center;
 }
 
@@ -2055,7 +2055,7 @@ sup, sub { font-size: 0.72em; line-height: 0; }
   height: 72px;
   border-radius: 50%;
   object-fit: cover;
-  border: 3px solid #ffd6e9;
+  border: 3px solid var(--pink-pale, #ffd6e9);
 }
 
 .auth-title { margin: 10px 0 2px; font-size: 20px; }
@@ -2064,7 +2064,7 @@ sup, sub { font-size: 0.72em; line-height: 0; }
 .auth-tabs {
   display: flex;
   gap: 8px;
-  background: #fff2f8;
+  background: var(--pink-mist, #fff2f8);
   border-radius: 12px;
   padding: 4px;
   margin-bottom: 16px;
@@ -2083,9 +2083,9 @@ sup, sub { font-size: 0.72em; line-height: 0; }
 
 .auth-tab.on {
   background: #fff;
-  color: #d63f86;
+  color: var(--pink-deep, #d63f86);
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(214, 63, 134, 0.12);
+  box-shadow: 0 2px 8px rgba(60, 40, 50, 0.10);
 }
 
 .auth-form { display: flex; flex-direction: column; gap: 12px; text-align: left; }
@@ -2104,10 +2104,10 @@ sup, sub { font-size: 0.72em; line-height: 0; }
   padding: 11px 12px;
   font-size: 15px;
   outline: none;
-  background: #fffafc;
+  background: #fff;
 }
 
-.auth-field input:focus { border-color: #f39ac6; background: #fff; }
+.auth-field input:focus { border-color: var(--pink, #f39ac6); background: #fff; }
 
 .auth-submit {
   margin-top: 4px;
@@ -2117,13 +2117,13 @@ sup, sub { font-size: 0.72em; line-height: 0; }
   font-size: 15px;
   font-weight: 600;
   color: #fff;
-  background: linear-gradient(135deg, #ff8fc4, #f0569b);
+  background: linear-gradient(135deg, var(--pink-dark, #ff8fc4), var(--pink-deep, #f0569b));
   cursor: pointer;
 }
 
 .auth-submit:disabled { opacity: 0.6; cursor: default; }
 
-.auth-msg { margin: 12px 0 0; font-size: 13px; color: #d63f86; }
+.auth-msg { margin: 12px 0 0; font-size: 13px; color: var(--pink-deep, #d63f86); }
 .auth-msg.ok { color: #23a06b; }
 
 /* ================= 侧边栏（只有聊天页用，必须限定 body.chat-page，
