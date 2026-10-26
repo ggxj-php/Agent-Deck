@@ -72,6 +72,24 @@ const IMAGE_MAX_COUNT = 6;  // 一轮最多几张，和后端 uploads.MAX_COUNT 
 marked.setOptions({ gfm: true, breaks: true });
 
 /* 任何接口回 401 都说明登录过期了，直接踢回登录页，别让页面卡在死状态 */
+/* 兜底：任何没被 catch 的 JS 错都摆到状态栏上（带错误信息），
+   免得页面挂了却只显示一句「连不上服务喵」，查都没法查。 */
+window.addEventListener('error', (event) => {
+  try {
+    const status = document.getElementById('status');
+    if (status) status.textContent = '页面出错了：' + (event.message || '未知错误');
+  } catch (err) { /* 忽略 */ }
+});
+window.addEventListener('unhandledrejection', (event) => {
+  try {
+    const status = document.getElementById('status');
+    const reason = event.reason;
+    if (status) {
+      status.textContent = '页面出错了：' + ((reason && reason.message) || reason || '未知错误');
+    }
+  } catch (err) { /* 忽略 */ }
+});
+
 const _realFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const resp = await _realFetch(input, init);
@@ -551,6 +569,39 @@ function addUser(text, images) {
   scrollToBottom();
 }
 
+/* 历史里的用户消息长这样：「我发了两张图\n\n[图片 #abc123 uploads/abc123.jpg：摘要]」
+   把标记抠出来换成缩略图，剩下的当正文；塔菲的正文里夹着 [sticker:mood]，按位置拆开。 */
+const HISTORY_IMG_MARK = /\[图片 #([0-9a-f]{6,32})[^\]]*\]/g;
+
+function renderHistory(items) {
+  (items || []).forEach((item) => {
+    const text = String(item.text || '');
+    if (item.role === 'user') {
+      const ids = [];
+      const re = new RegExp(HISTORY_IMG_MARK.source, 'g');
+      let hit;
+      while ((hit = re.exec(text)) !== null) ids.push(hit[1]);
+      const body = text.replace(HISTORY_IMG_MARK, '').trim();
+      addUser(body || (ids.length ? '' : '（空消息）'),
+              ids.map((id) => `/api/uploads/${id}`));
+      return;
+    }
+    const turn = addAgent();
+    const mark = /\[\s*sticker\s*:\s*([a-zA-Z_]+)\s*\]/gi;
+    let last = 0;
+    let hit;
+    while ((hit = mark.exec(text)) !== null) {
+      const chunk = text.slice(last, hit.index);
+      if (chunk) contentChunk(turn, chunk);
+      addSticker(turn, hit[1].toLowerCase());
+      last = hit.index + hit[0].length;
+    }
+    const tail = text.slice(last);
+    if (tail) contentChunk(turn, tail);
+    if (turn.content) scheduleRender(turn.content);
+  });
+}
+
 function addAgent() {
   const row = el('div', 'msg agent');
   const avatar = el('img', 'avatar');
@@ -849,7 +900,11 @@ async function switchSession(id) {
     sessionId = id;
     messagesEl.innerHTML = '';
     const items = data.history || [];
-    renderHistory(items);
+    if (items.length) {
+      renderHistory(items);
+    } else {
+      welcome();
+    }
     paintContext(data.context);
     sessionStorage.setItem(STORAGE_KEY, sessionId);
     renderSessionList();
@@ -1486,7 +1541,11 @@ armLeaveGuard();
         sessionId = latest;
         messagesEl.innerHTML = '';
         const items = data.history || [];
-        renderHistory(items);
+        if (items.length) {
+          renderHistory(items);
+        } else {
+          welcome();          // 空会话给个开场白，别对着空白页发呆
+        }
         paintContext(data.context);
         scrollToBottom();
       }
