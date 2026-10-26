@@ -221,25 +221,32 @@ def public(pid=None):
 
 
 def avatar_path(pid=None):
-    """头像文件路径；没配就返回内置的 static/avatar.jpg。"""
+    """头像文件路径。
+
+    优先级：avatar 字段 → icon 字段 → 内置 static/avatar.jpg。
+    头像和图标互相兜底：只传了一张，三个地方（标签图标 / 后台头像 / 聊天页头像）
+    就都用同一张，不会出现「图标换了头像没换」。
+    """
     meta = current() if pid is None else _meta(pid)
-    name = os.path.basename(meta.get("avatar") or "")
-    if name:
-        path = os.path.join(_dir(meta["id"]), name)
-        if os.path.isfile(path):
-            return path
+    for key in ("avatar", "icon"):
+        name = os.path.basename(meta.get(key) or "")
+        if name:
+            path = os.path.join(_dir(meta["id"]), name)
+            if os.path.isfile(path):
+                return path
     return os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "web", "static", "avatar.jpg")
 
 
 def icon_path(pid=None):
-    """网页图标：配了 icon 用 icon，没有就跟头像一样。"""
+    """网页图标：配了 icon 用 icon，没有就跟头像一样（互相兜底）。"""
     meta = current() if pid is None else _meta(pid)
-    name = os.path.basename(meta.get("icon") or "")
-    if name:
-        path = os.path.join(_dir(meta["id"]), name)
-        if os.path.isfile(path):
-            return path
+    for key in ("icon", "avatar"):
+        name = os.path.basename(meta.get(key) or "")
+        if name:
+            path = os.path.join(_dir(meta["id"]), name)
+            if os.path.isfile(path):
+                return path
     return avatar_path(pid)
 
 
