@@ -718,6 +718,9 @@ function renderAssistantBlock(text) {
   let hit;
   while ((hit = ARTIFACT_MARK.exec(text)) !== null) {
     renderAssistantText(turn, text.slice(last, hit.index));
+    // 关键：把当前正文块「封口」，卡片后面的文字会另起一块排到卡片下方，
+    // 不然它们还会往同一个 .content 里追加，DOM 上就都跑到卡片前面去了
+    turn.content = null;
     turn.bubble.appendChild(buildArtifactCard(hit[1], hit[2] || ''));
     last = hit.index + hit[0].length;
   }
