@@ -202,8 +202,9 @@ def build_prompt():
     try:
         mode = settings.web_search_mode()
         if mode == "inline":
-            text += ("\n\n【联网搜索已由服务端内置开启：搜到的网页会自动附在你的上下文里，"
-                     "直接拿来回答就行，不用调用 web_search / open_url。】")
+            text += ("\n\n【联网搜索已由服务端内置开启：平台可能已经把搜到的网页附在你的上下文里，"
+                     "如果看到了就用它回答；**如果这一轮根本没看到任何搜索结果**（比如问的是"
+                     "实时信息、平台没触发搜索），就自己调用 web_search 补搜一次，别直接说没数据。】")
         elif mode == "tools_api":
             text += ("\n\n【web_search 已接官方搜索接口（又快又干净）：要查资料直接调用它，"
                      "一般不用再 open_url；一次提问最多搜 1~2 次。】")

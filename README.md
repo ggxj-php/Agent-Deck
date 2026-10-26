@@ -882,7 +882,9 @@ def say_hi(name: str) -> str:
 后台「模型与接口 → 用服务端内置的联网搜索」开关，控制**是让模型自己上网（enable_search）**，还是用本站的网页搜索 / 抓取（`web_search` + `open_url`）。
 
 - **两种实现自动探测**：
-  - `inline`：请求里带 `enable_search: true`，平台自己搜完把结果塞进上下文（阿里百炼 / Qwen 兼容模式）；
+  - `inline`：请求里带 `enable_search: true`，平台自己搜完把结果塞进上下文（阿里百炼 / Qwen 兼容模式）。
+    **注意：自家的 `web_search` / `open_url` 仍然保留做兜底** —— 平台是按查询自己决定搜不搜的，
+    有些问题它压根不注入结果，这时模型还得能自己补搜（线上踩过：摘掉工具后模型只能说「没搜到」）；
   - `tools_api`：独立搜索接口 `POST {base}/tools/search`，body `{query, count, need_content}`，
     返回 `{results:[{title,url,summary,content}]}`（DeepSeek 官方那套）——
     `web_search` 会改成直接调它，一次请求拿结果 + 正文，不用再抓搜索结果页。

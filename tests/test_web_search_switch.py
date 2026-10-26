@@ -40,12 +40,13 @@ def test_开关关掉就不激活(monkeypatch):
     assert settings.web_search_mode() == "none"
 
 
-def test_inline_模式摘掉自家网页工具(monkeypatch):
+def test_inline_模式也保留自家网页工具做兜底(monkeypatch):
+    """平台不注入搜索结果时，模型得还能自己搜，不能把工具摘了。"""
     from deck import settings as s
     monkeypatch.setattr(s, "web_search_mode", lambda: "inline")
     names = {spec["function"]["name"] for spec in tools.active_specs()}
-    assert "web_search" not in names
-    assert "open_url" not in names
+    assert "web_search" in names
+    assert "open_url" in names
 
 
 def test_tools_api_模式保留自家网页工具(monkeypatch):

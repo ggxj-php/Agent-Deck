@@ -142,15 +142,10 @@ def active_specs():
     """给模型看的工具清单（按后台开关过滤）。"""
     groups = enabled_groups()
     specs = [spec for spec in TOOLS if group_of(spec["function"]["name"]) in groups]
-    try:
-        from .. import settings
-        if settings.web_search_mode() == "inline":
-            # 走服务端内置搜索时，把自家的网页搜索 / 抓取工具摘掉：
-            # 模型已经有搜索结果了，再给它这两个工具只会多绕几轮
-            specs = [s for s in specs
-                     if s["function"]["name"] not in ("web_search", "open_url")]
-    except Exception:                        # noqa: BLE001
-        pass
+    # 注意：即使开了服务端内置搜索，也**不能**把 web_search / open_url 摘掉。
+    # 平台是按查询自己决定搜不搜的，有些问题它压根不注入结果；这时候模型要是连
+    # 工具都没有，就只能干瞪眼说「没搜到」（线上真踩过）。留着当兜底，提示词里
+    # 让它「没看到结果再补搜一次」就行。
     return specs
 
 
