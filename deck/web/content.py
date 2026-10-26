@@ -39,7 +39,7 @@ async def _save_body(request, target, max_bytes, label):
                 if size > max_bytes:
                     raise HTTPException(
                         status_code=413,
-                        detail=f"{label}太大了喵（上限 {max_bytes // 1024 // 1024}MB）",
+                        detail=f"{label}太大了（上限 {max_bytes // 1024 // 1024}MB）",
                     )
                 fp.write(chunk)
     except BaseException:
@@ -50,7 +50,7 @@ async def _save_body(request, target, max_bytes, label):
         raise
     if not size:
         os.remove(tmp)
-        raise HTTPException(status_code=400, detail="文件是空的喵")
+        raise HTTPException(status_code=400, detail="文件是空的")
     os.replace(tmp, target)
     return size
 
@@ -104,7 +104,7 @@ async def stickers_import(request: Request):
         except Exception as exc:
             raise HTTPException(
                 status_code=400,
-                detail=f"这个压缩包解不开喵（要标准的 .zip）：{type(exc).__name__}: {exc}",
+                detail=f"这个压缩包解不开（要标准的 .zip）：{type(exc).__name__}: {exc}",
             )
         result["library"] = stickers.library()
         return result
@@ -124,7 +124,7 @@ def _ws_dir(path):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if not os.path.isdir(full):
-        raise HTTPException(status_code=404, detail=f"没有这个目录喵：{path}")
+        raise HTTPException(status_code=404, detail=f"没有这个目录：{path}")
     return full
 
 
@@ -146,7 +146,7 @@ def _entry(full, name, base):
 
 @router.get("/api/admin/workspace")
 def workspace_list(request: Request, path: str = Query("")):
-    """列 workspace 里某个目录。跟塔菲的 list_files 看的是同一个地方。"""
+    """列 workspace 里某个目录。跟助手的 list_files 看的是同一个地方。"""
     _require(request)
     full = _ws_dir(path)
     try:
@@ -168,13 +168,13 @@ async def workspace_upload(request: Request, path: str = Query("")):
     _require(request)
     rel = (path or "").replace("\\", "/").strip().lstrip("/")
     if not rel or rel.endswith("/"):
-        raise HTTPException(status_code=400, detail="得给个文件名喵，比如 samples/dump.bin")
+        raise HTTPException(status_code=400, detail="得给个文件名，比如 samples/dump.bin")
     try:
         target = safe_path(rel)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if os.path.isdir(target):
-        raise HTTPException(status_code=400, detail=f"{rel} 是个目录喵，得给个文件名")
+        raise HTTPException(status_code=400, detail=f"{rel} 是个目录，得给个文件名")
     parent = os.path.dirname(target)
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -215,7 +215,7 @@ def _kn_path(rel):
     full = os.path.normpath(os.path.join(KNOWLEDGE_DIR, rel))
     root = os.path.normpath(KNOWLEDGE_DIR)
     if full != root and not full.startswith(root + os.sep):
-        raise HTTPException(status_code=400, detail="路径得在 knowledge/ 里面喵")
+        raise HTTPException(status_code=400, detail="路径得在 knowledge/ 里面")
     return full, rel
 
 
@@ -237,9 +237,9 @@ def _schedule_restart():
 
 def _restart_note(auto):
     if auto:
-        return (f"知识库改好了喵，{int(RESTART_DELAY)} 秒内没有新改动就自动重启、"
+        return (f"知识库改好了，{int(RESTART_DELAY)} 秒内没有新改动就自动重启、"
                 "重新建索引（聊天会断一下，之后就是新的了）。")
-    return (f"知识库改好了喵，但没检测到 systemd 在管 {update.SERVICE_NAME} 这个服务，"
+    return (f"知识库改好了，但没检测到 systemd 在管 {update.SERVICE_NAME} 这个服务，"
             "自动重启不了——自己重启一下才进索引（索引是进程内建的）。")
 
 
@@ -284,15 +284,15 @@ async def knowledge_upload(request: Request, path: str = Query("")):
     _require(request)
     rel = (path or "").replace("\\", "/").strip().lstrip("/")
     if not rel or rel.endswith("/"):
-        raise HTTPException(status_code=400, detail="得给个文件名喵，比如 books/新书.pdf")
+        raise HTTPException(status_code=400, detail="得给个文件名，比如 books/新书.pdf")
     if not kb_loader.supported(os.path.basename(rel)):
         raise HTTPException(
             status_code=400,
-            detail=f"这个格式进不了索引喵，只认：{'、'.join(kb_loader.extensions())}",
+            detail=f"这个格式进不了索引，只认：{'、'.join(kb_loader.extensions())}",
         )
     target, rel = _kn_path(rel)
     if os.path.isdir(target):
-        raise HTTPException(status_code=400, detail=f"{rel} 是个目录喵，得给个文件名")
+        raise HTTPException(status_code=400, detail=f"{rel} 是个目录，得给个文件名")
     parent = os.path.dirname(target)
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -308,18 +308,18 @@ def knowledge_delete(req: WorkspaceDelete, request: Request):
     _require(request)
     full, rel = _kn_path(req.path)
     if not rel:
-        raise HTTPException(status_code=400, detail="得指定删哪个文件喵")
+        raise HTTPException(status_code=400, detail="得指定删哪个文件")
     if full == os.path.normpath(KNOWLEDGE_DIR):
-        raise HTTPException(status_code=400, detail="不能把整个知识库删掉喵")
+        raise HTTPException(status_code=400, detail="不能把整个知识库删掉")
     if os.path.islink(full):
-        raise HTTPException(status_code=400, detail="这是个软链接喵，塔菲不敢动")
+        raise HTTPException(status_code=400, detail="这是个软链接，助手不敢动")
     if not os.path.exists(full):
-        raise HTTPException(status_code=404, detail=f"没有这个文件喵：{rel}")
+        raise HTTPException(status_code=404, detail=f"没有这个文件：{rel}")
     try:
         if os.path.isdir(full):
             if not req.recursive:
                 raise HTTPException(status_code=400,
-                                    detail=f"{rel} 是个目录喵，要删得选「整目录一起删」")
+                                    detail=f"{rel} 是个目录，要删得选「整目录一起删」")
             shutil.rmtree(full)
         else:
             os.remove(full)

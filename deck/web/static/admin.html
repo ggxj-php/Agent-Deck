@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ffb7d5">
-<title>塔菲后台</title>
+<title>助手后台</title>
 <link rel="icon" href="/static/avatar.jpg" id="page-icon">
 <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -12,10 +12,10 @@
 
 <header class="topbar">
   <button type="button" id="nav-toggle" class="nav-toggle" aria-label="菜单" hidden>☰</button>
-  <img class="avatar" src="/static/avatar.jpg" alt="塔菲" id="top-avatar">
+  <img class="avatar" src="/static/avatar.jpg" alt="助手" id="top-avatar">
   <div class="who">
-    <div class="name" id="top-name">塔菲后台</div>
-    <div class="status" id="status">看看钥匙喵…</div>
+    <div class="name" id="top-name">助手后台</div>
+    <div class="status" id="status">看看钥匙…</div>
   </div>
   <button type="button" id="nav-collapse" class="new-chat ghost nav-collapse" hidden>收起导航</button>
   <button type="button" id="logout" class="new-chat" hidden>退出</button>
@@ -192,13 +192,13 @@
               <div class="stat-note" id="disk-note"></div>
             </div>
             <div class="stat" id="stat-proc">
-              <div class="stat-label">塔菲进程</div>
+              <div class="stat-label">助手进程</div>
               <div class="stat-value" id="proc-value">—</div>
               <div class="stat-note" id="proc-note"></div>
             </div>
           </div>
           <div class="bar"><span id="mem-bar"></span></div>
-          <p class="hint" id="sysinfo-hint">每 5 秒自己刷一次喵。</p>
+          <p class="hint" id="sysinfo-hint">每 5 秒自己刷一次。</p>
         </div>
       </section>
 
@@ -247,7 +247,7 @@
               <div class="stat-note" id="t-chat-note"></div>
             </div>
           </div>
-          <p class="hint" id="traffic-hint">点开就自动算喵。</p>
+          <p class="hint" id="traffic-hint">点开就自动算。</p>
         </div>
 
         <div class="card">
@@ -337,7 +337,7 @@
             聊天页那个「上下文 xx%」和自动压缩都按这个数算，照模型的官方文档填
             （DeepSeek V3 是 64K / 128K，官方长上下文版才到 1M；填错了只影响压得早晚）。<br>
             历史用到窗口的 <b>80%</b>（<code>config.py</code> 里的
-            <code>CONTEXT_COMPRESS_AT</code>）时，塔菲会把较早那段聊过的内容交给模型压成
+            <code>CONTEXT_COMPRESS_AT</code>）时，助手会把较早那段聊过的内容交给模型压成
             一段摘要，只留最近几条原文，免得请求被模型以「超长」直接拒掉。
             压缩用的就是上面那个聊天模型。<br>
             <b>填大了比填小了危险</b>：填大了会把压缩推迟到模型真正吃不下的时候，那一轮直接被
@@ -410,7 +410,7 @@
           <h2>身份卡</h2>
           <p class="hint">
             一张身份卡 = 一套人设：名字、称呼、欢迎语、状态文案、提示词、表情包。
-            切到哪张，聊天页就变成哪张。<b>塔菲是默认身份卡</b>，删不掉正在用的那张。<br>
+            切到哪张，聊天页就变成哪张。<b>助手是默认身份卡</b>，删不掉正在用的那张。<br>
             表情包在「素材 → 表情包库」里管理，跟着当前身份卡走。
           </p>
           <div class="table-wrap">
@@ -441,9 +441,9 @@
             <label>自称 <input id="persona-self" placeholder="例如 猫猫" maxlength="24"></label>
             <label>称呼用户 <input id="persona-user" placeholder="例如 铲屎官" maxlength="24"></label>
             <label>欢迎语 <input id="persona-welcome" placeholder="聊天页第一条欢迎语"></label>
-            <label>输入框提示 <input id="persona-placeholder" placeholder="和猫猫说点什么喵…"></label>
-            <label>在线文案 <input id="persona-online" placeholder="在线喵"></label>
-            <label>思考文案 <input id="persona-thinking" placeholder="正在思考喵…"></label>
+            <label>输入框提示 <input id="persona-placeholder" placeholder="和猫猫说点什么…"></label>
+            <label>在线文案 <input id="persona-online" placeholder="在线"></label>
+            <label>思考文案 <input id="persona-thinking" placeholder="正在思考…"></label>
             <label>主题色 <input type="color" id="persona-theme" value="#ffb7d5"></label>
             <label class="persona-asset-label">头像
               <img id="persona-avatar-preview" class="persona-asset-preview" alt="头像">
@@ -472,7 +472,7 @@
         <div class="card">
           <h2>系统提示词（人设）</h2>
           <p class="hint">
-            这就是塔菲的人设：每个新会话历史里的第一条，决定她怎么说话、守哪些规矩。<br>
+            这就是助手的人设：每个新会话历史里的第一条，决定她怎么说话、守哪些规矩。<br>
             框里显示的是<b>当前生效</b>的那份——没改过就是 <code>config.py</code> 里内置的那份。
             <b>改完点保存，新开的会话立刻就是新的</b>，不用重启服务；
             已经在聊的会话还留着旧的（那条消息在开会话时就定下来了，想让老会话换人设得点「新会话」）。<br>
@@ -481,7 +481,7 @@
           </p>
           <label>提示词正文（<span id="prompt-count">0</span> / <span id="prompt-limit">40000</span> 字）
             <textarea id="prompt-text" rows="18" spellcheck="false"
-                      placeholder="点这里改塔菲的人设喵…"></textarea>
+                      placeholder="点这里改助手的人设…"></textarea>
           </label>
           <div class="btn-row">
             <button type="button" id="save-prompt">保存提示词</button>
@@ -490,10 +490,10 @@
           <p class="hint" id="prompt-state"></p>
           <p class="hint">
             改的时候留意这几条（内置那份里标着「【重要】」的）：<br>
-            塔菲每轮回复至少要发一张表情包（<code>send_sticker</code>）；代码要完整写进回答，
+            助手每轮回复至少要发一张表情包（<code>send_sticker</code>）；代码要完整写进回答，
             不能只丢在 workspace 里；workspace 只是临时测试区，跑完要把自己写的临时文件删掉；<br>
             数学式子不许用 LaTeX 源码；写代码只准碰 workspace 里的东西；去知识库查过要带上出处文件名。<br>
-            删掉这些规矩塔菲就真会照做——所以改之前建议先把内置那份复制出来备份。
+            删掉这些规矩助手就真会照做——所以改之前建议先把内置那份复制出来备份。
           </p>
         </div>
       </section>
@@ -587,7 +587,7 @@
             接口 400、向量那一路直接关掉。留空就<b>自动探测</b>一次（发两条比它自己报的用量，
             探得出来按它收口，探不出来按不限），也可以自己填。改了得重建索引，下面会显示用了多少。
           </p>
-          <p class="hint">向量库状态（每 5 秒自动刷新）：<span id="kb-status">还没开始建喵…</span></p>
+          <p class="hint">向量库状态（每 5 秒自动刷新）：<span id="kb-status">还没开始建…</span></p>
           <p class="hint">
             <b>怎么算建好了</b>：上面那行写到「<b>全部 N 块都带向量 —— 向量检索已生效</b>」就是成了。
             还在建的时候会显示进度（文件 x/y、已切多少块、已算多少块向量、当前在处理哪个文件、
@@ -656,7 +656,7 @@
           </label>
           <button type="button" id="kn-upload">上传</button>
           <p class="hint">
-            <code>knowledge/</code> 就是塔菲检索用的那堆原始文档。传到子目录（比如
+            <code>knowledge/</code> 就是助手检索用的那堆原始文档。传到子目录（比如
             <code>books/</code>）也能被扫到。<br>
             <b>传完 / 删完会自动重启服务重新建索引</b>——索引是进程内建的（见
             <code>kb/index.py</code>），不重启看不到新文件；连着传好几个只会重启一次
@@ -684,7 +684,7 @@
           </label>
           <button type="button" id="ws-upload">上传</button>
           <p class="hint">
-            塔菲的文件工具读写的就是这里（她自己的临时工作区）。传取证样本、数据集、待分析的
+            助手的文件工具读写的就是这里（她自己的临时工作区）。传取证样本、数据集、待分析的
             文件进来都行，单个文件上限 100MB。路径写相对路径，比如 <code>samples/dump.bin</code>。
           </p>
         </div>

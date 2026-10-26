@@ -33,7 +33,7 @@ _TEXT_MAX = 500
 DEFAULTS = {
     "name": "永雏塔菲",
     "self_name": "塔菲",
-    "user_name": "雏草姬",
+    "user_name": "用户",
     "avatar": "",                    # 空 = 用 static/avatar.jpg
     "welcome": "",                   # 空 = 用内置欢迎语
     "placeholder": "",               # 空 = 用内置输入框提示
@@ -133,7 +133,7 @@ def set_current(pid):
 
     pid = safe_id(pid)
     if not exists(pid):
-        raise ValueError("没有这个人设喵")
+        raise ValueError("没有这个人设")
     settings.set_persona(pid)
     _cache["key"] = None
     return pid
@@ -293,17 +293,17 @@ def save(pid, data):
         if key in data:
             merged[key] = _clean_text(data[key])
     if "name" in data and not merged["name"]:
-        return None, "名字不能为空喵"
+        return None, "名字不能为空"
     theme = str(merged.get("theme") or "").strip()
     if theme and not re.match(r"^#[0-9a-fA-F]{6}$", theme):
-        return None, "主题色要写成 #rrggbb 这种格式喵"
+        return None, "主题色要写成 #rrggbb 这种格式"
     merged["theme"] = theme or "#ffb7d5"
 
     prompt = data.get("prompt")
     if prompt is not None:
         prompt = str(prompt)
         if len(prompt) > PROMPT_MAX:
-            return None, "提示词太长了喵（最多 4 万字）"
+            return None, "提示词太长了（最多 4 万字）"
         merged["prompt"] = prompt
         # 有内容就写 prompt.md（好编辑），同时把 json 里的清空避免两份不一致
         prompt_file = os.path.join(base, "prompt.md")
@@ -332,11 +332,11 @@ def save(pid, data):
 def delete(pid):
     pid = safe_id(pid)
     if not pid or not exists(pid):
-        return False, "没有这个人设喵"
+        return False, "没有这个人设"
     if pid == current_id():
-        return False, "正在用的人设不能删喵，先切到别的"
+        return False, "正在用的人设不能删，先切到别的"
     if len(list_personas()) <= 1:
-        return False, "至少要留一个人设喵"
+        return False, "至少要留一个人设"
     try:
         shutil.rmtree(_dir(pid))
     except OSError as exc:
@@ -346,7 +346,7 @@ def delete(pid):
 
 
 WELCOME_FALLBACK = (
-    "雏草姬来啦喵～我是{name}，有什么想聊的直接说就好喵。\n\n"
+    "用户来啦～我是{name}，有什么想聊的直接说就好。\n\n"
     "算法题、代码、知识库里的资料都可以问我；左上角 ☰ 是侧边栏，"
     "你所有的会话都在里面，随时切回来接着聊；点顶栏名字能进用户中心。"
 )
@@ -373,11 +373,11 @@ def ensure_default():
     save(DEFAULT_ID, {
         "name": "永雏塔菲",
         "self_name": "塔菲",
-        "user_name": "雏草姬",
-        "welcome": WELCOME_FALLBACK.format(name="永雏塔菲"),
-        "placeholder": "和塔菲说点什么喵…",
-        "status_online": "在线喵",
-        "status_thinking": "正在思考喵…",
+        "user_name": "用户",
+        "welcome": WELCOME_FALLBACK.format(name="永雏助手"),
+        "placeholder": "和助手说点什么…",
+        "status_online": "在线",
+        "status_thinking": "正在思考…",
         "stickers": STATIC_STICKERS,
         "prompt": prompt,
     })

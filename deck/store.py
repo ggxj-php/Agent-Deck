@@ -158,7 +158,7 @@ def _content_of(message):
 
 
 def display(messages):
-    """给网页聊天区看的精简版：只留用户说的和塔菲的正文，工具那些不摆出来。"""
+    """给网页聊天区看的精简版：只留用户说的和助手的正文，工具那些不摆出来。"""
     items = []
     for message in messages:
         role = message.get("role")

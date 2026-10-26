@@ -56,7 +56,7 @@ SPECS = [
             "name": "open_url",
             "description": (
                 "打开一个 http/https 链接，把网页正文抓回来读。"
-                "雏草姬甩过来一个网址、或者搜索/知识库结果里有想细看的页面时用这个。"
+                "用户甩过来一个网址、或者搜索/知识库结果里有想细看的页面时用这个。"
                 "返回的是网页正文纯文本；打不开、或者不是网页（图片、压缩包之类）会直接说明。"
             ),
             "parameters": {
@@ -615,7 +615,7 @@ def _is_local(ip) -> bool:
 
 
 def _host_blocked(host: str) -> str:
-    """本机、内网、链路本地一律不给开，免得拿塔菲当跳板去戳内部服务。
+    """本机、内网、链路本地一律不给开，免得拿助手当跳板去戳内部服务。
 
     返回拒绝原因；没问题的地址返回空串。解析不了的域名按「拦下」处理：如果这里
     放行，攻击者只要让校验那次解析失败、真正连接那次解析到内网，就是典型的
@@ -644,10 +644,10 @@ def _check_url(url: str):
     """只认 http/https，且不能是本机/内网。合法返回 None，否则返回拒绝说明。"""
     parsed = urlsplit(url)
     if parsed.scheme.lower() not in ("http", "https"):
-        return f"只认 http / https 的链接喵，{parsed.scheme or '这种'}开头的不给开"
+        return f"只认 http / https 的链接，{parsed.scheme or '这种'}开头的不给开"
     reason = _host_blocked(parsed.hostname)
     if reason:
-        return f"这个地址塔菲不给开（{reason}）喵"
+        return f"这个地址助手不给开（{reason}）"
     return None
 
 
@@ -771,7 +771,7 @@ def open_url(url: str, max_chars: int = MAX_CHARS) -> str:
     """
     url = (url or "").strip()
     if not url:
-        return "没给网址喵"
+        return "没给网址"
 
     session = requests.Session()   # 带上 Cookie，有些站点靠它才肯放行
     visited = []
@@ -781,7 +781,7 @@ def open_url(url: str, max_chars: int = MAX_CHARS) -> str:
         if bad:
             if not visited:
                 return bad
-            return f"链接跳转到了不给开的地方（{url}），塔菲就不跟了喵。{bad}"
+            return f"链接跳转到了不给开的地方（{url}），助手就不跟了。{bad}"
 
         headers = dict(FETCH_HEADERS)
         if visited:
@@ -816,9 +816,9 @@ def open_url(url: str, max_chars: int = MAX_CHARS) -> str:
             if status >= 400:
                 return f"打不开这个链接：HTTP {status}"
             if "pdf" in ctype:
-                return "这个链接是 PDF，塔菲没法直接读正文喵。想读的话下下来放进 knowledge/ 目录，塔菲就能索引了"
+                return "这个链接是 PDF，助手没法直接读正文。想读的话下下来放进 knowledge/ 目录，助手就能索引了"
             if ctype and not any(k in ctype for k in ("html", "text", "json", "xml")):
-                return f"这个链接不是网页（{ctype.split(';')[0]}），塔菲打开也读不了喵"
+                return f"这个链接不是网页（{ctype.split(';')[0]}），助手打开也读不了"
             target = _bounce_target(url, raw, ctype)     # 页面自己发的跳转
 
         if target:
@@ -826,7 +826,7 @@ def open_url(url: str, max_chars: int = MAX_CHARS) -> str:
                 # 只把绕圈的那一段列出来（从 target 上次出现的地方开始）
                 path = visited + [url]
                 chain = " → ".join(path[path.index(target):] + [target])
-                return (f"这个链接在几个地址之间来回跳（{chain}），塔菲不跟了喵。"
+                return (f"这个链接在几个地址之间来回跳（{chain}），助手不跟了。"
                         "这种一般是要登录、或者先让你同意 Cookie 的中间页")
             visited.append(url)
             url = target
@@ -847,14 +847,14 @@ def open_url(url: str, max_chars: int = MAX_CHARS) -> str:
         if not text.strip():
             return ("网页打开了，但里面没抓到正文喵——要么是纯图片页 / 要登录，"
                     "要么正文是 JS 动态渲染出来的（这种纯抓取拿不到）。"
-                    "要是页面在浏览器里能正常看，把内容截图发塔菲也行喵")
+                    "要是页面在浏览器里能正常看，把内容截图发助手也行")
 
         text = text.strip()
         if len(text) > max_chars:
-            text = text[:max_chars] + "\n\n……（正文太长，塔菲先看到这儿）"
+            text = text[:max_chars] + "\n\n……（正文太长，助手先看到这儿）"
         elif cut:
             text += "\n\n……（网页太大，只下了前 2MB）"
         return text + fallback
 
-    return f"这个链接跳了 {MAX_REDIRECTS} 次还没走到正经页面，塔菲不跟了喵"
+    return f"这个链接跳了 {MAX_REDIRECTS} 次还没走到正经页面，助手不跟了"
 

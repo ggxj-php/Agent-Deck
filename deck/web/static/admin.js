@@ -1,4 +1,4 @@
-/* 兜底：万一脚本某一行抛异常，别让人卡在「看看钥匙喵…」——
+/* 兜底：万一脚本某一行抛异常，别让人卡在「看看钥匙…」——
    至少把登录框放出来，而不是白屏干瞪眼。 */
 window.addEventListener('error', () => {
   const status = document.getElementById('status');
@@ -188,11 +188,11 @@ function makeError(status, detail) {
   let message = raw || `服务返回 ${status}`;
   if (status === 404 && (!raw || raw === 'Not Found')) {
     message = '后台不认识这个接口（404）——多半是服务拉完新代码还没重启，' +
-      '跑的还是旧进程：重启一下服务、再刷新这个页面就好喵。';
+      '跑的还是旧进程：重启一下服务、再刷新这个页面就好。';
   } else if (status === 401) {
-    message = raw || '登录状态过期了，重新登一次喵';
+    message = raw || '登录状态过期了，重新登一次';
   } else if (status === 502 || status === 503 || status === 504) {
-    message = `服务现在不在（${status}）——可能正在重启，等几秒刷新看看喵。`;
+    message = `服务现在不在（${status}）——可能正在重启，等几秒刷新看看。`;
   }
   const error = new Error(message);
   error.status = status;
@@ -322,7 +322,7 @@ function render(state) {
   navToggleEl.hidden = false;
   navCollapseEl.hidden = false;
   logoutEl.hidden = false;
-  sidebarTipEl.textContent = `管理员后台 · 聊天用 ${state.model} 喵`;
+  sidebarTipEl.textContent = `管理员后台 · 聊天用 ${state.model} `;
 
   modelEl.value = state.model;
   visionEl.value = state.vision_model;
@@ -351,7 +351,7 @@ function render(state) {
   embedDimEl.textContent = state.embed_dim;
   renderEmbedSwitch(state);
   if (!state.embed_model || !state.embed_base_url) {
-    embedStateEl.textContent = '还没配全，知识库现在只用原查询和英文检索词那两路喵。';
+    embedStateEl.textContent = '还没配全，知识库现在只用原查询和英文检索词那两路。';
   } else if (state.embed_key_source === 'admin') {
     embedStateEl.textContent = '当前 key 是后台设过的。';
   } else {
@@ -379,13 +379,13 @@ function render(state) {
     chip.textContent = name;
     chip.addEventListener('click', () => {
       modelEl.value = name;
-      flash(`已经填进「聊天模型」了喵：${name}`);
+      flash(`已经填进「聊天模型」了：${name}`);
     });
     historyEl.appendChild(chip);
   });
   historyHintEl.textContent = history.length
     ? '用过的模型（点一下填进聊天模型）：'
-    : '还没用过别的模型喵。';
+    : '还没用过别的模型。';
   historyEl.hidden = !history.length;
 
   if (!activeView) {
@@ -400,7 +400,7 @@ async function loadBranding() {
     const resp = await fetch('/api/persona', { cache: 'no-store' });
     if (!resp.ok) return;
     const info = await resp.json();
-    const name = info.name || '塔菲';
+    const name = info.name || '助手';
     document.title = `${name} 后台`;
     const nameEl = document.getElementById('top-name');
     if (nameEl) nameEl.textContent = `${name} 后台`;
@@ -425,7 +425,7 @@ async function loadBranding() {
       if (meta) meta.content = info.theme;
     }
   } catch (err) {
-    /* 拿不到就用写死的塔菲，不影响后台使用 */
+    /* 拿不到就用写死的助手，不影响后台使用 */
   }
 }
 
@@ -476,9 +476,9 @@ async function load(message) {
     render(await api('/api/admin/state'));
     loadBranding();
     loadCapabilities();
-    flash(message || '已登录喵', true);
+    flash(message || '已登录', true);
   } catch (err) {
-    showLogin(err && err.status === 401 ? '先输口令喵' : err.message);
+    showLogin(err && err.status === 401 ? '先输口令' : err.message);
   }
 }
 
@@ -494,7 +494,7 @@ function renderEmbedSwitch(state) {
   } else if (set) {
     embedSwitchStateEl.textContent = on
       ? '开关开着，这一路在用。'
-      : '开关开着，但模型 / 地址 / key 还没配齐，实际用不了喵。';
+      : '开关开着，但模型 / 地址 / key 还没配齐，实际用不了。';
   } else {
     embedSwitchStateEl.textContent = '开关关着，这一路整个不用（检索只走原查询词 + 英文检索词）。';
   }
@@ -517,7 +517,7 @@ function renderKb(kb) {
   const live = (kb && kb.progress) || null;
   const building = Boolean(kb && kb.building);
   if (!kb || (!kb.chunks && !building)) {
-    text = '还没开始建喵（knowledge/ 里可能没文档）。';
+    text = '还没开始建（knowledge/ 里可能没文档）。';
   } else if (building) {
     const parts = ['正在建'];
     if (live && live.files_total) parts.push(`文件 ${live.files_done}/${live.files_total}`);
@@ -616,8 +616,8 @@ async function refreshSysinfo() {
     ? `开机以来 ${fmtDuration(proc.uptime_s)}`
     : '这是本进程占的内存';
 
-  sysinfoHintEl.textContent = '每 5 秒自己刷一次喵。' +
-    (mem && mem.percent >= 85 ? ' 内存快满了，注意别让它开太多会话喵！' : '');
+  sysinfoHintEl.textContent = '每 5 秒自己刷一次。' +
+    (mem && mem.percent >= 85 ? ' 内存快满了，注意别让它开太多会话！' : '');
 }
 
 /* ---------------- 访问流量 ---------------- */
@@ -725,7 +725,7 @@ function paintDayDetail(col) {
   if (!trafficDayDetailEl) return;
   trafficDaysEl.querySelectorAll('.day-col').forEach((c) => c.classList.toggle('on', c === col));
   if (!col || !col.dataset.date) {
-    trafficDayDetailEl.textContent = '点柱子看当天明细喵';
+    trafficDayDetailEl.textContent = '点柱子看当天明细';
     return;
   }
   const d = col.dataset;
@@ -844,7 +844,7 @@ async function runIpAnalysis() {
   if (!ipModalIp) return;
   ipModalRunEl.hidden = true;
   ipModalAiEl.hidden = false;
-  ipModalAiEl.textContent = '塔菲正在分析这个 IP 的日志…';
+  ipModalAiEl.textContent = '助手正在分析这个 IP 的日志…';
   ipModalAiEl.classList.add('busy');
   try {
     const r = await api('/api/admin/ip-analyze', { ip: ipModalIp, days: trafficDays });
@@ -1125,7 +1125,7 @@ async function loadTraffic() {
       `&overseas=${trafficOverseas ? 1 : 0}&scanners=${trafficScanners ? 1 : 0}`);
     trafficBusy = false;
     if (!info.ok) {
-      trafficHintEl.textContent = info.error || '算不出来喵';
+      trafficHintEl.textContent = info.error || '算不出来';
       return;
     }
     renderTraffic(info);
@@ -1181,7 +1181,7 @@ function renderStickers(data) {
     const grid = el('div', 'sticker-grid');
     if (!items.length) {
       const empty = el('div', 'mood-empty');
-      empty.textContent = '还没有喵';
+      empty.textContent = '还没有';
       grid.appendChild(empty);
     }
     items.forEach((item) => grid.appendChild(stickerCard(item, deleteSticker)));
@@ -1192,7 +1192,7 @@ function renderStickers(data) {
   if (data.other && data.other.length) {
     const block = el('div', 'mood-block');
     const head = el('div', 'mood-head');
-    head.textContent = `没归类的（${data.other.length}）—— 文件名开头不是那八个心情，塔菲用不上，建议改个名`;
+    head.textContent = `没归类的（${data.other.length}）—— 文件名开头不是那八个心情，助手用不上，建议改个名`;
     block.appendChild(head);
     const grid = el('div', 'sticker-grid');
     data.other.forEach((item) => grid.appendChild(stickerCard(item, deleteSticker)));
@@ -1210,11 +1210,11 @@ async function loadStickers() {
 }
 
 async function deleteSticker(name) {
-  if (!confirm(`确定把表情包 ${name} 删掉喵？删了就找不回来了。`)) return;
+  if (!confirm(`确定把表情包 ${name} 删掉？删了就找不回来了。`)) return;
   try {
     const data = await api('/api/admin/stickers/delete', { name });
     renderStickers(data.library);
-    flash(`删掉啦喵：${data.removed}`, true);
+    flash(`删掉啦：${data.removed}`, true);
   } catch (err) {
     guard(err);
   }
@@ -1223,12 +1223,12 @@ async function deleteSticker(name) {
 async function uploadSticker() {
   const file = stickerFileEl.files && stickerFileEl.files[0];
   if (!file) {
-    flash('先挑一张图片喵', false);
+    flash('先挑一张图片', false);
     return;
   }
   const ext = (file.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
   if (IMG_EXTS.indexOf(ext) < 0) {
-    flash(`只收 ${IMG_EXTS.join(' / ')} 喵`, false);
+    flash(`只收 ${IMG_EXTS.join(' / ')} `, false);
     return;
   }
   const name = nextStickerName(stickerMoodEl.value, ext);
@@ -1237,7 +1237,7 @@ async function uploadSticker() {
     const data = await apiUpload(`/api/admin/stickers/upload?name=${encodeURIComponent(name)}`, file);
     renderStickers(data.library);
     stickerFileEl.value = '';
-    flash(`收下啦喵：${data.name}（${fmtSize(data.size)}）`, true);
+    flash(`收下啦：${data.name}（${fmtSize(data.size)}）`, true);
   } catch (err) {
     guard(err);
   } finally {
@@ -1248,21 +1248,21 @@ async function uploadSticker() {
 async function importZip() {
   const file = stickerZipEl.files && stickerZipEl.files[0];
   if (!file) {
-    flash('先挑一个 zip 喵', false);
+    flash('先挑一个 zip ', false);
     return;
   }
   if (!/\.zip$/i.test(file.name)) {
-    flash('要 .zip 压缩包喵', false);
+    flash('要 .zip 压缩包', false);
     return;
   }
   stickerImportEl.disabled = true;
-  flash('正在解包喵…');
+  flash('正在解包…');
   try {
     const data = await apiUpload('/api/admin/stickers/import', file);
     renderStickers(data.library);
     stickerZipEl.value = '';
     const skipped = data.skipped || [];
-    let text = `导进来 ${data.added.length} 张喵`;
+    let text = `导进来 ${data.added.length} 张`;
     if (skipped.length) text += `，跳过 ${skipped.length} 个`;
     flash(text, true);
     if (skipped.length) {
@@ -1301,7 +1301,7 @@ function wsRow(item) {
   del.addEventListener('click', async (event) => {
     event.stopPropagation();
     const what = item.dir ? `目录 ${item.path}（里面的东西一起删）` : `文件 ${item.path}`;
-    if (!confirm(`确定删掉${what} 喵？`)) return;
+    if (!confirm(`确定删掉${what} ？`)) return;
     try {
       const data = await api('/api/admin/workspace/delete',
                              { path: item.path, recursive: item.dir });
@@ -1339,13 +1339,13 @@ async function loadWorkspace(dir) {
 
     if (!data.entries.length) {
       const empty = el('div', 'row empty');
-      empty.textContent = '空目录喵';
+      empty.textContent = '空目录';
       wsListEl.appendChild(empty);
     }
     data.entries.forEach((item) => wsListEl.appendChild(wsRow(item)));
     wsHintEl.textContent = data.truncated
-      ? '文件太多，只列了前面一部分喵。'
-      : '点目录名进去，点「删除」删掉。塔菲也能读写这里。';
+      ? '文件太多，只列了前面一部分。'
+      : '点目录名进去，点「删除」删掉。助手也能读写这里。';
   } catch (err) {
     guard(err);
   }
@@ -1354,17 +1354,17 @@ async function loadWorkspace(dir) {
 async function uploadWorkspace() {
   const file = wsFileEl.files && wsFileEl.files[0];
   if (!file) {
-    flash('先挑一个文件喵', false);
+    flash('先挑一个文件', false);
     return;
   }
   let rel = wsPathEl.value.trim().replace(/\\/g, '/').replace(/^\/+/, '');
   if (!rel) rel = file.name;
   if (rel.endsWith('/')) rel += file.name;
   wsUploadEl.disabled = true;
-  flash('正在上传喵…');
+  flash('正在上传…');
   try {
     const data = await apiUpload(`/api/admin/workspace/upload?path=${encodeURIComponent(rel)}`, file);
-    flash(`传好了喵：${data.path}（${fmtSize(data.size)}）`, true);
+    flash(`传好了：${data.path}（${fmtSize(data.size)}）`, true);
     wsFileEl.value = '';
     wsPathEl.value = '';
     const parts = data.path.split('/');
@@ -1420,7 +1420,7 @@ function knRow(item) {
   del.type = 'button';
   del.textContent = '删除';
   del.addEventListener('click', async () => {
-    if (!confirm(`确定把 ${item.path} 从知识库删掉喵？删完会自动重启重建索引。`)) return;
+    if (!confirm(`确定把 ${item.path} 从知识库删掉？删完会自动重启重建索引。`)) return;
     try {
       const data = await api('/api/admin/knowledge/delete', { path: item.path });
       flash(data.message, true);
@@ -1443,11 +1443,11 @@ async function loadKnowledge() {
     knListEl.innerHTML = '';
     if (!files.length) {
       const empty = el('div', 'row empty');
-      empty.textContent = 'knowledge/ 还是空的喵，上面传一个文档进来吧。';
+      empty.textContent = 'knowledge/ 还是空的，上面传一个文档进来吧。';
       knListEl.appendChild(empty);
     }
     files.forEach((item) => knListEl.appendChild(knRow(item)));
-    knHintEl.textContent = (data.truncated ? '文件太多，只列了前面一部分喵。' : '') +
+    knHintEl.textContent = (data.truncated ? '文件太多，只列了前面一部分。' : '') +
       `认的格式：${(data.extensions || []).join(' / ')}；单个上限 ${fmtSize(data.max_bytes)}。`;
     refreshKbStatus();
   } catch (err) {
@@ -1468,19 +1468,19 @@ async function loadKnowledge() {
 async function uploadKnowledge() {
   const file = knFileEl.files && knFileEl.files[0];
   if (!file) {
-    flash('先挑一个文档喵', false);
+    flash('先挑一个文档', false);
     return;
   }
   let rel = knPathEl.value.trim().replace(/\\/g, '/').replace(/^\/+/, '');
   if (!rel) rel = file.name;
   if (rel.endsWith('/')) rel += file.name;
   knUploadEl.disabled = true;
-  flash('正在上传喵…');
+  flash('正在上传…');
   try {
     const data = await apiUpload(`/api/admin/knowledge/upload?path=${encodeURIComponent(rel)}`, file);
     knFileEl.value = '';
     knPathEl.value = '';
-    flash(`传好了喵：${data.path}（${fmtSize(data.size)}）`, true);
+    flash(`传好了：${data.path}（${fmtSize(data.size)}）`, true);
     loadKnowledge();
     if (data.restart) relaxAfterRestart();
   } catch (err) {
@@ -1515,7 +1515,7 @@ function renderUpdate(data, applied) {
     lines.push(`<div>本地 <code>${escapeHtml(data.local)}</code> → 远端 ` +
                `<code>${escapeHtml(data.remote_head)}</code></div>`);
     lines.push(data.up_to_date
-      ? '<div class="ok-line">已经是最新的了喵。</div>'
+      ? '<div class="ok-line">已经是最新的了。</div>'
       : `<div class="ok-line">落后 ${data.behind} 个提交，可以更新：</div>`);
     if (data.commits && data.commits.length) {
       lines.push('<pre class="update-log">' +
@@ -1540,7 +1540,7 @@ function escapeHtml(text) {
 
 async function checkUpdate() {
   updateCheckEl.disabled = true;
-  updateResultEl.textContent = '正在问远端喵…';
+  updateResultEl.textContent = '正在问远端…';
   try {
     renderUpdate(await api(`/api/admin/update?remote=${encodeURIComponent(updateRemoteEl.value)}`));
   } catch (err) {
@@ -1552,9 +1552,9 @@ async function checkUpdate() {
 }
 
 async function applyUpdate() {
-  if (!confirm('会用 git pull 拉最新版，然后重启服务（聊天页会断一下）。\n确定现在更新喵？')) return;
+  if (!confirm('会用 git pull 拉最新版，然后重启服务（聊天页会断一下）。\n确定现在更新？')) return;
   updateApplyEl.disabled = true;
-  updateResultEl.textContent = '正在拉取喵…';
+  updateResultEl.textContent = '正在拉取…';
   try {
     const data = await api('/api/admin/update', { remote: updateRemoteEl.value });
     if (updateInfo) renderUpdate(updateInfo, data);
@@ -1607,7 +1607,7 @@ saveModelsEl.addEventListener('click', async () => {
   const model = modelEl.value.trim();
   const vision = visionEl.value.trim();
   if (!model || !vision) {
-    flash('聊天和图片的模型名都得填喵', false);
+    flash('聊天和图片的模型名都得填', false);
     return;
   }
   saveModelsEl.disabled = true;
@@ -1617,7 +1617,7 @@ saveModelsEl.addEventListener('click', async () => {
       vision_model: vision,
       translate_model: translateEl.value.trim(),
     }));
-    flash('模型存好了喵，下一条消息就生效', true);
+    flash('模型存好了，下一条消息就生效', true);
   } catch (err) {
     guard(err);
   } finally {
@@ -1635,7 +1635,7 @@ saveKeysEl.addEventListener('click', async () => {
     translate_base_url: changed(translateBaseEl, lastState.translate_base_url),
   };
   if (!Object.values(body).some((value) => value)) {
-    flash('什么都没改喵', false);
+    flash('什么都没改', false);
     return;
   }
   saveKeysEl.disabled = true;
@@ -1644,7 +1644,7 @@ saveKeysEl.addEventListener('click', async () => {
     chatKeyEl.value = '';
     visionKeyEl.value = '';
     translateKeyEl.value = '';
-    flash('接口设置存好了喵，下一条消息就生效', true);
+    flash('接口设置存好了，下一条消息就生效', true);
   } catch (err) {
     guard(err);
   } finally {
@@ -1668,18 +1668,18 @@ saveEmbedEl.addEventListener('click', async () => {
   if (rawMax !== '') {
     maxValue = parseInt(rawMax, 10);
     if (!Number.isFinite(maxValue) || maxValue < 0) {
-      flash('单条输入上限得填个数字喵（留空或 0 = 自动探测）', false);
+      flash('单条输入上限得填个数字（留空或 0 = 自动探测）', false);
       return;
     }
     if (maxValue > 0 && maxValue < 32) {
-      flash('单条输入上限别小于 32 token 喵，块会碎成几个字', false);
+      flash('单条输入上限别小于 32 token ，块会碎成几个字', false);
       return;
     }
   }
   const maxChanged = Boolean(lastState) && maxValue !== maxNow;
   if (!body.embed_model && !body.embed_base_url && !body.embed_key &&
       !switchChanged && !maxChanged) {
-    flash('什么都没改喵', false);
+    flash('什么都没改', false);
     return;
   }
   if (switchChanged) body.embed_enabled = embedEnabledEl.checked;
@@ -1689,8 +1689,8 @@ saveEmbedEl.addEventListener('click', async () => {
     render(await api('/api/admin/embed', body));
     embedKeyEl.value = '';
     flash(maxChanged
-      ? '向量模型存好了喵，重启服务重建索引后按新的块长生效'
-      : '向量模型存好了喵，重启服务后生效', true);
+      ? '向量模型存好了，重启服务重建索引后按新的块长生效'
+      : '向量模型存好了，重启服务后生效', true);
   } catch (err) {
     guard(err);
   } finally {
@@ -1701,13 +1701,13 @@ saveEmbedEl.addEventListener('click', async () => {
 saveContextEl.addEventListener('click', async () => {
   const limit = parseInt(contextLimitEl.value.trim(), 10);
   if (!limit || limit < 4096) {
-    flash('上下文上限得填个大于 4096 的数字喵（单位是 token）', false);
+    flash('上下文上限得填个大于 4096 的数字（单位是 token）', false);
     return;
   }
   saveContextEl.disabled = true;
   try {
     render(await api('/api/admin/context', { limit }));
-    flash('上下文上限存好了喵，立刻生效', true);
+    flash('上下文上限存好了，立刻生效', true);
   } catch (err) {
     guard(err);
   } finally {
@@ -1752,7 +1752,7 @@ savePromptEl.addEventListener('click', async () => {
   savePromptEl.disabled = true;
   try {
     renderPrompt(await api('/api/admin/prompt', { text }));
-    flash('提示词存好了喵，新开的会话立刻就是这份', true);
+    flash('提示词存好了，新开的会话立刻就是这份', true);
   } catch (err) {
     guard(err);
   } finally {
@@ -1761,11 +1761,11 @@ savePromptEl.addEventListener('click', async () => {
 });
 
 resetPromptEl.addEventListener('click', async () => {
-  if (!confirm('把提示词恢复成 config.py 里内置的那份？你改的这份会被丢掉喵。')) return;
+  if (!confirm('把提示词恢复成 config.py 里内置的那份？你改的这份会被丢掉。')) return;
   resetPromptEl.disabled = true;
   try {
     renderPrompt(await api('/api/admin/prompt', { text: '' }));
-    flash('恢复成内置的那份了喵', true);
+    flash('恢复成内置的那份了', true);
   } catch (err) {
     resetPromptEl.disabled = false;   // 没恢复成功，得能再点
     guard(err);
@@ -1894,15 +1894,15 @@ async function patchUser(user, body, okText) {
   try {
     await api(`/api/admin/users/${user.id}`, body, 'PATCH');
     await loadUsers();
-    userMsg(okText || '改好了喵', true);
+    userMsg(okText || '改好了', true);
   } catch (err) {
-    userMsg(err && err.message ? err.message : '改不了喵', false);
+    userMsg(err && err.message ? err.message : '改不了', false);
   }
 }
 
 function toggleAdmin(user) {
   return patchUser(user, { is_admin: !user.is_admin },
-    user.is_admin ? `已经取消「${user.name}」的管理员权限喵` : `「${user.name}」现在是管理员喵`);
+    user.is_admin ? `已经取消「${user.name}」的管理员权限` : `「${user.name}」现在是管理员`);
 }
 
 /* 封禁时长：支持 30m / 12h / 7d，或者纯数字（当分钟），0 = 永久 */
@@ -1932,16 +1932,16 @@ function fmtBanLeft(until) {
 function toggleBan(user) {
   // 已经封着的，点一下就是解封
   if (user.banned) {
-    return patchUser(user, { disabled: false }, `已经解封「${user.name}」喵`);
+    return patchUser(user, { disabled: false }, `已经解封「${user.name}」`);
   }
   const answer = window.prompt(
-    `封「${user.name}」多久喵？\n\n` +
+    `封「${user.name}」多久？\n\n` +
     '填法：30m（30 分钟）· 12h（12 小时）· 7d（7 天）· 0（永久封禁）',
     '1d');
   if (answer === null) return undefined;
   const minutes = parseBanDuration(answer);
   if (minutes === null) {
-    userMsg('看不懂这个时长喵：用 30m / 12h / 7d / 0 这种写法', false);
+    userMsg('看不懂这个时长：用 30m / 12h / 7d / 0 这种写法', false);
     return undefined;
   }
   return patchUser(
@@ -1949,7 +1949,7 @@ function toggleBan(user) {
     { disabled: true, ban_minutes: minutes },
     minutes
       ? `已封「${user.name}」，${fmtBanLeft(Date.now() / 1000 + minutes * 60).replace('后解封', '后自动解封')}`
-      : `已永久封禁「${user.name}」喵`,
+      : `已永久封禁「${user.name}」`,
   );
 }
 
@@ -1962,17 +1962,17 @@ function resetPassword(user) {
 function editNote(user) {
   const note = window.prompt(`给「${user.name}」写个备注`, user.note || '');
   if (note === null) return undefined;
-  return patchUser(user, { note }, '备注存好了喵');
+  return patchUser(user, { note }, '备注存好了');
 }
 
 async function removeUser(user) {
-  if (!window.confirm(`删掉用户「${user.name}」和他所有会话喵？删了就回不来了`)) return;
+  if (!window.confirm(`删掉用户「${user.name}」和他所有会话？删了就回不来了`)) return;
   try {
     await api(`/api/admin/users/${user.id}`, undefined, 'DELETE');
     await loadUsers();
-    userMsg(`已经把「${user.name}」删掉了喵`, true);
+    userMsg(`已经把「${user.name}」删掉了`, true);
   } catch (err) {
-    userMsg(err && err.message ? err.message : '删不掉喵', false);
+    userMsg(err && err.message ? err.message : '删不掉', false);
   }
 }
 
@@ -1984,7 +1984,7 @@ document.getElementById('user-create').addEventListener('click', async () => {
   const name = nameEl.value.trim();
   const password = passEl.value;
   if (!name || !password) {
-    userMsg('用户名和密码都得填喵', false);
+    userMsg('用户名和密码都得填', false);
     return;
   }
   try {
@@ -1998,9 +1998,9 @@ document.getElementById('user-create').addEventListener('click', async () => {
     noteEl.value = '';
     adminEl.checked = false;
     await loadUsers();
-    userMsg(`「${name}」建好了喵`, true);
+    userMsg(`「${name}」建好了`, true);
   } catch (err) {
-    userMsg(err && err.message ? err.message : '建不了喵', false);
+    userMsg(err && err.message ? err.message : '建不了', false);
   }
 });
 
@@ -2088,9 +2088,9 @@ async function activatePersona(item) {
   try {
     await api(`/api/admin/personas/${item.id}/activate`, {}, 'POST');
     await loadPersonas();
-    personaMsg(`已经切到「${item.name || item.id}」喵，刷新聊天页就能看到`, true);
+    personaMsg(`已经切到「${item.name || item.id}」，刷新聊天页就能看到`, true);
   } catch (err) {
-    personaMsg(err && err.message ? err.message : '切不了喵', false);
+    personaMsg(err && err.message ? err.message : '切不了', false);
   }
 }
 
@@ -2125,13 +2125,13 @@ async function editPersona(item) {
 }
 
 async function removePersona(item) {
-  if (!window.confirm(`删掉身份卡「${item.name || item.id}」喵？提示词和表情包一起没`)) return;
+  if (!window.confirm(`删掉身份卡「${item.name || item.id}」？提示词和表情包一起没`)) return;
   try {
     await api(`/api/admin/personas/${item.id}`, undefined, 'DELETE');
     await loadPersonas();
-    personaMsg('删掉了喵', true);
+    personaMsg('删掉了', true);
   } catch (err) {
-    personaMsg(err && err.message ? err.message : '删不掉喵', false);
+    personaMsg(err && err.message ? err.message : '删不掉', false);
   }
 }
 
@@ -2149,26 +2149,26 @@ async function savePersona() {
     prompt: els.prompt.value,
   };
   if (!payload.name) {
-    personaMsg('名字得填喵', false);
+    personaMsg('名字得填', false);
     return;
   }
   try {
     if (editingPersona) {
       await api(`/api/admin/personas/${editingPersona}`, payload, 'PATCH');
-      personaMsg('改好啦喵', true);
+      personaMsg('改好啦', true);
     } else {
       payload.id = els.id.value.trim().toLowerCase();
       if (!payload.id) {
-        personaMsg('ID 得填喵（小写字母开头）', false);
+        personaMsg('ID 得填（小写字母开头）', false);
         return;
       }
       await api('/api/admin/personas', payload, 'POST');
-      personaMsg('建好啦喵，点「启用」就能用', true);
+      personaMsg('建好啦，点「启用」就能用', true);
     }
     resetPersonaForm();
     await loadPersonas();
   } catch (err) {
-    personaMsg(err && err.message ? err.message : '存不下来喵', false);
+    personaMsg(err && err.message ? err.message : '存不下来', false);
   }
 }
 
@@ -2233,9 +2233,9 @@ async function saveTools() {
   try {
     const data = await api('/api/admin/tools', { groups: checked }, 'POST');
     renderTools(data);
-    toolsMsg('存好了喵，下一轮对话就按这个走', true);
+    toolsMsg('存好了，下一轮对话就按这个走', true);
   } catch (err) {
-    toolsMsg(err && err.message ? err.message : '存不下来喵', false);
+    toolsMsg(err && err.message ? err.message : '存不下来', false);
   }
 }
 
@@ -2327,9 +2327,9 @@ async function saveCorePrompt() {
   try {
     await api('/api/admin/core-prompt', { text: textarea.value }, 'POST');
     await loadCorePrompt();
-    corePromptMsg('存好了喵，新会话立刻生效', true);
+    corePromptMsg('存好了，新会话立刻生效', true);
   } catch (err) {
-    corePromptMsg(err && err.message ? err.message : '存不下来喵', false);
+    corePromptMsg(err && err.message ? err.message : '存不下来', false);
   }
 }
 
@@ -2340,7 +2340,7 @@ document.getElementById('core-prompt-reset').addEventListener('click', async () 
     document.getElementById('core-prompt-text').value = data.default || '';
     corePromptMsg('已经填回默认版本，点保存才生效', true);
   } catch (err) {
-    corePromptMsg('恢复不了喵', false);
+    corePromptMsg('恢复不了', false);
   }
 });
 
@@ -2373,7 +2373,7 @@ document.getElementById('persona-import-file').addEventListener('change', async 
     await loadPersonas();
     personaMsg(`已经导入身份卡「${data.id}」（${data.files} 个文件），点「启用」就能用`, true);
   } catch (err) {
-    personaMsg('导入失败喵：' + (err && err.message ? err.message : err), false);
+    personaMsg('导入失败：' + (err && err.message ? err.message : err), false);
   }
 });
 
@@ -2382,7 +2382,7 @@ document.getElementById('persona-import-file').addEventListener('change', async 
 async function uploadPersonaAsset(kind) {
   const state = editingPersona || (document.getElementById('persona-id').value || '').trim();
   if (!state) {
-    personaMsg('先填好 ID 再传图喵', false);
+    personaMsg('先填好 ID 再传图', false);
     return;
   }
   if (!editingPersona) {
@@ -2407,10 +2407,10 @@ async function uploadPersonaAsset(kind) {
     }
     const preview = document.getElementById(kind === 'avatar' ? 'persona-avatar-preview' : 'persona-icon-preview');
     if (preview) preview.src = data.url + '&v=' + Date.now();
-    personaMsg(kind === 'avatar' ? '头像换好啦喵' : '网页图标换好啦喵，刷新页面就能看到', true);
+    personaMsg(kind === 'avatar' ? '头像换好啦' : '网页图标换好啦，刷新页面就能看到', true);
     await loadPersonas();
   } catch (err) {
-    personaMsg('上传失败喵：' + (err && err.message ? err.message : err), false);
+    personaMsg('上传失败：' + (err && err.message ? err.message : err), false);
   }
 }
 

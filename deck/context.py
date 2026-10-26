@@ -33,13 +33,13 @@ TOOL_SNIPPET_CHARS = 400
 # 同一时刻只让一个会话压（压缩要调模型，慢；并发压缩会把内存和费用顶上去）。
 _compress_lock = threading.Lock()
 
-SUMMARY_SYSTEM = """你在帮一个中文聊天机器人整理对话历史。下面是你之前和雏草姬聊的内容，
+SUMMARY_SYSTEM = """你在帮一个中文聊天机器人整理对话历史。下面是你之前和用户聊的内容，
 现在要把前面这部分压成一段摘要，好腾出上下文空间继续聊。
 
 要求：
 - 用中文，第三人称陈述，不要寒暄、不要复述要求。
 - 务必留住：聊过的事实和结论、代码/命令的最终结果、知识库回答的出处文件名、
-  雏草姬的偏好和明确要求、还没做完的事。
+  用户的偏好和明确要求、还没做完的事。
 - 丢掉：寒暄、重复的来回、思考过程、工具的中间输出（只留结论）。
 - 按时间顺序写，可以用短条目。控制在 400 字以内。
 - 只输出摘要本身，不要加「摘要：」这类前缀。"""
@@ -132,16 +132,16 @@ def _render(messages):
         text = (content or "").strip()
         if role == "user":
             if text:
-                lines.append(f"雏草姬：{text}")
+                lines.append(f"用户：{text}")
         elif role == "assistant":
             if text:
-                lines.append(f"塔菲：{text}")
+                lines.append(f"助手：{text}")
             names = [
                 (call.get("function") or {}).get("name") or "?"
                 for call in message.get("tool_calls") or []
             ]
             if names:
-                lines.append(f"（塔菲调用了工具：{'、'.join(names)}）")
+                lines.append(f"（助手调用了工具：{'、'.join(names)}）")
         elif role == "tool":
             snippet = text[:TOOL_SNIPPET_CHARS]
             if len(text) > TOOL_SNIPPET_CHARS:

@@ -1,4 +1,4 @@
-"""表情包工具：让塔菲发自己的表情包。
+"""表情包工具：让助手发自己的表情包。
 
 真正把图发出去的是 core.py —— 它看到 send_sticker 就逐个 mood 发 sticker 事件，
 这里只负责校验 mood、给模型一句回执。可选表情对应 web/static/stickers/ 下的文件名。

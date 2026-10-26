@@ -117,7 +117,7 @@ def core_prompt():
 def set_core_prompt(text):
     text = (text or "").strip()
     if len(text) > PROMPT_LIMIT:
-        raise ValueError(f"太长了喵，最多 {PROMPT_LIMIT} 个字")
+        raise ValueError(f"太长了，最多 {PROMPT_LIMIT} 个字")
     with _lock:
         data = _load()
         data["core_prompt"] = text
@@ -474,7 +474,7 @@ def set_prompt(text):
     """
     text = (text or "").strip()
     if len(text) > PROMPT_LIMIT:
-        raise ValueError(f"提示词太长了喵，最多 {PROMPT_LIMIT} 个字（现在 {len(text)} 个）")
+        raise ValueError(f"提示词太长了，最多 {PROMPT_LIMIT} 个字（现在 {len(text)} 个）")
     with _lock:
         data = _load()
         data["prompt"] = text

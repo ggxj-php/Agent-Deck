@@ -104,7 +104,7 @@
       avatarEl.alt = name;
     }
     const subEl = document.getElementById('auth-sub');
-    if (subEl) subEl.textContent = `先登录才能跟${name}聊天喵`;
+    if (subEl) subEl.textContent = `先登录才能跟${name}聊天`;
     const inviteEl = document.getElementById('reg-invite');
     if (inviteEl && info.user_name) {
       inviteEl.placeholder = `找已经在用的${info.user_name}要一个`;
@@ -167,7 +167,7 @@
       document.getElementById('reg-captcha').value = '';
     } catch (err) {
       captchaId = '';
-      showMsg('验证码加载失败，点图重试喵');
+      showMsg('验证码加载失败，点图重试');
     }
   }
 
@@ -187,7 +187,7 @@
       let data = null;
       try { data = await resp.json(); } catch (err) { data = null; }
       if (!resp.ok) {
-        showMsg((data && data.detail) || ('失败了喵（' + resp.status + '）'));
+        showMsg((data && data.detail) || ('失败了（' + resp.status + '）'));
         button.disabled = false;
         return false;
       }
@@ -195,7 +195,7 @@
       location.replace(next.startsWith('/') ? next : '/');
       return true;
     } catch (err) {
-      showMsg('连不上服务器喵：' + (err && err.message ? err.message : err));
+      showMsg('连不上服务器：' + (err && err.message ? err.message : err));
       button.disabled = false;
       return false;
     }
@@ -207,7 +207,7 @@
     const name = document.getElementById('login-name').value.trim();
     const password = document.getElementById('login-password').value;
     if (!name || !password) {
-      showMsg('用户名和密码都得填喵');
+      showMsg('用户名和密码都得填');
       return;
     }
     post('/api/auth/login', { name, password }, loginSubmitEl);
@@ -221,15 +221,15 @@
     const invite = document.getElementById('reg-invite').value.trim();
     const captcha = document.getElementById('reg-captcha').value.trim();
     if (!name || !password) {
-      showMsg('用户名和密码都得填喵');
+      showMsg('用户名和密码都得填');
       return;
     }
     if (!invite) {
-      showMsg('要填邀请码喵');
+      showMsg('要填邀请码');
       return;
     }
     if (!captcha) {
-      showMsg('要填图形验证码喵');
+      showMsg('要填图形验证码');
       return;
     }
     post('/api/auth/register',

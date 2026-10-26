@@ -577,7 +577,7 @@ def _literal(node, source):
     # 显式挡掉 0x / 0b / 0o：不挡的话 int() 会抛出英文的 Python 原生异常文本，
     # 而且「看得懂就顺手支持」会让同一个式子写法不同结果不同，不如直接说清楚
     if re.fullmatch(r"[+-]?0[xXbBoO][0-9a-fA-F]+", text):
-        raise ValueError("不支持 0x / 0b / 0o 进制字面量，请写成十进制喵")
+        raise ValueError("不支持 0x / 0b / 0o 进制字面量，请写成十进制")
     if isinstance(node.value, int):
         return int(text)
     if isinstance(node.value, float):
@@ -687,7 +687,7 @@ def sci_calc(expression: str = "", precision: int = DEFAULT_PRECISION) -> str:
     """把表达式算到指定精度，返回可读的结果文本。"""
     text = (expression or "").strip()
     if not text:
-        return "给我个表达式呀，比如 (1+2)**100 / sqrt(3)、sin(pi/6)、1/7 喵"
+        return "给我个表达式呀，比如 (1+2)**100 / sqrt(3)、sin(pi/6)、1/7 "
     if len(text) > MAX_EXPRESSION:
         return f"表达式太长了（{len(text)} 字符，最多 {MAX_EXPRESSION}）"
     try:

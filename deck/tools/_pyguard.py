@@ -80,7 +80,7 @@ def main():
         roots.add(full)
 
     def deny(what):
-        raise PermissionError(f"安全拦截：{what}。塔菲的代码只准在 workspace 里活动喵")
+        raise PermissionError(f"安全拦截：{what}。助手的代码只准在 workspace 里活动")
 
     def hook(event, args):
         if event == "import":

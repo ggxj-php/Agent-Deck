@@ -126,21 +126,21 @@ def verify(ident, answer):
     ident = (ident or "").strip()
     answer = (answer or "").strip()
     if not ident or not answer:
-        return False, "要填图形验证码喵"
+        return False, "要填图形验证码"
     now = time.time()
     with _lock:
         item = _store.get(ident)
         if not item:
-            return False, "验证码过期了喵，点图换一张"
+            return False, "验证码过期了，点图换一张"
         if item["expire"] < now:
             _store.pop(ident, None)
-            return False, "验证码过期了喵，点图换一张"
+            return False, "验证码过期了，点图换一张"
         if item["tries"] >= MAX_ATTEMPTS:
             _store.pop(ident, None)
-            return False, "这个验证码试太多次了喵，换一张"
+            return False, "这个验证码试太多次了，换一张"
         item["tries"] += 1
         if not secrets.compare_digest(item["hash"], _hash(answer)):
-            return False, "图形验证码不对喵"
+            return False, "图形验证码不对"
         _store.pop(ident, None)           # 一次一用
         return True, ""
 

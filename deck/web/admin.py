@@ -38,9 +38,9 @@ def _admin(request):
     """必须登录 + 是管理员才放行。"""
     user = _current_user(request)
     if not user:
-        raise HTTPException(status_code=401, detail="先登录喵")
+        raise HTTPException(status_code=401, detail="先登录")
     if not user.get("is_admin"):
-        raise HTTPException(status_code=403, detail="要管理员权限喵")
+        raise HTTPException(status_code=403, detail="要管理员权限")
     request.state.user = user
     return user
 
@@ -95,7 +95,7 @@ def admin_page(request: Request):
     if not user:
         return RedirectResponse(url="/login?next=/admin", status_code=303)
     if not user.get("is_admin"):
-        raise HTTPException(status_code=403, detail="要管理员权限喵")
+        raise HTTPException(status_code=403, detail="要管理员权限")
     return FileResponse(os.path.join(STATIC_DIR, "admin.html"))
 
 
@@ -118,7 +118,7 @@ def save_models(req: ModelsRequest, request: Request):
     model = req.model.strip()
     vision = req.vision_model.strip()
     if not model or not vision:
-        raise HTTPException(status_code=400, detail="聊天和图片的模型名都得填喵")
+        raise HTTPException(status_code=400, detail="聊天和图片的模型名都得填")
     settings.update_models(model, vision, req.translate_model.strip())
     return _state()
 
@@ -137,7 +137,7 @@ class KeysRequest(BaseModel):
 def _check_base(name, value):
     value = value.strip()
     if value and not value.startswith(("http://", "https://")):
-        raise HTTPException(status_code=400, detail=f"{name}的接口地址要以 http:// 或 https:// 开头喵")
+        raise HTTPException(status_code=400, detail=f"{name}的接口地址要以 http:// 或 https:// 开头")
     return value
 
 
@@ -151,7 +151,7 @@ def save_keys(req: KeysRequest, request: Request):
     vision_key = req.vision_key.strip()
     translate_key = req.translate_key.strip()
     if not any((chat_key, vision_key, translate_key, chat_base, vision_base, translate_base)):
-        raise HTTPException(status_code=400, detail="一个都没填，那就先不动它喵")
+        raise HTTPException(status_code=400, detail="一个都没填，那就先不动它")
     settings.update_keys(chat_key, vision_key, chat_base, vision_base,
                          translate_key_new=translate_key, translate_base=translate_base)
     return _state()
@@ -452,7 +452,7 @@ def update_check(request: Request, remote: str = ""):
     _require(request)
     provider = (remote or settings.update_remote()).strip().lower()
     if provider not in settings.UPDATE_REMOTES:
-        raise HTTPException(status_code=400, detail="只能从 gitee 或者 github 拉喵")
+        raise HTTPException(status_code=400, detail="只能从 gitee 或者 github 拉")
     info = update.check(provider)
     # 真跑通了才把这次选的厂家记下来；检查失败就保留原来的，免得下次打开指向一个拉不通的源
     if not info.get("error"):
@@ -471,7 +471,7 @@ def update_apply(req: UpdateRequest, request: Request):
     _require(request)
     provider = (req.remote or settings.update_remote()).strip().lower()
     if provider not in settings.UPDATE_REMOTES:
-        raise HTTPException(status_code=400, detail="只能从 gitee 或者 github 拉喵")
+        raise HTTPException(status_code=400, detail="只能从 gitee 或者 github 拉")
     result = update.apply(provider)
     # 拉成功了才把这次选的厂家记下来；失败就保留原来的，免得下次自动挑一个拉不通的源
     if result.get("ok"):
@@ -505,7 +505,7 @@ def save_embed(req: EmbedRequest, request: Request):
             raise HTTPException(
                 status_code=400,
                 detail=f"单条输入上限得在 {EMBED_TOKENS_MIN} ~ {EMBED_TOKENS_MAX} 之间，"
-                       f"或者填 0（自动探测）喵",
+                       f"或者填 0（自动探测）",
             )
         settings.set_embed_max_tokens(req.embed_max_tokens)
     if req.embed_enabled is not None:
@@ -513,7 +513,7 @@ def save_embed(req: EmbedRequest, request: Request):
     if not (model or base or key):
         # 只拨了开关 / 只改了上限也算改过，别当成「什么都没填」拒掉
         if req.embed_enabled is None and req.embed_max_tokens is None:
-            raise HTTPException(status_code=400, detail="一个都没填，那就先不动它喵")
+            raise HTTPException(status_code=400, detail="一个都没填，那就先不动它")
         return _state()
     settings.update_embed(model, base, key)
     return _state()
@@ -537,7 +537,7 @@ def save_context(req: ContextRequest, request: Request):
     if not CONTEXT_MIN <= req.limit <= CONTEXT_MAX:
         raise HTTPException(
             status_code=400,
-            detail=f"上下文上限得在 {CONTEXT_MIN} ~ {CONTEXT_MAX} 之间喵",
+            detail=f"上下文上限得在 {CONTEXT_MIN} ~ {CONTEXT_MAX} 之间",
         )
     settings.set_context_limit(req.limit)
     return _state()
@@ -649,13 +649,13 @@ def update_user(user_id: int, req: UserUpdate, request: Request):
     me = _require(request)
     target = auth.find_by_id(user_id)
     if not target:
-        raise HTTPException(status_code=404, detail="没有这个用户喵")
+        raise HTTPException(status_code=404, detail="没有这个用户")
 
     if target["id"] == me["id"]:
         if req.is_admin is False:
-            raise HTTPException(status_code=400, detail="不能取消自己的管理员权限喵")
+            raise HTTPException(status_code=400, detail="不能取消自己的管理员权限")
         if req.disabled or req.ban_minutes is not None:
-            raise HTTPException(status_code=400, detail="不能封禁自己喵")
+            raise HTTPException(status_code=400, detail="不能封禁自己")
 
     if target.get("is_admin") and req.is_admin is False:
         with db.cursor() as conn:
@@ -663,7 +663,7 @@ def update_user(user_id: int, req: UserUpdate, request: Request):
                 "SELECT COUNT(*) AS n FROM users WHERE is_admin = 1 AND id != ?",
                 (target["id"],)).fetchone()["n"]
         if not others:
-            raise HTTPException(status_code=400, detail="这是最后一个管理员，不能降权喵")
+            raise HTTPException(status_code=400, detail="这是最后一个管理员，不能降权")
 
     with db.cursor() as conn:
         if req.is_admin is not None:
@@ -696,17 +696,17 @@ def update_user(user_id: int, req: UserUpdate, request: Request):
 def delete_user(user_id: int, request: Request):
     me = _require(request)
     if user_id == me["id"]:
-        raise HTTPException(status_code=400, detail="不能删自己喵")
+        raise HTTPException(status_code=400, detail="不能删自己")
     target = auth.find_by_id(user_id)
     if not target:
-        raise HTTPException(status_code=404, detail="没有这个用户喵")
+        raise HTTPException(status_code=404, detail="没有这个用户")
     if target.get("is_admin"):
         with db.cursor() as conn:
             others = conn.execute(
                 "SELECT COUNT(*) AS n FROM users WHERE is_admin = 1 AND id != ?",
                 (user_id,)).fetchone()["n"]
         if not others:
-            raise HTTPException(status_code=400, detail="这是最后一个管理员，不能删喵")
+            raise HTTPException(status_code=400, detail="这是最后一个管理员，不能删")
     with db.cursor() as conn:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
     return {"ok": True}
@@ -739,7 +739,7 @@ def personas_list(request: Request):
 def persona_detail(pid: str, request: Request):
     _require(request)
     if not persona.exists(pid):
-        raise HTTPException(status_code=404, detail="没有这个人设喵")
+        raise HTTPException(status_code=404, detail="没有这个人设")
     meta = persona._meta(pid)
     meta["is_current"] = pid == persona.current_id()
     meta["stickers_count"] = len(persona.sticker_files(pid))
@@ -753,7 +753,7 @@ def persona_create(req: PersonaRequest, request: Request):
         raise HTTPException(status_code=400,
                             detail="id 只能是 2~24 位小写字母 / 数字 / _ -，且以字母开头")
     if persona.exists(req.id):
-        raise HTTPException(status_code=409, detail="这个人设 id 已经有了喵")
+        raise HTTPException(status_code=409, detail="这个人设 id 已经有了")
     data = req.model_dump()
     data.pop("id", None)
     meta, err = persona.save(req.id, data)
@@ -766,7 +766,7 @@ def persona_create(req: PersonaRequest, request: Request):
 def persona_update(pid: str, req: PersonaRequest, request: Request):
     _require(request)
     if not persona.exists(pid):
-        raise HTTPException(status_code=404, detail="没有这个人设喵")
+        raise HTTPException(status_code=404, detail="没有这个人设")
     data = req.model_dump()
     data.pop("id", None)
     meta, err = persona.save(pid, data)
@@ -887,7 +887,7 @@ def persona_export(pid: str, request: Request):
     _require(request)
     pid = persona.safe_id(pid)
     if not pid or not persona.exists(pid):
-        raise HTTPException(status_code=404, detail="没有这个人设喵")
+        raise HTTPException(status_code=404, detail="没有这个人设")
     buf = io.BytesIO()
     base = persona._dir(pid)
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -925,17 +925,17 @@ async def persona_import(request: Request, pid: str = ""):
     _require(request)
     length = int(request.headers.get("content-length") or 0)
     if length > MAX_IMPORT_BYTES:
-        raise HTTPException(status_code=413, detail="压缩包太大喵（上限 50MB）")
+        raise HTTPException(status_code=413, detail="压缩包太大（上限 50MB）")
     raw = await request.body()
     if not raw:
-        raise HTTPException(status_code=400, detail="空文件喵")
+        raise HTTPException(status_code=400, detail="空文件")
     if len(raw) > MAX_IMPORT_BYTES:
-        raise HTTPException(status_code=413, detail="压缩包太大喵（上限 50MB）")
+        raise HTTPException(status_code=413, detail="压缩包太大（上限 50MB）")
 
     try:
         zf = zipfile.ZipFile(io.BytesIO(raw))
     except zipfile.BadZipFile:
-        raise HTTPException(status_code=400, detail="这不是一个 zip 包喵")
+        raise HTTPException(status_code=400, detail="这不是一个 zip 包")
 
     # 先找 persona.json，确定要建成的 id
     meta = None
@@ -950,13 +950,13 @@ async def persona_import(request: Request, pid: str = ""):
         except (KeyError, ValueError):
             continue
     if meta is None:
-        raise HTTPException(status_code=400, detail="包里没有 persona.json 喵")
+        raise HTTPException(status_code=400, detail="包里没有 persona.json ")
 
     target = persona.safe_id(pid or meta.get("id") or "")
     if not target:
-        raise HTTPException(status_code=400, detail="id 不合法喵（小写字母开头，2~24 位）")
+        raise HTTPException(status_code=400, detail="id 不合法（小写字母开头，2~24 位）")
     if persona.exists(target):
-        raise HTTPException(status_code=409, detail=f"身份卡 id「{target}」已经有了喵")
+        raise HTTPException(status_code=409, detail=f"身份卡 id「{target}」已经有了")
 
     base = persona._dir(target)
     os.makedirs(base, exist_ok=True)
@@ -982,7 +982,7 @@ async def persona_import(request: Request, pid: str = ""):
             dst.write(src.read(8 * 1024 * 1024))
         extracted += 1
     if not extracted:
-        raise HTTPException(status_code=400, detail="包里没有可导入的文件喵")
+        raise HTTPException(status_code=400, detail="包里没有可导入的文件")
 
     persona._cache["key"] = None
     saved, err = persona.save(target, {})
@@ -1013,17 +1013,17 @@ async def persona_asset(pid: str, request: Request, kind: str = "avatar"):
     _require(request)
     pid = persona.safe_id(pid)
     if not pid or not persona.exists(pid):
-        raise HTTPException(status_code=404, detail="没有这个人设喵")
+        raise HTTPException(status_code=404, detail="没有这个人设")
     if kind not in ("avatar", "icon"):
         raise HTTPException(status_code=400, detail="kind 只能是 avatar 或 icon")
     length = int(request.headers.get("content-length") or 0)
     if length > MAX_ASSET_BYTES:
-        raise HTTPException(status_code=413, detail="图片太大喵（上限 8MB）")
+        raise HTTPException(status_code=413, detail="图片太大（上限 8MB）")
     raw = await request.body()
     if not raw:
-        raise HTTPException(status_code=400, detail="空文件喵")
+        raise HTTPException(status_code=400, detail="空文件")
     if len(raw) > MAX_ASSET_BYTES:
-        raise HTTPException(status_code=413, detail="图片太大喵（上限 8MB）")
+        raise HTTPException(status_code=413, detail="图片太大（上限 8MB）")
 
     try:
         from PIL import Image
@@ -1039,7 +1039,7 @@ async def persona_asset(pid: str, request: Request, kind: str = "avatar"):
     except HTTPException:
         raise
     except Exception:                    # noqa: BLE001
-        raise HTTPException(status_code=400, detail="这不是一张能识别的图片喵")
+        raise HTTPException(status_code=400, detail="这不是一张能识别的图片")
 
     persona.save(pid, {kind: f"{kind}.png"})
     persona._cache["key"] = None

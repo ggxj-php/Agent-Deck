@@ -607,13 +607,13 @@ def _expand_data(text, symbols, here, line, budget=None):
             need = len(inner) * count
             if need > budget[0]:
                 raise _AsmError(
-                    f"数据定义太大：展开后超过 {MAX_DATA_ELEMENTS} 个元素，不给了喵", line)
+                    f"数据定义太大：展开后超过 {MAX_DATA_ELEMENTS} 个元素，不给了", line)
             budget[0] -= need
             out.extend(inner * count)
             continue
         if budget[0] <= 0:
             raise _AsmError(
-                f"数据定义太大：展开后超过 {MAX_DATA_ELEMENTS} 个元素，不给了喵", line)
+                f"数据定义太大：展开后超过 {MAX_DATA_ELEMENTS} 个元素，不给了", line)
         budget[0] -= 1
         if stripped == "?":
             out.append(("zero", ""))

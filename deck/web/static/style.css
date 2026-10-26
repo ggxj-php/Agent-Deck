@@ -534,6 +534,24 @@ body {
   font-size: 13px;
 }
 
+/* 提示条下面的操作按钮（比如「点我继续」） */
+.bubble-actions { display: flex; gap: 8px; margin: 8px 0 2px; }
+
+.continue-btn {
+  border: 1px solid var(--pink-dark, #ff9ec7);
+  background: linear-gradient(135deg, var(--pink-dark, #ff9ec7), var(--pink-deep, #e0729f));
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.continue-btn:active { transform: scale(.97); }
+.continue-btn:disabled { opacity: .5; cursor: default; }
+
 /* ---------- 上下文占用（输入框上面那条） ---------- */
 .ctx-bar {
   flex: none;

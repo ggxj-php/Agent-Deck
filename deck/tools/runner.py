@@ -213,7 +213,7 @@ def _unsafe_arg(args: list) -> str:
         segs = a.replace("\\", "/").split("/")
         if _ABS_ARG.match(a) or ".." in segs:
             return (
-                f"安全拦截：参数 {a!r} 看着是绝对路径或带 .. 的越界路径喵。"
+                f"安全拦截：参数 {a!r} 看着是绝对路径或带 .. 的越界路径。"
                 f"命令行参数只能传普通值（数字、短字符串之类），不能用来指 workspace 以外的文件。"
             )
     return None

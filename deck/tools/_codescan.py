@@ -265,16 +265,16 @@ def check(path: str, ext: str) -> str:
         m = pattern.search(texts[target])
         if m:
             return (
-                f"安全拦截：{why}喵（命中 `{m.group(0).strip()}`）。"
-                f"塔菲的代码只准在 workspace 里做纯计算，不联网、不起进程、不碰 workspace 以外的文件。"
-                f"改掉这段再用 run_code 重新跑喵。"
+                f"安全拦截：{why}（命中 `{m.group(0).strip()}`）。"
+                f"助手的代码只准在 workspace 里做纯计算，不联网、不起进程、不碰 workspace 以外的文件。"
+                f"改掉这段再用 run_code 重新跑。"
             )
 
     hit = _path_hit(stripped)
     if hit:
         return (
-            f"安全拦截：{hit}喵。塔菲的代码只能读写 workspace 里的文件，"
-            f"路径要写相对 workspace 的相对路径，也不许用 .. 往上跑。改掉再用 run_code 跑喵。"
+            f"安全拦截：{hit}。助手的代码只能读写 workspace 里的文件，"
+            f"路径要写相对 workspace 的相对路径，也不许用 .. 往上跑。改掉再用 run_code 跑。"
         )
 
     return ""

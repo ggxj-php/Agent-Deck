@@ -13,8 +13,8 @@ let AVATAR = '/static/avatar.jpg';
 /* 当前人设（名字、头像、欢迎语、输入框提示、状态文案都从后端拿，换人设不用改前端） */
 let personaInfo = null;
 
-const onlineText = () => (personaInfo && personaInfo.status_online) || '在线喵';
-const thinkingText = () => (personaInfo && personaInfo.status_thinking) || '正在思考喵…';
+const onlineText = () => (personaInfo && personaInfo.status_online) || '在线';
+const thinkingText = () => (personaInfo && personaInfo.status_thinking) || '正在思考…';
 
 /* 换网页图标：删掉旧的 link 再新建一个（带时间戳绕开缓存），最稳 */
 function setFavicon(url) {
@@ -59,7 +59,7 @@ function applyTheme(theme) {
 function applyPersona(info) {
   if (!info) return;
   personaInfo = info;
-  const name = info.name || '塔菲';
+  const name = info.name || '助手';
   document.title = `${name} · Agent`;
   applyTheme(info.theme);
   const themeMeta = document.querySelector('meta[name="theme-color"]');
@@ -150,7 +150,7 @@ marked.setOptions({ gfm: true, breaks: true });
 
 /* 任何接口回 401 都说明登录过期了，直接踢回登录页，别让页面卡在死状态 */
 /* 兜底：任何没被 catch 的 JS 错都摆到状态栏上（带错误信息），
-   免得页面挂了却只显示一句「连不上服务喵」，查都没法查。 */
+   免得页面挂了却只显示一句「连不上服务」，查都没法查。 */
 window.addEventListener('error', (event) => {
   try {
     const status = document.getElementById('status');
@@ -173,7 +173,7 @@ window.fetch = async (input, init) => {
   if (resp.status === 401 && !String(input).includes('/api/auth/login')
       && !String(input).includes('/api/auth/register')) {
     location.replace('/login');
-    throw new Error('登录过期了喵');
+    throw new Error('登录过期了');
   }
   return resp;
 };
@@ -540,7 +540,7 @@ async function copyText(text) {
   return false;
 }
 
-/* 复制失败就把代码选中，让雏草姬长按 / 双击手动复制，别干瞪眼 */
+/* 复制失败就把代码选中，让用户长按 / 双击手动复制，别干瞪眼 */
 function selectNode(node) {
   const range = document.createRange();
   range.selectNodeContents(node);
@@ -652,7 +652,7 @@ function renderBlockIncremental(block) {
 
 /* ---------------- 滚动 ---------------- */
 
-/* 不再自动吸底跟随。内容流式增长时视图一动不动，雏草姬想翻到哪就翻到哪，
+/* 不再自动吸底跟随。内容流式增长时视图一动不动，用户想翻到哪就翻到哪，
    不会被新来的内容顶回去。只有发消息这一下才把最新一条带进视野。 */
 function scrollToBottom() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -726,7 +726,7 @@ function addUser(text, images) {
 }
 
 /* 历史里的用户消息长这样：「我发了两张图\n\n[图片 #abc123 uploads/abc123.jpg：摘要]」
-   把标记抠出来换成缩略图，剩下的当正文；塔菲的正文里夹着 [sticker:mood]，按位置拆开。 */
+   把标记抠出来换成缩略图，剩下的当正文；助手的正文里夹着 [sticker:mood]，按位置拆开。 */
 const HISTORY_IMG_MARK = /\[图片 #([0-9a-f]{6,32})[^\]]*\]/g;
 
 /* 产物标记：后端在 assistant 正文里留的 [[artifact:16位id|标题]] */
@@ -800,7 +800,7 @@ function addAgent() {
   const row = el('div', 'msg agent');
   const avatar = el('img', 'avatar');
   avatar.src = AVATAR;
-  avatar.alt = '塔菲';
+  avatar.alt = '助手';
   const bubble = el('div', 'bubble');
   row.append(avatar, bubble);
   messagesEl.appendChild(row);
@@ -854,7 +854,7 @@ function clearLoading(turn) {
 }
 
 /* 正文/工具/表情包一来，就说明这段思考结束了，把标题标一下。
-   盒子开不开交给雏草姬自己决定，这里不强行收起。 */
+   盒子开不开交给用户自己决定，这里不强行收起。 */
 function settleThinking(turn) {
   if (!turn.thinking) return;
   turn.thinking.box.querySelector('.tsum').textContent = '已深度思考';
@@ -977,7 +977,7 @@ function addSticker(turn, mood, name) {
   contentChunk(turn, `@@sticker:${index}@@`);   // 就地放个占位符
 }
 
-// 塔菲画的图：用沙箱 iframe 渲染，脚本能跑但摸不到父页面
+// 助手画的图：用沙箱 iframe 渲染，脚本能跑但摸不到父页面
 function addArtifact(turn, event) {
   settleThinking(turn);
   turn.content = null;
@@ -1070,20 +1070,41 @@ window.addEventListener('message', (event) => {
   }
 });
 
-function errorBubble(turn, message) {
+function errorBubble(turn, message, canContinue) {
   settleThinking(turn);
   turn.content = null;
   const box = el('div', 'error');
-  box.textContent = '喵呜…出错了：' + message;
+  box.textContent = t('errorPrefix') + message;
   turn.bubble.appendChild(box);
+  // 断流 / 网络抖一下这种，给个按钮让模型接着讲，不用自己打字
+  if (canContinue) addContinueAction(turn);
+  updateToBottom();
 }
 
-/* 系统提示条（不是塔菲说的话），比如「历史太长，旧的那段压成摘要了」 */
-function noticeBubble(turn, text) {
+/* 提示条下面加一个「点我继续」按钮：点了自动发「继续」 */
+function addContinueAction(turn) {
+  if (!turn) return;
+  const row = el('div', 'bubble-actions');
+  const btn = el('button', 'continue-btn');
+  btn.type = 'button';
+  btn.textContent = t('continueBtn');
+  btn.addEventListener('click', () => {
+    if (busy) return;
+    btn.disabled = true;
+    row.remove();
+    send('继续');
+  });
+  row.appendChild(btn);
+  turn.bubble.appendChild(row);
+}
+
+/* 系统提示条（不是助手说的话），比如「历史太长，旧的那段压成摘要了」 */
+function noticeBubble(turn, text, canContinue) {
   turn.content = null;
   const box = el('div', 'notice');
   box.textContent = text;
   turn.bubble.appendChild(box);
+  if (canContinue) addContinueAction(turn);
   updateToBottom();
 }
 
@@ -1174,7 +1195,7 @@ function renderSessionList() {
   sideListEl.innerHTML = '';
   if (!sessions.length) {
     const empty = el('div', 'side-empty');
-    empty.textContent = '还没有会话喵';
+    empty.textContent = '还没有会话';
     sideListEl.appendChild(empty);
     return;
   }
@@ -1192,7 +1213,7 @@ function renderSessionList() {
     del.setAttribute('aria-label', '删除这个会话');
     del.addEventListener('click', async (event) => {
       event.stopPropagation();
-      if (!window.confirm(`删掉「${item.title || '新会话'}」喵？删了就回不来了`)) return;
+      if (!window.confirm(`删掉「${item.title || '新会话'}」？删了就回不来了`)) return;
       // 记住它在列表里的位置，删完跳到「附近」的那条去，而不是新建一个
       const index = sessions.findIndex((row) => row.id === item.id);
       const wasCurrent = item.id === sessionId;
@@ -1238,7 +1259,7 @@ function renderSessionList() {
 }
 
 async function switchSession(id) {
-  // 塔菲正在回话的时候切会话会让两段流搅在一起，先拦一下并说明原因
+  // 助手正在回话的时候切会话会让两段流搅在一起，先拦一下并说明原因
   if (busy) {
     statusEl.textContent = t('busySwitch');
     closeSidebar();
@@ -1407,12 +1428,12 @@ document.getElementById('pass-form').addEventListener('submit', async (event) =>
   passMsg('');
   const next = passNewEl.value;
   if (next !== passConfirmEl.value) {
-    passMsg('两次输入的新密码不一样喵');
+    passMsg('两次输入的新密码不一样');
     passConfirmEl.focus();
     return;
   }
   if (next.length < 8) {
-    passMsg('新密码至少 8 位喵');
+    passMsg('新密码至少 8 位');
     return;
   }
   passOkEl.disabled = true;
@@ -1425,17 +1446,17 @@ document.getElementById('pass-form').addEventListener('submit', async (event) =>
     let data = null;
     try { data = await resp.json(); } catch (err) { data = null; }
     if (!resp.ok) {
-      passMsg((data && data.detail) || '改不了喵');
+      passMsg((data && data.detail) || '改不了');
       passOkEl.disabled = false;
       return;
     }
     passOldEl.value = '';
     passNewEl.value = '';
     passConfirmEl.value = '';
-    passMsg('密码改好啦喵（下次登录用新的）', true);
+    passMsg('密码改好啦（下次登录用新的）', true);
     statusEl.textContent = t('passwordSaved');
   } catch (err) {
-    passMsg('连不上服务器喵');
+    passMsg('连不上服务器');
   }
   passOkEl.disabled = false;
 });
@@ -1477,7 +1498,7 @@ document.getElementById('pass-form').addEventListener('submit', async (event) =>
   try { data = await resp.json(); } catch (err) { data = null; }
   if (!resp.ok) {
     passMsgEl.hidden = false;
-    passMsgEl.textContent = (data && data.detail) || '改不了喵';
+    passMsgEl.textContent = (data && data.detail) || '改不了';
     return;
   }
   closePassModal();
@@ -1525,7 +1546,7 @@ async function refreshContext() {
 /* ---------------- SSE ---------------- */
 
 /* 手机切后台、信号抖动的时候，这条流可能悄无声息地断掉：不报错也不结束，
-   reader.read() 就那么挂着，界面永远停在「正在思考喵…」、发送按钮也一直锁着，
+   reader.read() 就那么挂着，界面永远停在「正在思考…」、发送按钮也一直锁着，
    看起来就跟没网了一样（刷新才恢复）。所以每收到一块数据就重置一次计时器，
    静默太久就自己掐掉，把状态放出来。 */
 const STREAM_IDLE_MS = 60000;
@@ -1591,7 +1612,7 @@ async function streamChat(id, message, onEvent, images) {
       }
     }
   } catch (err) {
-    if (stalled) throw new Error('这条回复断在半路了喵（网络波动），再发一次就好');
+    if (stalled) throw new Error('这条回复断在半路了（网络波动），再发一次就好');
     throw err;
   } finally {
     clearTimeout(idleTimer);
@@ -1621,20 +1642,20 @@ function handleEvent(turn, event) {
       addArtifact(turn, event);
       break;
     case 'cut':
-      noticeBubble(turn,
-        `塔菲话还没说完就断了（${event.reason || '网络中断'}）。发「继续」让塔菲接着讲喵～`);
+      noticeBubble(turn, t('cutNotice', { reason: event.reason || '网络中断' }), true);
       break;
     case 'compressed':
-      noticeBubble(turn,
-        `这段聊得有点长啦，塔菲把前面 ${event.dropped} 条旧记录压成摘要了喵` +
-        `（上下文从 ${Math.round(event.before_tokens / 1000)}k 降到 ` +
-        `${Math.round(event.after_tokens / 1000)}k），接着聊就好～`);
+      noticeBubble(turn, t('compressedNotice', {
+        n: event.dropped,
+        before: Math.round(event.before_tokens / 1000),
+        after: Math.round(event.after_tokens / 1000),
+      }));
       break;
     case 'done':
       if (event.context) paintContext(event.context);
       break;
     case 'error':
-      errorBubble(turn, event.message);
+      errorBubble(turn, event.message, true);
       break;
     default:
       break;
@@ -1643,7 +1664,7 @@ function handleEvent(turn, event) {
 
 /* ---------------- 回到前台重连 ----------------
    手机上切后台再切回来，浏览器/系统常年会把之前的连接悄悄掐掉，页面就卡在死状态。
-   回到前台先探一下服务还在不在：连着就把状态改回「在线喵」，连不上就再试几次，
+   回到前台先探一下服务还在不在：连着就把状态改回「在线」，连不上就再试几次，
    实在不行才提示刷新。正在跑的那条流有它自己的静默计时器兜底，这里不去打扰。 */
 
 const RECONNECT_TRIES = 3;
@@ -1695,7 +1716,7 @@ async function send(text, images) {
     const id = await ensureSession();
     await streamChat(id, text, (event) => handleEvent(turn, event), images);
   } catch (err) {
-    errorBubble(turn, err && err.message ? err.message : String(err));
+    errorBubble(turn, err && err.message ? err.message : String(err), true);
   } finally {
     clearLoading(turn);
     settleThinking(turn);
@@ -1725,7 +1746,7 @@ inputEl.addEventListener('input', autosize);
 
 /* ---------------- 发图片（可以多张） ----------------
    图片只在浏览器里读成 data URL，随请求发上去；服务端先用魔术字节验一遍，
-   真图片才落到 workspace/uploads/，塔菲自己调 read_img 看——这样图片内容
+   真图片才落到 workspace/uploads/，助手自己调 read_img 看——这样图片内容
    会走「外部内容边界」，比直接塞多模态请求安全。这一轮结束服务端会把临时
    图片删掉，服务器上不留原图。 */
 
@@ -1855,14 +1876,14 @@ function welcome() {
   }
   contentChunk(
     turn,
-    '雏草姬来啦喵～我是永雏塔菲，有什么想聊的直接说就好喵。\n\n' +
+    '用户来啦～我是永雏助手，有什么想聊的直接说就好。\n\n' +
     '算法题、代码、知识库里的资料都可以问我；嵌入式、单片机（STM32 那种）、物联网、' +
-    '计算机组成原理、数字取证这些塔菲也懂喵。左下角可以发图片给塔菲看（看完就删，不会留着）；' +
+    '计算机组成原理、数字取证这些助手也懂。左下角可以发图片给助手看（看完就删，不会留着）；' +
     '左上角 ☰ 是侧边栏，你所有的会话都在里面，随时切回来接着聊；' +
     '点顶栏名字能进用户中心（改密码 / 退出登录）；' +
-    '想换个话题就点「新会话」，塔菲会把之前的事忘干净从头开始喵～\n\n' +
-    '输入框上面那条是这段对话占了多少「上下文」，快满的时候塔菲会自己把前面聊过的' +
-    '压成摘要，不会聊着聊着就卡住喵。'
+    '想换个话题就点「新会话」，助手会把之前的事忘干净从头开始～\n\n' +
+    '输入框上面那条是这段对话占了多少「上下文」，快满的时候助手会自己把前面聊过的' +
+    '压成摘要，不会聊着聊着就卡住。'
   );
 }
 

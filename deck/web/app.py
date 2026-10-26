@@ -140,7 +140,7 @@ def _user_of(request):
     """从 request.state 拿当前用户；中间件保证已登录的请求一定有。"""
     user = getattr(request.state, "user", None)
     if not user:
-        raise HTTPException(status_code=401, detail="还没登录喵")
+        raise HTTPException(status_code=401, detail="还没登录")
     return user
 
 
@@ -196,7 +196,7 @@ async def require_login(request, call_next):
         user = None                  # 被封号（含临时封禁未到期）的账号，登录态还在也不放行
     if not user:
         if path.startswith("/api/"):
-            return JSONResponse({"detail": "还没登录喵"}, status_code=401)
+            return JSONResponse({"detail": "还没登录"}, status_code=401)
         return RedirectResponse(url="/login", status_code=303)
 
     request.state.user = user
@@ -235,7 +235,7 @@ def get_captcha(request: Request):
     """发一张图形验证码。注册前要先拿到它，不然注册接口一律拒绝。"""
     ip = _client_ip(request)
     if not _captcha_limiter.ok(ip):
-        raise HTTPException(status_code=429, detail="验证码刷太多次了喵，过一会儿再试")
+        raise HTTPException(status_code=429, detail="验证码刷太多次了，过一会儿再试")
     ident, data_url = captcha.new_data_url(ip)
     return {"id": ident, "image": data_url, "ttl": captcha.TTL}
 
@@ -244,7 +244,7 @@ def get_captcha(request: Request):
 def register(req: AuthRequest, request: Request):
     ip = _client_ip(request)
     if not _register_limiter.ok(ip):
-        raise HTTPException(status_code=429, detail="注册太频繁了喵，过一会儿再试")
+        raise HTTPException(status_code=429, detail="注册太频繁了，过一会儿再试")
     ok, why = captcha.verify(req.captcha_id, req.captcha)
     if not ok:
         raise HTTPException(status_code=400, detail=why)
@@ -261,7 +261,7 @@ def register(req: AuthRequest, request: Request):
 def login(req: AuthRequest, request: Request):
     ip = _client_ip(request)
     if not _login_limiter.ok(ip + "|" + (req.name or "")):
-        raise HTTPException(status_code=429, detail="试太多次了喵，歇 10 分钟再来")
+        raise HTTPException(status_code=429, detail="试太多次了，歇 10 分钟再来")
     user, reason = auth.lookup(req.name, req.password)
     if reason == "banned":
         # 403 而不是 401：密码可能没错，是账号被封。把解封时间也带上，
@@ -278,7 +278,7 @@ def login(req: AuthRequest, request: Request):
             },
         )
     if not user:
-        raise HTTPException(status_code=401, detail="用户名或密码不对喵")
+        raise HTTPException(status_code=401, detail="用户名或密码不对")
     token = auth.issue_token(user["id"], ip, request.headers.get("user-agent", ""))
     resp = JSONResponse({"ok": True, "user": auth.public_user(user)})
     _set_login_cookie(resp, token, request)
@@ -383,7 +383,7 @@ def persona_sticker(name: str):
     safe = os.path.basename(name.replace("\\", "/"))
     full = os.path.join(base, safe)
     if not safe or not os.path.isfile(full):
-        raise HTTPException(status_code=404, detail="没有这张表情包喵")
+        raise HTTPException(status_code=404, detail="没有这张表情包")
     return FileResponse(full, headers={"Cache-Control": "public, max-age=300"})
 
 
@@ -395,10 +395,10 @@ def sticker_library():
 
 @app.get("/api/artifact/{artifact_id}")
 def get_artifact(artifact_id: str):
-    """把塔菲画的那张图取出来给 iframe 渲染。"""
+    """把助手画的那张图取出来给 iframe 渲染。"""
     item = render_tool.get_artifact(artifact_id)
     if not item:
-        raise HTTPException(status_code=404, detail="这张图过期或者不存在了喵")
+        raise HTTPException(status_code=404, detail="这张图过期或者不存在了")
     return Response(
         content=item["html"],
         media_type="text/html; charset=utf-8",
@@ -420,16 +420,16 @@ def get_upload(image_id: str, request: Request):
     user = _user_of(request)
     owner = uploads.owner_of(image_id)
     if owner is not None and int(owner) != int(user["id"]):
-        raise HTTPException(status_code=404, detail="图片不存在喵")
+        raise HTTPException(status_code=404, detail="图片不存在")
     url = uploads.data_url(image_id)
     if not url or "," not in url:
-        raise HTTPException(status_code=404, detail="图片过期了喵")
+        raise HTTPException(status_code=404, detail="图片过期了")
     header, payload = url.split(",", 1)
     mime = header[5:].split(";")[0] or "image/jpeg"
     try:
         raw = base64.b64decode(payload)
     except Exception:                       # noqa: BLE001
-        raise HTTPException(status_code=500, detail="图片读坏了喵")
+        raise HTTPException(status_code=500, detail="图片读坏了")
     return Response(content=raw, media_type=mime,
                     headers={"Cache-Control": "private, max-age=3600"})
 
@@ -457,7 +457,7 @@ def create_session(req: NewSessionRequest, request: Request):
 def delete_session(session_id: str, request: Request):
     user = _user_of(request)
     if not store.delete(user["id"], session_id):
-        raise HTTPException(status_code=404, detail="会话不存在喵")
+        raise HTTPException(status_code=404, detail="会话不存在")
     return {"ok": True}
 
 
@@ -469,7 +469,7 @@ class RenameRequest(BaseModel):
 def rename_session(session_id: str, req: RenameRequest, request: Request):
     user = _user_of(request)
     if not store.get(user["id"], session_id):
-        raise HTTPException(status_code=404, detail="会话不存在喵")
+        raise HTTPException(status_code=404, detail="会话不存在")
     store.rename(user["id"], session_id, req.title)
     return {"ok": True}
 
@@ -480,13 +480,13 @@ def session_messages(session_id: str, request: Request):
     user = _user_of(request)
     sess = store.get(user["id"], session_id)
     if not sess:
-        raise HTTPException(status_code=404, detail="会话不存在喵")
+        raise HTTPException(status_code=404, detail="会话不存在")
     messages = store.load_messages(session_id)
     full = [{"role": "system", "content": settings.system_prompt()}] + messages
     usage = context.usage(full, settings.context_limit())
     return {
         "session": {"id": sess["id"], "title": sess["title"]},
-        "history": store.display(messages),   # 只留用户和塔菲的正文
+        "history": store.display(messages),   # 只留用户和助手的正文
         "context": usage,
     }
 

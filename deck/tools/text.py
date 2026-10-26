@@ -175,7 +175,7 @@ def regex_test(pattern: str = "", text: str = "", flags: str = "", replace: str 
                max_matches: int = MAX_MATCHES) -> str:
     """跑一遍正则，把匹配 / 分组 / 替换结果列出来。replace 传空串表示「删掉匹配」。"""
     if not pattern:
-        return "得先给我一个正则表达式呀喵"
+        return "得先给我一个正则表达式呀"
     if len(pattern) > MAX_PATTERN:
         return f"正则太长了（{len(pattern)} 字符，最多 {MAX_PATTERN}）"
     if len(text) > MAX_TEXT:
@@ -196,12 +196,12 @@ def regex_test(pattern: str = "", text: str = "", flags: str = "", replace: str 
         return f"这个正则写错了：{e}"
     if _risky_pattern(pattern):
         return ("这个正则里有嵌套量词（像 (a+)+ 这种写法），跑起来可能会指数级回溯卡死，"
-                "先改写成不会灾难性回溯的版本再来喵")
+                "先改写成不会灾难性回溯的版本再来")
 
     result = _run_regex(pattern, flag_value, text, limit, replace)
     if result is None:
         return (f"这个正则跑了超过 {REGEX_TIMEOUT:.0f} 秒还没算完，八成会灾难性回溯，已经中止了。"
-                f"换成不会指数级回退的写法再来喵")
+                f"换成不会指数级回退的写法再来")
     matches, replaced = result
 
     names = {index: name for name, index in compiled.groupindex.items()}
@@ -233,7 +233,7 @@ def regex_test(pattern: str = "", text: str = "", flags: str = "", replace: str 
 def diff_text(a: str = "", b: str = "", context: int = 3) -> str:
     """两段文本的 unified diff。"""
     if not a and not b:
-        return "两段都是空的，没法比喵"
+        return "两段都是空的，没法比"
     if len(a) > MAX_TEXT or len(b) > MAX_TEXT:
         return f"两边都要在 {MAX_TEXT} 字符以内"
     try:
@@ -360,7 +360,7 @@ def _walk(obj, path: str):
 def json_tool(data: str = "", op: str = "format", path: str = "", indent: int = 2) -> str:
     """JSON 美化 / 压缩 / 取值 / 校验。"""
     if not (data or "").strip():
-        return "得给我一段 JSON 呀喵"
+        return "得给我一段 JSON 呀"
     if len(data) > MAX_TEXT:
         return f"JSON 太长了（{len(data)} 字符，最多 {MAX_TEXT}）"
     def _reject_constant(name):
@@ -396,7 +396,7 @@ def json_tool(data: str = "", op: str = "format", path: str = "", indent: int = 
         spaces = 2
 
     if action == "validate":
-        return f"JSON 是合法的喵：顶层是{_describe(obj)}"
+        return f"JSON 是合法的：顶层是{_describe(obj)}"
 
     if action == "get":
         if not path.strip():

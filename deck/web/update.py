@@ -221,5 +221,5 @@ def apply(provider):
     return {
         "ok": True, "restart": False, "from": before, "to": after,
         "message": f"代码更新好了：{before} → {after}。但没检测到 systemd 在管 {SERVICE_NAME} 这个服务，"
-                   "没法自动重启，自己重启一下才生效喵。",
+                   "没法自动重启，自己重启一下才生效。",
     }

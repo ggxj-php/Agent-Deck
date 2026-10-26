@@ -1,4 +1,4 @@
-"""render_html 工具：让塔菲把 HTML 画出来，直接渲染在聊天里。
+"""render_html 工具：让助手把 HTML 画出来，直接渲染在聊天里。
 
 安全是这里的核心，一共四层：
 
@@ -146,7 +146,7 @@ SPECS = [
         "function": {
             "name": "render_html",
             "description": (
-                "把一段 HTML 直接渲染成一张可视化卡片给雏草姬看——画图、示意图、"
+                "把一段 HTML 直接渲染成一张可视化卡片给用户看——画图、示意图、"
                 "流程图、图表、海报、动画都用它，比用文字描述清楚一万倍。"
                 "传完整的 HTML 片段或整页都行：CSS 写在 <style> 里，SVG 直接写，"
                 "要动起来可以用内联 <script>（canvas 也行）。"
@@ -343,7 +343,7 @@ def render_html(html: str, title: str = "") -> str:
                 "bytes": size, "limit": RENDER_MAX_BYTES})
         return json.dumps({
             "error": f"HTML 太大了（{size} 字节，上限 {RENDER_MAX_BYTES}）。"
-                     f"简化一下再画，别塞这么多内容喵。"
+                     f"简化一下再画，别塞这么多内容。"
         }, ensure_ascii=False)
 
     clean, findings = _sanitize(raw)
@@ -379,6 +379,6 @@ def render_html(html: str, title: str = "") -> str:
         "ok": True,
         "artifact_id": aid,
         "title": title or "",
-        "note": "已经渲染成卡片给雏草姬看了，正文里不用再把 HTML 贴一遍，"
+        "note": "已经渲染成卡片给用户看了，正文里不用再把 HTML 贴一遍，"
                 "用一两句话说明你画了什么就行。",
     }, ensure_ascii=False)

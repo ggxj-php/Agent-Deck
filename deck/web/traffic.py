@@ -62,7 +62,7 @@ BOT_PATH = re.compile(
 )
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
 
-# 站点口径。日志里两个站混在一起：WWW 站是塔菲，API 站是 one-api；
+# 站点口径。日志里两个站混在一起：WWW 站是助手，API 站是 one-api；
 # 裸 IP 和随机 Host 头都落到默认 server（API 站）。
 # 域名**不写死**：从 config 读（.env 里的 TAFFY_SITE_WWW / TAFFY_SITE_API），
 # 默认是占位域名，换部署只改环境变量，不用动代码。

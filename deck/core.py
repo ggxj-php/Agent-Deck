@@ -26,7 +26,7 @@ _IMAGE_MAX_CHARS = 8 * 1024 * 1024
 # 改成让模型在正文里写标记，服务端边收流边切成 sticker 事件，
 # 前端 contentChunk / addSticker 本来就是按顺序往气泡里追加，天然能交错。
 class _LeakGuard:
-    """挡住「把塔菲的底层设定 / 系统提示词原文吐出来」这种泄露。
+    """挡住「把助手的底层设定 / 系统提示词原文吐出来」这种泄露。
 
     流式输出没法等全文再检查，所以先扣住最后 HOLD 个字：每次新内容进来，
     对整段缓冲（含上一轮扣下的尾巴）扫一遍，命中就把那段换成一句提示，
@@ -66,7 +66,7 @@ class _LeakGuard:
         for pat in self._pats:
             if pat in text:
                 self.hit = True
-                text = text.replace(pat, "…（这段像是塔菲的底层设定，不贴出来喵）")
+                text = text.replace(pat, "…（这段涉及内部设定，不展开）")
         return text
 
 
@@ -250,7 +250,7 @@ def _sendable(messages):
 
 
 class DeckAgent:
-    """一个塔菲会话。对话历史存在实例里，所以同一个实例能记住上下文。"""
+    """一个助手会话。对话历史存在实例里，所以同一个实例能记住上下文。"""
 
     def __init__(self, messages=None, cut_off=False, owner=None):
         """messages 是这条会话已经存下来的历史（不含 system 那条）。
@@ -289,7 +289,7 @@ class DeckAgent:
           content     {text}                       回答正文增量
           tool_start  {name, arguments}            模型决定调用工具
           tool_end    {name, args, result}         工具执行完的结果
-          sticker     {mood}                       塔菲发了一张表情包
+          sticker     {mood}                       助手发了一张表情包
           compressed  {dropped, before_tokens, ...} 历史太长，旧的那段被压成摘要了
           error       {message}                    出错了
           cut         {reason}                     回复被截断/中断了，可以发「继续」接着写
@@ -320,7 +320,7 @@ class DeckAgent:
         if resume:
             self.messages.append({"role": "user", "content": RESUME_INSTRUCTION})
         elif refs:
-            text = user_input or "看看这几张图喵"
+            text = user_input or "看看这几张图"
             if markers:
                 text = text + "\n\n" + markers
             parts = [{"type": "text", "text": text}]
@@ -418,7 +418,7 @@ class DeckAgent:
 
                 # 兜底：空正文又没工具调用的消息一旦进历史，后面每轮都会 400
                 if not message.get("content") and not message.get("tool_calls"):
-                    yield {"type": "error", "message": "模型这一轮没吐内容，跳过它喵，再问一次就好"}
+                    yield {"type": "error", "message": "模型这一轮没吐内容，跳过它，再问一次就好"}
                     return
 
                 self.messages.append(message)
@@ -506,12 +506,12 @@ class DeckAgent:
                     return
 
             finished = True
-            yield {"type": "content", "text": "喵呜…工具调太多次了，塔菲脑子转不动了喵"}
+            yield {"type": "content", "text": "呜…工具调太多次了，助手脑子转不动了"}
             yield {"type": "done", "context": self.context_usage()}
         finally:
             # 这一轮跑完，把多模态大块换成「标记 + 摘要」：
             # 图还在 workspace/uploads/，最近一两轮会自动 rehydrate 回来，
-            # 更久远的只能靠摘要回忆，细节让塔菲自己 read_img 回看原图。
+            # 更久远的只能靠摘要回忆，细节让助手自己 read_img 回看原图。
             if image_slot is not None:
                 self.messages[image_slot] = {
                     "role": "user",
@@ -538,7 +538,7 @@ class DeckAgent:
                 print(event["text"], end="", flush=True)
             elif kind == "content":
                 if not answer_started:
-                    print("\n塔菲: ", end="", flush=True)
+                    print("\n助手: ", end="", flush=True)
                     answer_started = True
                 print(event["text"], end="", flush=True)
             elif kind == "tool_start":
@@ -547,7 +547,7 @@ class DeckAgent:
             elif kind == "tool_end":
                 print(f"[结果] {event['result'][:100]}")
             elif kind == "sticker":
-                print(f"[表情包] 塔菲发了一张 {event['mood']} 表情包")
+                print(f"[表情包] 助手发了一张 {event['mood']} 表情包")
             elif kind == "error":
                 answer_started = thinking_started = False
                 print(f"\n[出错] {event['message']}")
@@ -556,18 +556,18 @@ class DeckAgent:
 
     def run(self):
         """终端交互循环"""
-        print("塔菲: 雏草姬来啦喵～想聊什么直接说喵。算法题、代码、嵌入式、单片机（STM32 那种）、物联网、计算机组成原理、数字取证这些塔菲都懂喵，输入 exit 就拜拜喵")
+        print("助手: 用户来啦～想聊什么直接说。算法题、代码、嵌入式、单片机（STM32 那种）、物联网、计算机组成原理、数字取证这些助手都懂，输入 exit 就拜拜")
         while True:
             try:
                 user_input = input("\n你: ").strip()
             except (EOFError, KeyboardInterrupt):
-                print("\n塔菲: 拜拜喵~")
+                print("\n助手: 拜拜~")
                 break
 
             if not user_input:
                 continue
             if user_input.lower() in EXIT_WORDS:
-                print("塔菲: 那塔菲先溜啦，关注永雏塔菲谢谢喵！")
+                print("助手: 那助手先溜啦，关注永雏助手谢谢！")
                 break
 
             self.ask(user_input)

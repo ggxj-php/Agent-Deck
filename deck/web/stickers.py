@@ -48,14 +48,14 @@ def check_name(name):
     """校验一个要存进来的文件名，返回 (心情, 后缀)。不合法就抛 ValueError。"""
     base = os.path.basename((name or "").replace("\\", "/")).strip()
     if not base or base.startswith("."):
-        raise ValueError("文件名不能空着，也不能是隐藏文件喵")
+        raise ValueError("文件名不能空着，也不能是隐藏文件")
     ext = os.path.splitext(base)[1].lower()
     if ext not in EXTS:
-        raise ValueError(f"只收 {'、'.join(EXTS)} 这几种图片喵")
+        raise ValueError(f"只收 {'、'.join(EXTS)} 这几种图片")
     mood = mood_of(base)
     if not mood:
         raise ValueError(
-            "文件名开头得是心情喵，八个之一："
+            "文件名开头得是心情，八个之一："
             + "、".join(MOODS) + f"。比如 happy1.gif、love_02.png（现在是 {base}）"
         )
     return mood, ext
@@ -110,10 +110,10 @@ def _safe_existing(name):
     """把名字解析成库里的一个真实文件，越界/不存在就抛 ValueError。"""
     base = os.path.basename((name or "").replace("\\", "/")).strip()
     if not base or base != (name or "").strip():
-        raise ValueError("文件名不对喵")
+        raise ValueError("文件名不对")
     full = os.path.join(_dir(), base)
     if not os.path.isfile(full):
-        raise ValueError(f"没有这张表情包喵：{base}")
+        raise ValueError(f"没有这张表情包：{base}")
     return full
 
 

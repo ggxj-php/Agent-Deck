@@ -77,18 +77,18 @@ def check_name(name):
     """用户名：3~20 位，中文 / 字母 / 数字 / _ - 。"""
     name = (name or "").strip()
     if not (NAME_MIN <= len(name) <= NAME_MAX):
-        return f"用户名要 {NAME_MIN}~{NAME_MAX} 个字喵"
+        return f"用户名要 {NAME_MIN}~{NAME_MAX} 个字"
     for ch in name:
         if not (ch.isalnum() or ch in "_-"):
-            return "用户名只能用中文 / 字母 / 数字 / _ - 喵"
+            return "用户名只能用中文 / 字母 / 数字 / _ - "
     return ""
 
 
 def check_password(password):
     if not password or len(password) < PASSWORD_MIN:
-        return f"密码至少 {PASSWORD_MIN} 位喵"
+        return f"密码至少 {PASSWORD_MIN} 位"
     if len(password) > 200:
-        return "密码太长啦喵"
+        return "密码太长啦"
     return ""
 
 
@@ -123,7 +123,7 @@ def create_user(name, password, invited_by="", is_admin=False, note=""):
     with db.cursor() as conn:
         exists = conn.execute("SELECT 1 FROM users WHERE name = ?", (name,)).fetchone()
         if exists:
-            return None, "这个名字被占了喵"
+            return None, "这个名字被占了"
         code = new_invite_code()
         for _ in range(12):
             if not conn.execute("SELECT 1 FROM users WHERE invite_code = ?", (code,)).fetchone():
@@ -148,13 +148,13 @@ def register(name, password, invite):
     name = (name or "").strip()
     code = (invite or "").strip().upper()
     if not code:
-        return None, "要填邀请码喵（找已经在用的雏草姬要一个）"
+        return None, "要填邀请码（找已经在用的用户要一个）"
     err = check_name(name) or check_password(password)
     if err:
         return None, err
     inviter = find_by_invite(code)
     if not inviter:
-        return None, "邀请码不对喵，检查一下大小写和有没有漏字符"
+        return None, "邀请码不对，检查一下大小写和有没有漏字符"
     return create_user(name, password, invited_by=inviter["name"])
 
 
@@ -319,9 +319,9 @@ def change_password(user_id, old_password, new_password):
     """用户自己改密码：要先验旧密码。返回错误串，成功返回空。"""
     user = find_by_id(user_id)
     if not user:
-        return "用户不存在喵"
+        return "用户不存在"
     if not verify_password(old_password, user["password_hash"]):
-        return "原密码不对喵"
+        return "原密码不对"
     return set_password(user_id, new_password)
 
 
@@ -425,7 +425,7 @@ def main(argv):
         if err:
             print(f"❌ {err}")
             return 1
-        print(f"✅ 建好了喵：{user['name']}")
+        print(f"✅ 建好了：{user['name']}")
         print(f"   邀请码：{user['invite_code']}（把这个给要注册的人）")
         return 0
     if cmd == "list":
