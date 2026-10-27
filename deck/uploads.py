@@ -42,6 +42,8 @@ _SIGNATURES = (
     (b"BM", "bmp"),
 )
 _DATA_URL = re.compile(r"^data:image/[a-zA-Z0-9.+-]{1,20};base64,(.+)$", re.S)
+# 普通附件：不限定 MIME，只要是 data:<mime>;base64,<...>
+_ANY_DATA_URL = re.compile(r"^data:[^,]{1,80};base64,(.+)$", re.S)
 
 
 # ---------------- 校验 / 归一化 ----------------
@@ -201,7 +203,7 @@ def save_file(name, data_url, owner=None):
     ext = os.path.splitext(clean)[1].lower()
     if ext not in FILE_EXTS:
         return None, f"不支持这种文件类型（{ext or '无扩展名'}），能传：{' '.join(FILE_EXTS)}"
-    match = _DATA_URL.match(str(data_url or ""))
+    match = _ANY_DATA_URL.match(str(data_url or ""))
     if not match:
         return None, "文件内容不是合法的 data URL"
     try:

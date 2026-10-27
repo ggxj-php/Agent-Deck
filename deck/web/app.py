@@ -31,7 +31,7 @@ from .. import persona as persona_mod
 from ..config import CONTEXT_COMPRESS_AT
 from ..core import DeckAgent
 from ..kb import warmup
-from ..tools import render as render_tool
+from ..tools import download as download_tool, render as render_tool
 from . import stickers
 from .admin import router as admin_router
 from .content import router as content_router
@@ -159,8 +159,10 @@ def _start_upload_sweeper(interval=300):
         while True:
             try:
                 removed = uploads.sweep()
-                if removed:
-                    print(f"[uploads] 清理了 {removed} 张过期图片", flush=True)
+                gone = download_tool.sweep()
+                if removed or gone:
+                    print(f"[uploads] 清理了 {removed} 张过期图片、{gone} 条过期下载链接",
+                          flush=True)
             except Exception as exc:         # noqa: BLE001
                 print(f"[uploads] 清理失败：{exc}", flush=True)
             time.sleep(interval)
@@ -430,6 +432,30 @@ def get_artifact(artifact_id: str):
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "no-referrer",
             "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.get("/d/{token}")
+@app.get("/d/{token}/{filename:path}")
+def download_file(token: str, request: Request, filename: str = ""):
+    """临时下载链接：20 分钟有效、只有生成它的用户能打开。"""
+    user = _user_of(request)
+    item = download_tool.lookup(token, user["id"])
+    if not item:
+        raise HTTPException(status_code=404, detail="下载链接已过期或无权访问")
+    full = download_tool.file_path(item)
+    if not full or not os.path.isfile(full):
+        raise HTTPException(status_code=404, detail="文件已经没了，可能过期被清掉了")
+    return FileResponse(
+        full,
+        filename=item["name"],
+        media_type="application/octet-stream",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": "default-src 'none'",
+            "Referrer-Policy": "no-referrer",
         },
     )
 

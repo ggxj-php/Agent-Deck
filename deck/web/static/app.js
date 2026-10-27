@@ -131,8 +131,13 @@ const sendEl = document.getElementById('send');
 const statusEl = document.getElementById('status');
 const newChatEl = document.getElementById('new-chat');
 const toBottomEl = document.getElementById('to-bottom');
-const pickImageEl = document.getElementById('pick-image');
 const imageInputEl = document.getElementById('image-input');
+const fileInputEl = document.getElementById('file-input');
+const pickPlusEl = document.getElementById('pick-plus');
+const attachPopEl = document.getElementById('attach-pop');
+let pendingFiles = [];            // 已上传、还没发出去的文件 [{id,name,size}]
+const FILE_MAX_COUNT = 6;
+const FILE_MAX_BYTES = 20 * 1024 * 1024;
 const attachBarEl = document.getElementById('attach-bar');
 const ctxBarEl = document.getElementById('ctx-bar');
 const ctxFillEl = document.getElementById('ctx-fill');
@@ -2016,7 +2021,7 @@ async function send(text, images) {
   if (busy) return;
   busy = true;
   sendEl.disabled = true;
-  pickImageEl.disabled = true;
+  pickPlusEl.disabled = true;
   inputEl.value = '';
   autosize();
   statusEl.textContent = thinkingText();
@@ -2037,7 +2042,7 @@ async function send(text, images) {
     if (turn.content) scheduleRender(turn.content);
     busy = false;
     sendEl.disabled = false;
-    pickImageEl.disabled = false;
+    pickPlusEl.disabled = false;
     statusEl.textContent = onlineText();
     refreshContext();     // 这一轮又添了几条，顺便把上下文占用刷新一下
     loadSessions();       // 首句聊完，标题会从「新会话」变成那句话
@@ -2068,7 +2073,7 @@ const IMAGE_MAX_BYTES = 4 * 1024 * 1024; // 单张上限，超了直接拦掉，
 
 function renderAttachBar() {
   attachBarEl.innerHTML = '';
-  if (!pendingImages.length) {
+  if (!pendingImages.length && !pendingFiles.length) {
     attachBarEl.hidden = true;
     return;
   }
@@ -2089,17 +2094,86 @@ function renderAttachBar() {
     item.append(img, del);
     attachBarEl.appendChild(item);
   });
+  pendingFiles.forEach((file, index) => {
+    const item = el('div', 'attach-item attach-file');
+    const icon = el('div', 'attach-file-icon');
+    icon.textContent = '📄';
+    const name = el('div', 'attach-file-name');
+    name.textContent = file.name;
+    name.title = `${file.name}（${Math.round((file.size || 0) / 1024)}KB）`;
+    const del = el('button', 'attach-remove');
+    del.type = 'button';
+    del.textContent = '×';
+    del.setAttribute('aria-label', '移除这个文件');
+    del.addEventListener('click', () => {
+      pendingFiles.splice(index, 1);
+      renderAttachBar();
+      inputEl.focus();
+    });
+    item.append(icon, name, del);
+    attachBarEl.appendChild(item);
+  });
   attachBarEl.hidden = false;
 }
 
+/* 上传一个普通文件：读成 data URL → 后端存 workspace（20 分钟自动清）→ 拿到 id */
+function uploadFileEntry(file) {
+  if (pendingFiles.length >= FILE_MAX_COUNT) {
+    statusEl.textContent = `最多一次 ${FILE_MAX_COUNT} 个附件`;
+    return;
+  }
+  if (file.size > FILE_MAX_BYTES) {
+    statusEl.textContent = `文件太大：${file.name}（上限 20MB）`;
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      statusEl.textContent = `正在上传 ${file.name}…`;
+      const resp = await fetch('/api/uploads/file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: file.name, data_url: reader.result }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error((data && data.detail) || `HTTP ${resp.status}`);
+      pendingFiles.push(data.file);
+      renderAttachBar();
+      statusEl.textContent = `已添加 ${pendingFiles.length} 个文件`;
+      inputEl.focus();
+    } catch (err) {
+      statusEl.textContent = `上传失败：${err.message}`;
+    }
+  };
+  reader.onerror = () => { statusEl.textContent = '读文件失败'; };
+  reader.readAsDataURL(file);
+}
+
 function clearImage() {
+  pendingFiles = [];
   pendingImages = [];
   imageInputEl.value = '';
   attachBarEl.innerHTML = '';
   attachBarEl.hidden = true;
 }
 
-pickImageEl.addEventListener('click', () => imageInputEl.click());
+pickPlusEl.addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  attachPopEl.hidden = !attachPopEl.hidden;
+});
+document.addEventListener('click', () => { attachPopEl.hidden = true; });
+attachPopEl.addEventListener('click', (ev) => {
+  const opt = ev.target.closest('.attach-opt');
+  if (!opt) return;
+  attachPopEl.hidden = true;
+  if (opt.dataset.kind === 'image') imageInputEl.click();
+  else fileInputEl.click();
+});
+fileInputEl.addEventListener('change', () => {
+  const files = Array.from(fileInputEl.files || []);
+  fileInputEl.value = '';
+  files.forEach(uploadFileEntry);
+});
 
 imageInputEl.addEventListener('change', () => {
   const files = Array.from(imageInputEl.files || []);
@@ -2126,6 +2200,42 @@ imageInputEl.addEventListener('change', () => {
   }
 });
 
+
+/* ---------- 桌面端：把文件拖进聊天框就能上传 ---------- */
+let dragDepth = 0;
+window.addEventListener('dragenter', (ev) => {
+  if (!ev.dataTransfer || !Array.from(ev.dataTransfer.types || []).includes('Files')) return;
+  dragDepth += 1;
+  document.body.classList.add('drop-active');
+});
+window.addEventListener('dragover', (ev) => {
+  if (ev.dataTransfer && Array.from(ev.dataTransfer.types || []).includes('Files')) {
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'copy';
+  }
+});
+window.addEventListener('dragleave', () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) document.body.classList.remove('drop-active');
+});
+window.addEventListener('drop', (ev) => {
+  const files = Array.from((ev.dataTransfer && ev.dataTransfer.files) || []);
+  if (!files.length) return;
+  ev.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove('drop-active');
+  files.forEach((file) => {
+    if (file.type && file.type.startsWith('image/')) {
+      if (pendingImages.length >= IMAGE_MAX_COUNT) return;
+      if (file.size > IMAGE_MAX_BYTES) { statusEl.textContent = `图片太大：${file.name}`; return; }
+      const reader = new FileReader();
+      reader.onload = () => { pendingImages.push(reader.result); renderAttachBar(); };
+      reader.readAsDataURL(file);
+    } else {
+      uploadFileEntry(file);
+    }
+  });
+});
 
 /* 回车不发送，老老实实在输入框里换行；要发就点「发送」按钮。
    手机端也一样，软键盘的回车键只负责换行，不会手滑把半句话发出去。 */

@@ -11,6 +11,7 @@ from . import (
     calc,
     diagram,
     docs,
+    download,
     files,
     forensics,
     kb,
@@ -24,7 +25,7 @@ from . import (
     text,
 )
 
-_MODULES = (basics, kb, search, files, docs, forensics, runner, sticker, render, diagram,
+_MODULES = (basics, kb, search, files, docs, download, forensics, runner, sticker, render, diagram,
             asm_sim, asm86, mcu, logic, numconv, calc, text)
 
 # 这些工具把「外部内容」带进上下文：网页正文、搜索结果、知识库片段、
@@ -80,7 +81,7 @@ TOOL_GROUPS = {
     "code": {
         "label": "跑代码 / 画图",
         "desc": "编译运行代码、结构化画图、写 HTML 渲染成卡片",
-        "tools": ("run_code", "draw_diagram", "render_html"),
+        "tools": ("run_code", "draw_diagram", "render_html", "make_download_link"),
     },
     "forensics": {
         "label": "数字取证",
@@ -141,7 +142,12 @@ def is_enabled(name):
 def active_specs():
     """给模型看的工具清单（按后台开关过滤）。"""
     groups = enabled_groups()
-    return [spec for spec in TOOLS if group_of(spec["function"]["name"]) in groups]
+    specs = [spec for spec in TOOLS if group_of(spec["function"]["name"]) in groups]
+    # 注意：即使开了服务端内置搜索，也**不能**把 web_search / open_url 摘掉。
+    # 平台是按查询自己决定搜不搜的，有些问题它压根不注入结果；这时候模型要是连
+    # 工具都没有，就只能干瞪眼说「没搜到」（线上真踩过）。留着当兜底，提示词里
+    # 让它「没看到结果再补搜一次」就行。
+    return specs
 
 
 def groups_payload():

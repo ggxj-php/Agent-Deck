@@ -63,11 +63,18 @@
 <form id="composer" class="composer">
   <div class="attach-bar" id="attach-bar" hidden></div>
   <div class="composer-row">
-    <button type="button" id="pick-image" class="icon-btn" aria-label="发送图片" title="发送图片">🖼</button>
+    <div class="attach-wrap">
+      <button type="button" id="pick-plus" class="icon-btn" aria-label="添加图片或文件" title="添加图片或文件">＋</button>
+      <div class="attach-pop" id="attach-pop" hidden>
+        <button type="button" class="attach-opt" data-kind="image">🖼 图片</button>
+        <button type="button" class="attach-opt" data-kind="file">📎 文件</button>
+      </div>
+    </div>
     <textarea id="input" rows="1" placeholder="和助手说点什么…" autocomplete="off"></textarea>
     <button id="send" type="submit" aria-label="发送">发送</button>
   </div>
   <input type="file" id="image-input" accept="image/*" multiple hidden>
+  <input type="file" id="file-input" multiple hidden>
 </form>
 
 <div class="modal" id="leave-modal" hidden>

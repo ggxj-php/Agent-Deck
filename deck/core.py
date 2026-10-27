@@ -13,6 +13,7 @@ from .config import EXIT_WORDS, MAX_ROUNDS, RESUME_INSTRUCTION, RESUME_WORDS, ST
 from .llm import stream_chat
 from .tools import active_specs, execute
 from .tools import diagram as diagram_tool
+from .tools import download as download_tool
 from .tools.render import append_marks, strip_marks
 from .tools.sticker import MOODS, pick_sticker
 
@@ -431,6 +432,8 @@ class DeckAgent:
         finished = False
         last_round = ""      # 最近一轮已经吐出去的原始正文，流被掐断时用来补历史
         try:
+            # 下载链接按用户隔离：工具里靠这个拿到当前用户 id
+            download_tool.set_owner(self.owner)
             stickers_sent = 0
             recent_sigs = []          # 最近的工具调用签名，用来发现重复重试
             search_counts = {}        # 这一轮各搜索工具调了几次
