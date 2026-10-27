@@ -125,6 +125,8 @@ function stickerPool(mood) {
 }
 
 const messagesEl = document.getElementById('messages');
+const emptyHeroEl = document.getElementById('empty-hero');
+const emptyTitleEl = document.getElementById('empty-title');
 const formEl = document.getElementById('composer');
 const inputEl = document.getElementById('input');
 const sendEl = document.getElementById('send');
@@ -875,6 +877,7 @@ function addUser(text, images) {
   row.appendChild(bubble);
   messagesEl.appendChild(row);
   scrollToBottom();
+  updateEmptyHero(true);
 }
 
 /* 历史里的用户消息长这样：「我发了两张图\n\n[图片 #abc123 uploads/abc123.jpg：摘要]」
@@ -883,6 +886,20 @@ const HISTORY_IMG_MARK = /\[图片 #([0-9a-f]{6,32})[^\]]*\]/g;
 
 /* 产物标记：后端在 assistant 正文里留的 [[artifact:16位id|标题]] */
 const ARTIFACT_MARK = /\[\[artifact:([0-9a-f]{16})\|([^\]\n]*)\]\]/g;
+
+function updateEmptyHero(hasMessages, welcome) {
+  if (!emptyHeroEl) return;
+  emptyHeroEl.hidden = Boolean(hasMessages);
+  if (welcome && emptyTitleEl) emptyTitleEl.textContent = welcome;
+}
+
+document.addEventListener('click', (ev) => {
+  const chip = ev.target.closest && ev.target.closest('.empty-chip');
+  if (!chip) return;
+  inputEl.value = chip.textContent.trim();
+  autosize();
+  inputEl.focus();
+});
 
 function renderHistory(items) {
   // 先合并：工具循环在库里会留好几条连续的 assistant，
@@ -912,6 +929,7 @@ function renderHistory(items) {
     }
     renderAssistantBlock(block.text);
   });
+  updateEmptyHero(blocks.length > 0);
 }
 
 /* 渲染一条 assistant 正文：按 [[artifact:...]] 切成几段，段内再处理表情包标记 */
