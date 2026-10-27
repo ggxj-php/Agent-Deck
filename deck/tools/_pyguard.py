@@ -30,10 +30,12 @@ WRITE_EVENTS = frozenset((
 READ_EVENTS = frozenset(("os.listdir", "os.scandir", "os.chdir"))
 
 # 不许导入的模块：这些能绕开路径检查直接碰系统
+# 注意只禁 urllib.request / http.client，不要禁整个 urllib——
+# urllib.parse 是纯字符串解析，pathlib（连带 zipfile / docx）都依赖它，一刀切会全炸。
 BLOCKED_MODULES = frozenset((
     "ctypes", "_ctypes", "_winapi", "msvcrt", "subprocess", "socket",
-    "winreg", "multiprocessing", "urllib", "http", "ftplib", "smtplib",
-    "telnetlib",
+    "winreg", "multiprocessing", "urllib.request", "urllib.error",
+    "http.client", "ftplib", "smtplib", "telnetlib",
 ))
 
 
@@ -79,6 +81,30 @@ def main():
             continue
         roots.add(full)
 
+    # 项目里的 venv 整个 root 不能加（会把 .env / admin.json 送出去），
+    # 但第三方库都在 venv 的 site-packages 里：不加进来连 import docx 都会因为
+    # 「读 workspace 以外的文件」被拦。site-packages 里只有库代码，单独放行。
+    for getter in ("getsitepackages", "getusersitepackages"):
+        try:
+            import site
+
+            values = getattr(site, getter)()
+            values = values if isinstance(values, list) else [values]
+            for path in values:
+                if path and os.path.isdir(path):
+                    roots.add(os.path.normcase(os.path.realpath(path)))
+        except Exception:                    # noqa: BLE001
+            pass
+    try:
+        import sysconfig
+
+        for key in ("purelib", "platlib"):
+            path = sysconfig.get_paths().get(key)
+            if path and os.path.isdir(path):
+                roots.add(os.path.normcase(os.path.realpath(path)))
+    except Exception:                        # noqa: BLE001
+        pass
+
     def deny(what):
         raise PermissionError(f"安全拦截：{what}。助手的代码只准在 workspace 里活动")
 
@@ -88,7 +114,10 @@ def main():
             if name in BLOCKED_MODULES or any(
                 name.startswith(m + ".") for m in BLOCKED_MODULES
             ):
-                deny(f"导入 {name} 模块被禁止（可能绕开安全限制）")
+                # 抛 ImportError 而不是 PermissionError：标准库里有些 import 是
+                # try ... except ImportError 的（比如 ntpath 试 _winapi、pathlib 试 nt），
+                # 抛别的异常会把正常库的 import 链整个炸掉。
+                raise ImportError(f"安全拦截：导入 {name} 模块被禁止（可能绕开安全限制）")
             return
 
         if event == "open":
