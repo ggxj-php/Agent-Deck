@@ -2856,7 +2856,7 @@ body.drop-active::after {
 }
 
 /* ---------- 电脑端美化（手机端不动）---------- */
-@media (min-width: 900px) and (pointer: fine) {
+@media (min-width: 900px) {
   body.chat-page #messages { max-width: 920px; margin: 0 auto; padding: 20px 18px 12px; }
   body.chat-page .composer { max-width: 920px; margin: 0 auto 10px; }
   .bubble {
@@ -2890,7 +2890,7 @@ body.drop-active::after {
    电脑端（≥900px 且鼠标设备）：豆包式极简布局
    白底 / 浅灰边栏 / 居中对话列 / 大圆角输入卡片 / 空状态示例问题
    ============================================================ */
-@media (min-width: 900px) and (pointer: fine) {
+@media (min-width: 900px) {
   :root {
     --desk-col: 780px;
     --side-w: 260px;
