@@ -177,6 +177,67 @@ def sweep(ttl=TTL_SECONDS):
     return removed
 
 
+# ---------- 通用文件（非图片）上传 ----------
+FILE_MAX_BYTES = 20 * 1024 * 1024          # 单文件 20MB
+FILE_MAX_COUNT = 6
+FILE_EXTS = (".pdf", ".docx", ".doc", ".txt", ".md", ".csv", ".json", ".py",
+             ".js", ".ts", ".java", ".c", ".cpp", ".h", ".zip", ".xlsx", ".pptx",
+             ".html", ".xml", ".yaml", ".yml", ".log", ".sql")
+
+_SAFE_NAME = re.compile(r"[^\w.\-\u4e00-\u9fff]+")
+
+
+def _clean_filename(name):
+    """只留文件名本身：去掉目录、控制字符、把危险符号换成 _。"""
+    name = os.path.basename(str(name or "")).strip()
+    name = _SAFE_NAME.sub("_", name).strip("._") or "file"
+    return name[:80]
+
+
+def save_file(name, data_url, owner=None):
+    """保存一个用户上传的普通文件（base64 data URL）。返回 (info, error)。"""
+    raw_name = str(name or "")
+    clean = _clean_filename(raw_name)
+    ext = os.path.splitext(clean)[1].lower()
+    if ext not in FILE_EXTS:
+        return None, f"不支持这种文件类型（{ext or '无扩展名'}），能传：{' '.join(FILE_EXTS)}"
+    match = _DATA_URL.match(str(data_url or ""))
+    if not match:
+        return None, "文件内容不是合法的 data URL"
+    try:
+        data = base64.b64decode(match.group(1), validate=True)
+    except (binascii.Error, ValueError):
+        return None, "文件内容解码失败"
+    if len(data) > FILE_MAX_BYTES:
+        return None, f"文件太大（{len(data) // 1024 // 1024}MB，上限 {FILE_MAX_BYTES // 1024 // 1024}MB）"
+    if not data:
+        return None, "空文件"
+
+    sweep()
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    index = _load_index()
+    fid = secrets.token_hex(6)
+    stored = f"{fid}{ext}"
+    path = os.path.join(UPLOAD_DIR, stored)
+    with open(path, "wb") as fp:
+        fp.write(data)
+    index[fid] = {"file": stored, "ts": time.time(), "owner": owner,
+                  "kind": "file", "name": clean, "size": len(data), "ext": ext}
+    _save_index(index)
+    return {"id": fid, "path": f"uploads/{stored}", "name": clean,
+            "size": len(data), "ext": ext}, ""
+
+
+def file_info(fid):
+    """按 id 取已上传文件的信息（文件名 / 路径 / 大小），给别人拼标记用。"""
+    item = _load_index().get(str(fid or ""))
+    if not item or item.get("kind") != "file":
+        return None
+    return {"id": str(fid), "path": f"uploads/{item.get('file')}",
+            "name": item.get("name") or item.get("file"),
+            "size": int(item.get("size") or 0), "ext": item.get("ext") or ""}
+
+
 # ---------------- 存 / 取 ----------------
 
 def save(data_urls, owner=None):
