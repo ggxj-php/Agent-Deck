@@ -3120,3 +3120,22 @@ body.drop-active::after {
   .attach-pop { border-radius: 14px; border-color: #ececf1; box-shadow: 0 8px 24px rgba(16, 24, 40, .12); }
   #to-bottom { right: calc(50% - var(--desk-col) / 2 + 6px); }
 }
+
+/* ---------- 用户消息里的附件卡片 ---------- */
+.sent-files { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+.sent-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .28);
+  border: 1px solid rgba(255, 255, 255, .45);
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+.sent-file-icon { display: flex; }
+.sent-file-icon svg { width: 15px; height: 15px; }
+.sent-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; }
+.sent-file-size { opacity: .75; font-size: 11px; flex: none; }

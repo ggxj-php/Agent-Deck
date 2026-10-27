@@ -856,7 +856,37 @@ toBottomEl.addEventListener('click', () => {
 
 /* ---------------- 消息渲染 ---------------- */
 
-function addUser(text, images) {
+
+/* 后端会在用户消息里塞 [附件 #id uploads/xxx（名字，大小KB）：…] 标记，
+   聊天记录里把它变成一排文件卡片，并把标记文本从显示内容里去掉。 */
+const ATTACH_MARK_RE = /\[附件 #([0-9a-f]+) uploads\/([^\s（]+)（([^，]*)，(\d+)KB）：[^\]]*\]/g;
+
+function splitAttachments(text) {
+  const files = [];
+  const clean = String(text || '').replace(ATTACH_MARK_RE, (m, id, fname, name, size) => {
+    files.push({ id, name: name || fname, size: Number(size) * 1024 });
+    return '';
+  }).replace(/\n{3,}/g, '\n\n').trim();
+  return { clean, files };
+}
+
+function fileChips(files) {
+  const wrap = el('div', 'sent-files');
+  files.forEach((file) => {
+    const item = el('div', 'sent-file');
+    const icon = el('span', 'sent-file-icon');
+    icon.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v5h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+    const name = el('span', 'sent-file-name');
+    name.textContent = file.name;
+    const size = el('span', 'sent-file-size');
+    size.textContent = `${Math.max(1, Math.round((file.size || 0) / 1024))}KB`;
+    item.append(icon, name, size);
+    wrap.appendChild(item);
+  });
+  return wrap;
+}
+
+function addUser(text, images, files) {
   const row = el('div', 'msg user');
   const bubble = el('div', 'bubble');
   if (images && images.length) {
@@ -869,6 +899,7 @@ function addUser(text, images) {
     });
     bubble.appendChild(wrap);
   }
+  if (files && files.length) bubble.appendChild(fileChips(files));
   if (text) {
     const box = el('div', 'text');
     box.textContent = text;
@@ -922,9 +953,12 @@ function renderHistory(items) {
       const re = new RegExp(HISTORY_IMG_MARK.source, 'g');
       let hit;
       while ((hit = re.exec(block.text)) !== null) ids.push(hit[1]);
-      const body = block.text.replace(HISTORY_IMG_MARK, '').trim();
-      addUser(body || (ids.length ? '' : '（空消息）'),
-              ids.map((id) => `/api/uploads/${id}`));
+      let body = block.text.replace(HISTORY_IMG_MARK, '').trim();
+      const parsed = splitAttachments(body);
+      body = parsed.clean;
+      addUser(body || (ids.length || parsed.files.length ? '' : '（空消息）'),
+              ids.map((id) => `/api/uploads/${id}`),
+              parsed.files);
       return;
     }
     renderAssistantBlock(block.text);
@@ -2047,7 +2081,7 @@ async function send(text, images) {
   // 先把待发附件记下来：clearImage() 会把 pendingFiles 清空，
   // 之前就是它抢在组装请求前清掉，导致 agent 永远收不到附件
   const filesToSend = pendingFiles.map((f) => ({ id: f.id }));
-  addUser(text, images);
+  addUser(text, images, filesToSend);
   clearImage();
 
   const turn = addAgent();
