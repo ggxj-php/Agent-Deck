@@ -18,8 +18,8 @@ from .tools.sticker import MOODS, pick_sticker
 
 # 工具轮次治理：一次提问里「模型 → 工具 → 模型」的往返次数。
 # 每多一轮就多一次完整模型请求（实测 8~12 秒），所以要主动压缩。
-TOOL_ROUND_SOFT = 6     # 到 6 轮就在工具结果里提醒：够了就答，别继续硬试
-TOOL_ROUND_HARD = 5
+# 工具轮次不再做人为限制（MAX_ROUNDS 只是防死循环的兜底），
+# 用户明确要求：别在跑到一半时自动掐断
 
 # 输出被 max_tokens 截断时，自动接着写几轮（不用用户点「继续」）
 AUTO_RESUME_LIMIT = 2
@@ -431,9 +431,7 @@ class DeckAgent:
         try:
             stickers_sent = 0
             recent_sigs = []          # 最近的工具调用签名，用来发现重复重试
-            tool_rounds = 0           # 这次提问里已经跑了几轮工具
             auto_resumes = 0          # 输出被截断后自动续写了几次
-            force_final = False       # 工具轮次到上限：下一轮不给工具，逼它直接给答案
             search_counts = {}        # 这一轮各搜索工具调了几次
             search_cache = {}         # 工具名 -> [(特征集合, 结果)]，判定「又搜了一遍」
 
@@ -446,9 +444,8 @@ class DeckAgent:
                 guard = _LeakGuard(settings.system_prompt())
                 picked = []          # 这一轮发出去的表情包（心情, 文件名）
                 try:
-                    round_specs = [] if force_final else active_specs()
                     for kind, payload in stream_chat(
-                        _sendable(_trim_history(_rehydrate(self.messages))), round_specs, model,
+                        _sendable(_trim_history(_rehydrate(self.messages))), active_specs(), model,
                         api_key=api_key, base_url=base_url, thinking=think,
                     ):
                         if kind == "message":
@@ -514,9 +511,6 @@ class DeckAgent:
                     yield {"type": "error", "message": "模型这一轮没吐内容，跳过它，再问一次就好"}
                     return
 
-                if force_final and message.get("tool_calls") and message.get("content"):
-                    # 已经说了别用工具它还想用：把正文当最终答案，不再执行工具
-                    message = {"role": "assistant", "content": message.get("content")}
                 self.messages.append(message)
                 calls = message.get("tool_calls")
                 if not calls:
@@ -680,27 +674,6 @@ class DeckAgent:
                         "tool_call_id": call.get("id"),
                         "content": result,
                     })
-
-                # ---- 压缩工具轮次 ----
-                tool_rounds += 1
-                if not sticker_only and tool_rounds >= TOOL_ROUND_SOFT:
-                    nudge = (f"\n\n⚠️ 这次提问已经连续调用工具 {tool_rounds} 轮了。"
-                             "信息够了就**直接给出最终回答**，不要再搜/再开网页；"
-                             "确实不够就先说明还差什么，别继续硬试。")
-                    for item in reversed(self.messages):
-                        if item.get("role") == "tool":
-                            item["content"] = str(item.get("content") or "") + nudge
-                            break
-                if not sticker_only and tool_rounds >= TOOL_ROUND_HARD and not force_final:
-                    # 以前这里直接收尾，用户看到的是一串工具卡片、没有最终答案，还得手动说「继续」。
-                    # 现在改成：去掉工具再跑一轮，逼它用已有结果直接给最终回答。
-                    force_final = True
-                    self.messages.append({
-                        "role": "user",
-                        "content": ("（工具已经跑了这么多轮，够了。这一轮**不要再调用任何工具**，"
-                                    "直接根据已经拿到的结果给出最终答案。）"),
-                    })
-                    continue
 
                 # 收尾：正文写完了、工具只调了表情包 → 这一轮到此为止，
                 # 不再给模型「接着说」的机会，这是治刷屏的关键一步。
