@@ -40,7 +40,7 @@ SITE_API = os.environ.get("TAFFY_SITE_API", "").strip().lower() or "api.example.
 # 复杂问题上思考一开，2048 / 4096 很容易被思考吃光，正文一个字都轮不到，表现就是
 # 「思考到一半戛然而止、这一轮没有任何回答」。所以放到 16384，给正文留足空间。
 # 代价是单次请求的成本上限变高，但比付了钱拿回一个空回复划算。
-MAX_TOKENS = 16384
+MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "32768") or 0)
 
 # 「关思考」要发给接口的那个参数名。百炼 / DashScope 系的中转认 enable_thinking，
 # 网页上那个「思考」开关就靠它生效。换成不认这个参数的接口（有些官方 API 会对

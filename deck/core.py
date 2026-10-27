@@ -19,7 +19,10 @@ from .tools.sticker import MOODS, pick_sticker
 # 工具轮次治理：一次提问里「模型 → 工具 → 模型」的往返次数。
 # 每多一轮就多一次完整模型请求（实测 8~12 秒），所以要主动压缩。
 TOOL_ROUND_SOFT = 3     # 到 3 轮就在工具结果里提醒：够了就答，别继续硬试
-TOOL_ROUND_HARD = 5     # 到 5 轮直接收尾，把目前的结论给用户（再多也是白烧时间）
+TOOL_ROUND_HARD = 5
+
+# 输出被 max_tokens 截断时，自动接着写几轮（不用用户点「继续」）
+AUTO_RESUME_LIMIT = 2     # 到 5 轮直接收尾，把目前的结论给用户（再多也是白烧时间）
 
 # 内联图片只认 data:image/...;base64,... 这种。上限按 base64 字符串长度算，
 _IMAGE_PREFIX = "data:image/"
@@ -407,6 +410,7 @@ class DeckAgent:
             stickers_sent = 0
             recent_sigs = []          # 最近的工具调用签名，用来发现重复重试
             tool_rounds = 0           # 这次提问里已经跑了几轮工具
+            auto_resumes = 0          # 输出被截断后自动续写了几次
 
             for _ in range(MAX_ROUNDS):
                 message = None
@@ -484,9 +488,18 @@ class DeckAgent:
                 self.messages.append(message)
                 calls = message.get("tool_calls")
                 if not calls:
+                    if finish_reason == "length" and auto_resumes < AUTO_RESUME_LIMIT:
+                        # 输出被 max_tokens 截断了（思考吃掉了大半预算）：自动接着写。
+                        # 不打断流、不用用户点「继续」，模型从断点往下写就行。
+                        auto_resumes += 1
+                        self.messages.append({
+                            "role": "user",
+                            "content": RESUME_INSTRUCTION,
+                        })
+                        continue
                     finished = True
                     if finish_reason == "length":
-                        # 输出被 max_tokens 截断了：正文只写了一半，提示可以发「继续」
+                        # 自动续写次数用完了还是截断：提示用户可以发「继续」
                         self.cut_off = True
                         yield {"type": "cut", "reason": "输出达到长度上限被截断"}
                     yield {"type": "done", "context": self.context_usage()}
