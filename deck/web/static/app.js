@@ -1878,9 +1878,10 @@ async function refreshContext() {
    静默太久就自己掐掉，把状态放出来。 */
 const STREAM_IDLE_MS = 60000;
 
-async function streamChat(id, message, onEvent, images) {
+async function streamChat(id, message, onEvent, images, files) {
   const body = { session_id: id, message, thinking: thinkingOn() };
   if (images && images.length) body.images = images;
+  if (files && files.length) body.files = files;
 
   const controller = new AbortController();
   let idleTimer = null;
@@ -2043,6 +2044,9 @@ async function send(text, images) {
   inputEl.value = '';
   autosize();
   statusEl.textContent = thinkingText();
+  // 先把待发附件记下来：clearImage() 会把 pendingFiles 清空，
+  // 之前就是它抢在组装请求前清掉，导致 agent 永远收不到附件
+  const filesToSend = pendingFiles.map((f) => ({ id: f.id }));
   addUser(text, images);
   clearImage();
 
@@ -2050,7 +2054,7 @@ async function send(text, images) {
   showLoading(turn);            // 首字回来之前先显示「正在想…」
   try {
     const id = await ensureSession();
-    await streamChat(id, text, (event) => handleEvent(turn, event), images);
+    await streamChat(id, text, (event) => handleEvent(turn, event), images, filesToSend);
   } catch (err) {
     errorBubble(turn, err && err.message ? err.message : String(err), true);
   } finally {
