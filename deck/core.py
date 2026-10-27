@@ -250,7 +250,7 @@ def _rehydrate(messages, max_images=3, window=2):
 # 以前试过把参数替换成 {"_omitted": true} —— 结果模型看到自己历史上带着这个参数，
 # 照抄着调用了 write_file(_omitted=True)，报错后又重试，直接死循环。所以改成整对删除：
 # 删掉的部分模型完全看不到，不会再有奇怪的示范。
-TRIM_KEEP_TOOL = 2
+TRIM_KEEP_TOOL = 4
 
 
 def _trim_history(messages):
@@ -273,11 +273,15 @@ def _trim_history(messages):
         else:
             i += 1
 
-    if len(rounds) <= TRIM_KEEP_TOOL:
-        return list(messages)
+    # 当前这一轮（最后一条 user 之后）产生的工具结果**一律保留**：
+    # 以前只留最近 2 轮，模型跑到第 5、6 轮时就把「刚刚搜到的知识库原题」删掉了，
+    # 于是后面自相矛盾地说「没有这类题」——这是真踩过的坑。
+    last_user = max((i for i, msg in enumerate(messages)
+                     if msg.get("role") == "user"), default=-1)
+    older_rounds = [r for r in rounds if r[0] <= last_user]
 
     drop = set()
-    for ai, tool_idx in rounds[: len(rounds) - TRIM_KEEP_TOOL]:
+    for ai, tool_idx in older_rounds[: max(0, len(older_rounds) - TRIM_KEEP_TOOL)]:
         drop.add(ai)
         drop.update(tool_idx)
     return [msg for idx, msg in enumerate(messages) if idx not in drop]
