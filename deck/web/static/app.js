@@ -2097,7 +2097,7 @@ function renderAttachBar() {
   pendingFiles.forEach((file, index) => {
     const item = el('div', 'attach-item attach-file');
     const icon = el('div', 'attach-file-icon');
-    icon.textContent = '📄';
+    icon.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v5h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
     const name = el('div', 'attach-file-name');
     name.textContent = file.name;
     name.title = `${file.name}（${Math.round((file.size || 0) / 1024)}KB）`;

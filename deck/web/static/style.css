@@ -2875,3 +2875,13 @@ body.drop-active::after {
   .tool { border-radius: 12px; }
   .attach-pop { border-radius: 16px; }
 }
+
+/* ---------- ＋号与菜单图标（描边 SVG，跟主题同色）---------- */
+.icon-btn svg { width: 20px; height: 20px; display: block; }
+.icon-plus svg { width: 22px; height: 22px; }
+.icon-plus { color: var(--pink-deep); }
+.icon-plus:hover { background: #fff0f7; }
+.attach-opt { display: flex; align-items: center; gap: 10px; }
+.attach-opt svg { width: 18px; height: 18px; flex: none; color: var(--pink-deep); }
+.attach-file-icon { color: var(--pink-deep); display: flex; }
+.attach-file-icon svg { width: 22px; height: 22px; }
