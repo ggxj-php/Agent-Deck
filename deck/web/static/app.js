@@ -1134,7 +1134,23 @@ function stickerImg(value) {
   return img;
 }
 
+function stripStickerTokensInCode(root) {
+  // 万一占位符落进了 <pre>/<code>，界面上只会显示 @@sticker:2@@ 这种乱码 → 清掉
+  if (!root) return;
+  root.querySelectorAll('pre, code').forEach((box) => {
+    const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT, null);
+    const nodes = [];
+    while (walker.nextNode()) {
+      if (walker.currentNode.nodeValue.includes('@@sticker:')) nodes.push(walker.currentNode);
+    }
+    nodes.forEach((node) => {
+      node.nodeValue = node.nodeValue.replace(/@@sticker:\d+@@/g, '');
+    });
+  });
+}
+
 function hydrateStickers(root, moods) {
+  stripStickerTokensInCode(root);
   if (!moods || !moods.length || !root) return;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
   const nodes = [];
@@ -1185,6 +1201,9 @@ function flushQueuedStickers(turn, force) {
   }
   const endsAtBoundary = /[。！？!?…；;\n]\s*$/.test(turn.content.raw);
   if (!force && !endsAtBoundary) return;
+  // 正文正处在未闭合的 ``` 代码围栏里：先别插，否则占位符会落进代码块变成乱码
+  const fences = (turn.content.raw.match(/```/g) || []).length;
+  if (!force && fences % 2 === 1) return;
   const index = turn.queuedStickers.shift();
   contentChunk(turn, `@@sticker:${index}@@`);
   if (force && turn.queuedStickers.length) flushQueuedStickers(turn, true);
