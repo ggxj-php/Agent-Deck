@@ -466,7 +466,10 @@ class DeckAgent:
                         print("[leak-guard] 拦下一段疑似系统提示原文", file=sys.stderr)
                 except Exception as exc:
                     last_round = "".join(chunks)
-                    yield {"type": "error", "message": f"模型请求失败：{exc}"}
+                    yield {"type": "error",
+                           "message": f"模型请求失败：{exc}"
+                                      "（网络/接口抖了一下。别从头重做，直接从断点继续；"
+                                      "点下面的按钮或发「继续」就行）"}
                     return
                 last_round = "".join(chunks)
                 stickers_sent = splitter.used
