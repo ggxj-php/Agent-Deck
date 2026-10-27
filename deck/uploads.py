@@ -30,6 +30,9 @@ INDEX_PATH = os.path.join(PROJECT_ROOT, ".cache", "upload_index.json")
 MAX_BYTES = 4 * 1024 * 1024
 MAX_COUNT = 6
 MAX_SIDE = 8000
+# 太大就不喂原图给模型：视觉 token 按像素算，手机长截图（1080x2400）
+# 直接拖慢首字 10~20 秒；缩到这个尺寸内再发给模型
+MAX_MODEL_SIDE = int(os.environ.get("UPLOAD_MAX_MODEL_SIDE", "1280") or 0)
 MAX_AFTER_ENCODE = 3 * 1024 * 1024
 TTL_SECONDS = 20 * 60          # 上传的图片只留 20 分钟，过期自动清掉
 SUMMARY_MAX_TOKENS = 500
@@ -87,6 +90,12 @@ def _normalize(data):
         return None, "", f"解不开（{exc}）"
     if max(img.size) > MAX_SIDE:
         return None, "", f"尺寸太大（{img.size[0]}x{img.size[1]}，上限 {MAX_SIDE}px）"
+
+    # 缩到模型友好的尺寸：像素越多视觉 token 越多，手机长截图会让首字等 10~20 秒
+    if MAX_MODEL_SIDE and max(img.size) > MAX_MODEL_SIDE:
+        ratio = MAX_MODEL_SIDE / max(img.size)
+        img = img.resize((max(1, int(img.size[0] * ratio)),
+                          max(1, int(img.size[1] * ratio))), Image.LANCZOS)
 
     has_alpha = img.mode in ("RGBA", "LA") or (
         img.mode == "P" and "transparency" in img.info)
