@@ -759,6 +759,22 @@ function renderBlockIncremental(block) {
   }
   const moods = block.turn ? block.turn.stickers : [];
 
+  // 代码围栏还没闭合时，不做「稳定段落搬进 head」的增量优化：
+  // 一旦把半个围栏搬进 head、剩下半个留在 tail，markdown 会把 ```asm 当普通文字、
+  // 再单独开一个空代码块（用户看到的就是「代码跑到卡片外面」）。
+  // 这时候干脆整块重渲，慢一点但一定正确。
+  const fencesOpen = (raw.match(/```/g) || []).length % 2 === 1;
+  if (fencesOpen) {
+    block.head.innerHTML = '';
+    block.rendered = 0;
+    block.tail.innerHTML = renderMarkdown(raw);
+    restoreMath(block.tail, lastMathBag);
+    enhance(block.tail);
+    hydrateStickers(block.tail, moods);
+    scheduleTypeset(block.tail);
+    return;
+  }
+
   const cut = stableSplit(raw);
   if (cut > block.rendered) {
     // 稳定段落：渲染一次后整块搬进 head，后面不再碰它
