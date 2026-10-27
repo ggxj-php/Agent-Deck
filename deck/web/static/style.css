@@ -2856,7 +2856,7 @@ body.drop-active::after {
 }
 
 /* ---------- 电脑端美化（手机端不动）---------- */
-@media (min-width: 900px) {
+@media (min-width: 900px) and (pointer: fine) {
   body.chat-page #messages { max-width: 920px; margin: 0 auto; padding: 20px 18px 12px; }
   body.chat-page .composer { max-width: 920px; margin: 0 auto 10px; }
   .bubble {
@@ -2891,7 +2891,7 @@ body.drop-active::after {
    结构：左侧固定边栏（fixed）+ 右侧内容整体右移，中间一条 860px 的对话列
    手机端完全不受影响
    ============================================================ */
-@media (min-width: 900px) {
+@media (min-width: 900px) and (pointer: fine) {
   :root { --desk-col: 860px; --side-w: 272px; }
 
   html, body.chat-page {
