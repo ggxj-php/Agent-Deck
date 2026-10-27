@@ -21,8 +21,6 @@ from .tools.sticker import MOODS, pick_sticker
 # 工具轮次不再做人为限制（MAX_ROUNDS 只是防死循环的兜底），
 # 用户明确要求：别在跑到一半时自动掐断
 
-# 输出被 max_tokens 截断时，自动接着写几轮（不用用户点「继续」）
-AUTO_RESUME_LIMIT = 2
 
 # 搜索类工具在一轮提问里最多调几次（提示词管不住模型，这里硬拦）
 SEARCH_TOOLS = ("web_search", "search_knowledge")
@@ -431,7 +429,6 @@ class DeckAgent:
         try:
             stickers_sent = 0
             recent_sigs = []          # 最近的工具调用签名，用来发现重复重试
-            auto_resumes = 0          # 输出被截断后自动续写了几次
             search_counts = {}        # 这一轮各搜索工具调了几次
             search_cache = {}         # 工具名 -> [(特征集合, 结果)]，判定「又搜了一遍」
 
@@ -514,15 +511,6 @@ class DeckAgent:
                 self.messages.append(message)
                 calls = message.get("tool_calls")
                 if not calls:
-                    if finish_reason == "length" and auto_resumes < AUTO_RESUME_LIMIT:
-                        # 输出被 max_tokens 截断了（思考吃掉了大半预算）：自动接着写。
-                        # 不打断流、不用用户点「继续」，模型从断点往下写就行。
-                        auto_resumes += 1
-                        self.messages.append({
-                            "role": "user",
-                            "content": RESUME_INSTRUCTION,
-                        })
-                        continue
                     finished = True
                     if finish_reason == "length":
                         # 自动续写次数用完了还是截断：提示用户可以发「继续」
