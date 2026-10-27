@@ -22,7 +22,29 @@ TOOL_ROUND_SOFT = 3     # 到 3 轮就在工具结果里提醒：够了就答，
 TOOL_ROUND_HARD = 5
 
 # 输出被 max_tokens 截断时，自动接着写几轮（不用用户点「继续」）
-AUTO_RESUME_LIMIT = 2     # 到 5 轮直接收尾，把目前的结论给用户（再多也是白烧时间）
+AUTO_RESUME_LIMIT = 2
+
+# 搜索类工具在一轮提问里最多调几次（提示词管不住模型，这里硬拦）
+SEARCH_TOOLS = ("web_search", "search_knowledge")
+TURN_SEARCH_LIMIT = 2
+
+
+def _query_bag(arguments):
+    """把查询参数拆成特征集合，用来判断「是不是又搜了同一件事」。"""
+    try:
+        data = json.loads(arguments or "{}")
+    except Exception:                        # noqa: BLE001
+        return set()
+    text = " ".join(str(v) for v in data.values() if isinstance(v, (str, int)))
+    cn = set(re.findall(r"[\u4e00-\u9fff]{2}", text))
+    en = {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9_.+-]{1,}", text)}
+    return cn | en
+
+
+def _similar(a, b):
+    if not a or not b:
+        return False
+    return len(a & b) / max(1, len(a | b)) >= 0.6     # 到 5 轮直接收尾，把目前的结论给用户（再多也是白烧时间）
 
 # 内联图片只认 data:image/...;base64,... 这种。上限按 base64 字符串长度算，
 _IMAGE_PREFIX = "data:image/"
@@ -411,6 +433,8 @@ class DeckAgent:
             recent_sigs = []          # 最近的工具调用签名，用来发现重复重试
             tool_rounds = 0           # 这次提问里已经跑了几轮工具
             auto_resumes = 0          # 输出被截断后自动续写了几次
+            search_counts = {}        # 这一轮各搜索工具调了几次
+            search_cache = {}         # 工具名 -> [(特征集合, 结果)]，判定「又搜了一遍」
 
             for _ in range(MAX_ROUNDS):
                 message = None
@@ -543,6 +567,30 @@ class DeckAgent:
                     yield {"type": "tool_start", "name": plan["name"],
                            "arguments": plan["arguments"]}
 
+                # 搜索类工具硬限制：一轮最多 2 次；查询词几乎一样就直接复用上次结果
+                for plan in plans:
+                    name = plan["name"]
+                    if name not in SEARCH_TOOLS:
+                        continue
+                    bag = _query_bag(plan.get("arguments"))
+                    cached = search_cache.get(name) or []
+                    same = next((r for feat, r in cached if _similar(feat, bag)), None)
+                    if same is not None:
+                        plan["reused"] = True
+                        plan["args"] = {}
+                        plan["result"] = (str(same) + "\n\n（和这一轮之前搜的几乎是同一件事，"
+                                                    "直接用上面的结果，别重复搜）")
+                        continue
+                    count = search_counts.get(name, 0)
+                    if count >= TURN_SEARCH_LIMIT:
+                        plan["reused"] = True
+                        plan["args"] = {}
+                        plan["result"] = (f"（这一轮已经调过 {count} 次 {name} 了，够了。"
+                                          "别再搜，直接按已有资料给出最终答案。）")
+                        continue
+                    plan["_bag"] = bag
+                    search_counts[name] = count + 1
+
                 todo = [p for p in plans if not p["reused"]]
                 if len(todo) == 1:
                     one = todo[0]
@@ -556,6 +604,9 @@ class DeckAgent:
                             item["args"], item["result"] = future.result()
 
                 for plan in plans:
+                    if plan.get("_bag") and plan.get("result"):
+                        search_cache.setdefault(plan["name"], []).append(
+                            (plan["_bag"], plan["result"]))
                     if plan["reused"]:
                         first = next(p for p in plans
                                      if p["signature"] == plan["signature"] and not p["reused"])
