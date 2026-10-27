@@ -632,9 +632,18 @@ function typesetMath(root) {
   }
 }
 
+/* Agent 有时把下载链接直接写成一串 /d/<token>/文件名，markdown 不会自动识别（不是 http 开头）。
+   这里在渲染前把它替换成可点击的 markdown 链接，显示成「下载附件」。 */
+function linkifyDownloads(text) {
+  return String(text || '').replace(
+    /(^|[^\w(])(\/d\/[0-9a-f]{32}(?:\/[^\s)\]）>,，。]+)?)/g,
+    (m, prefix, url) => `${prefix}[⬇ 下载附件](${url})`,
+  );
+}
+
 function renderMarkdown(text) {
   mathBag = [];
-  const html = DOMPurify.sanitize(marked.parse(mathify(text)), SANITIZE_CONFIG);
+  const html = DOMPurify.sanitize(marked.parse(mathify(linkifyDownloads(text))), SANITIZE_CONFIG);
   lastMathBag = mathBag;
   mathBag = [];
   return html;
