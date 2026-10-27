@@ -31,7 +31,8 @@ from .. import persona as persona_mod
 from ..config import CONTEXT_COMPRESS_AT
 from ..core import DeckAgent
 from ..kb import warmup
-from ..tools import download as download_tool, render as render_tool
+from ..tools import download as download_tool
+from ..tools import render as render_tool
 from . import stickers
 from .admin import router as admin_router
 from .content import router as content_router
