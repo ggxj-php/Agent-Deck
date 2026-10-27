@@ -575,14 +575,14 @@ class DeckAgent:
                     cached = search_cache.get(name) or []
                     same = next((r for feat, r in cached if _similar(feat, bag)), None)
                     if same is not None:
-                        plan["reused"] = True
+                        plan["blocked"] = True
                         plan["args"] = {}
                         plan["result"] = (str(same) + "\n\n（和这一轮之前搜的几乎是同一件事，"
                                                     "直接用上面的结果，别重复搜）")
                         continue
                     count = search_counts.get(name, 0)
                     if count >= TURN_SEARCH_LIMIT:
-                        plan["reused"] = True
+                        plan["blocked"] = True
                         plan["args"] = {}
                         plan["result"] = (f"（这一轮已经调过 {count} 次 {name} 了，够了。"
                                           "别再搜，直接按已有资料给出最终答案。）")
@@ -590,7 +590,7 @@ class DeckAgent:
                     plan["_bag"] = bag
                     search_counts[name] = count + 1
 
-                todo = [p for p in plans if not p["reused"]]
+                todo = [p for p in plans if not p["reused"] and not p.get("blocked")]
                 if len(todo) == 1:
                     one = todo[0]
                     one["args"], one["result"] = _safe_execute(one["name"], one["call"])
@@ -606,11 +606,15 @@ class DeckAgent:
                     if plan.get("_bag") and plan.get("result"):
                         search_cache.setdefault(plan["name"], []).append(
                             (plan["_bag"], plan["result"]))
+                    if plan.get("blocked"):
+                        continue          # 被拦掉的：result 已经写好了，直接回填
                     if plan["reused"]:
-                        first = next(p for p in plans
-                                     if p["signature"] == plan["signature"] and not p["reused"])
-                        plan["args"], plan["result"] = first["args"], first["result"]
-                        plan["result"] = (str(plan["result"])
+                        first = next((p for p in plans
+                                      if p["signature"] == plan["signature"] and not p["reused"]),
+                                     None)
+                        if first is not None:
+                            plan["args"], plan["result"] = first["args"], first["result"]
+                        plan["result"] = (str(plan.get("result") or "")
                                           + "\n\n（同一轮里已经查过一模一样的内容，这是复用上次结果）")
                     if plan["repeated"]:
                         plan["result"] = (str(plan["result"]) + "\n\n⚠️ 同样的调用已经连续重复 3 次了，"
