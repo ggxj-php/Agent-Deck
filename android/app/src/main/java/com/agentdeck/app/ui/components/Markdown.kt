@@ -226,7 +226,7 @@ fun parseMarkdown(source: String): List<MdBlock> {
         val heading = HEADING.find(trimmed)
         if (heading != null) {
             flushParagraph(paragraph)
-            blocks += MdBlock.Heading(heading.groupValues[1].length, demath(heading.groupValues[2].trim()))
+            blocks += MdBlock.Heading(heading.groupValues[1].length, heading.groupValues[2].trim())
             index++
             continue
         }
@@ -254,7 +254,7 @@ fun parseMarkdown(source: String): List<MdBlock> {
                 quote.append(lines[index].trim().removePrefix(">").trim())
                 index++
             }
-            blocks += MdBlock.Quote(demath(quote.toString()))
+            blocks += MdBlock.Quote(quote.toString())
             continue
         }
 
@@ -263,7 +263,7 @@ fun parseMarkdown(source: String): List<MdBlock> {
             flushParagraph(paragraph)
             val items = mutableListOf<String>()
             while (index < lines.size && BULLET.matches(lines[index])) {
-                items += demath(BULLET.find(lines[index])!!.groupValues[1])
+                items += BULLET.find(lines[index])!!.groupValues[1]
                 index++
             }
             blocks += MdBlock.Bullet(items)
@@ -276,7 +276,7 @@ fun parseMarkdown(source: String): List<MdBlock> {
             val items = mutableListOf<Pair<String, String>>()
             while (index < lines.size && ORDERED.matches(lines[index])) {
                 val match = ORDERED.find(lines[index])!!
-                items += match.groupValues[1] to demath(match.groupValues[2])
+                items += match.groupValues[1] to match.groupValues[2]
                 index++
             }
             blocks += MdBlock.Numbered(items)
@@ -291,7 +291,7 @@ fun parseMarkdown(source: String): List<MdBlock> {
 }
 
 private fun splitRow(line: String): List<String> =
-    line.trim().trim('|').split('|').map { demath(it.trim()) }
+    line.trim().trim('|').split('|').map { it.trim() }
 
 @Composable
 fun MarkdownText(
@@ -336,57 +336,20 @@ private fun MdBlockView(
             )
         }
 
-        is MdBlock.Paragraph -> {
-            val segments = remember(block.text) { splitInlineMath(block.text) }
-            if (segments.none { it.math }) {
-                val text = remember(block.text, palette.accent) { inline(block.text, palette) }
-                Text(
-                    text = text,
-                    style = syncedStyle,
-                    fontSize = 15.sp,
-                    lineHeight = 22.sp,
-                    color = palette.ink,
-                    modifier = Modifier.padding(vertical = 3.dp),
-                )
-            } else {
-                // 行内公式：文字和公式混排（网页端 KaTeX 的行内效果）
-                androidx.compose.foundation.layout.FlowRow(
-                    modifier = Modifier.padding(vertical = 3.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    segments.forEach { segment ->
-                        if (segment.math) {
-                            LatexImage(
-                                latex = segment.text,
-                                palette = palette,
-                                textSize = 15,
-                            )
-                        } else if (segment.text.isNotBlank()) {
-                            Text(
-                                text = remember(segment.text, palette.accent) {
-                                    inline(demath(segment.text), palette)
-                                },
-                                style = syncedStyle,
-                                fontSize = 15.sp,
-                                lineHeight = 22.sp,
-                                color = palette.ink,
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        is MdBlock.Paragraph -> MathText(
+            text = block.text,
+            palette = palette,
+            modifier = Modifier.padding(vertical = 3.dp),
+        )
 
         is MdBlock.Bullet -> Column(modifier = Modifier.padding(vertical = 2.dp)) {
             block.items.forEach { item ->
                 Row(modifier = Modifier.padding(vertical = 1.dp)) {
                     Text("•", fontSize = 15.sp, color = palette.accent)
                     Spacer(Modifier.width(6.dp))
-                    val text = remember(item, palette.accent) { inline(item, palette) }
-                    Text(
-                        text = text,
-                        style = syncedStyle,
+                    MathText(
+                        text = item,
+                        palette = palette,
                         fontSize = 15.sp,
                         lineHeight = 22.sp,
                         color = palette.ink,
@@ -400,10 +363,9 @@ private fun MdBlockView(
                 Row(modifier = Modifier.padding(vertical = 1.dp)) {
                     Text("$number.", fontSize = 15.sp, color = palette.accent)
                     Spacer(Modifier.width(6.dp))
-                    val text = remember(item, palette.accent) { inline(item, palette) }
-                    Text(
-                        text = text,
-                        style = syncedStyle,
+                    MathText(
+                        text = item,
+                        palette = palette,
                         fontSize = 15.sp,
                         lineHeight = 22.sp,
                         color = palette.ink,
@@ -415,7 +377,6 @@ private fun MdBlockView(
         is MdBlock.Code -> CodeBlock(block.lang, block.code)
 
         is MdBlock.Quote -> {
-            val text = remember(block.text, palette.accent) { inline(block.text, palette) }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -428,12 +389,11 @@ private fun MdBlockView(
                         .background(palette.line, RoundedCornerShape(2.dp)),
                 )
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    text = text,
-                    style = syncedStyle,
+                MathText(
+                    text = block.text,
+                    palette = palette,
                     fontSize = 14.sp,
                     lineHeight = 21.sp,
-                    fontStyle = FontStyle.Italic,
                     color = palette.inkSoft,
                 )
             }
@@ -637,6 +597,62 @@ private fun highlightCode(code: String, lang: String): AnnotatedString {
     }
 }
 
+
+/**
+ * 一段可能含行内公式的文字：拆成文字和公式混排。
+ * 网页端是对整段 markdown 统一做 mathify，所以列表、引用、表格里也都有公式；
+ * 这里做成可复用组件，避免只有段落支持。
+ */
+@Composable
+private fun MathText(
+    text: String,
+    palette: DeckPalette,
+    modifier: Modifier = Modifier,
+    fontSize: androidx.compose.ui.unit.TextUnit = 15.sp,
+    lineHeight: androidx.compose.ui.unit.TextUnit = 22.sp,
+    color: androidx.compose.ui.graphics.Color = palette.ink,
+) {
+    // 打开字体合成，保证没有粗体字面的中文字体也能「加粗」
+    val style = androidx.compose.ui.text.TextStyle(fontSynthesis = FontSynthesis.All)
+    val segments = remember(text) { splitInlineMath(text) }
+    if (segments.none { it.math }) {
+        Text(
+            text = remember(text, palette.accent) { inline(demath(text), palette) },
+            style = style,
+            fontSize = fontSize,
+            lineHeight = lineHeight,
+            color = color,
+            modifier = modifier,
+        )
+    } else {
+        androidx.compose.foundation.layout.FlowRow(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            segments.forEach { segment ->
+                if (segment.math) {
+                    LatexImage(
+                        latex = segment.text,
+                        palette = palette,
+                        textSize = fontSize.value.toInt().coerceAtLeast(12),
+                    )
+                } else if (segment.text.isNotBlank()) {
+                    Text(
+                        text = remember(segment.text, palette.accent) {
+                            inline(demath(segment.text), palette)
+                        },
+                        style = style,
+                        fontSize = fontSize,
+                        lineHeight = lineHeight,
+                        color = color,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun TableRow(    cells: List<String>,
     columns: Int,
@@ -651,16 +667,16 @@ private fun TableRow(    cells: List<String>,
     ) {
         for (column in 0 until columns) {
             val raw = cells.getOrElse(column) { "" }
-            val text = remember(raw, palette.accent) { inline(raw, palette) }
-            Text(
-                text = text,
-                style = TextStyle(fontSynthesis = FontSynthesis.All),
-                fontSize = 12.5.sp,
-                lineHeight = 18.sp,
-                fontWeight = if (header) FontWeight.SemiBold else FontWeight.Normal,
-                color = palette.ink,
-                modifier = Modifier.weight(1f),
-            )
+            // 表格里也常有 $0$、$1/3$ 这种公式，和段落一样处理
+            Box(modifier = Modifier.weight(1f)) {
+                MathText(
+                    text = raw,
+                    palette = palette,
+                    fontSize = 12.5.sp,
+                    lineHeight = 18.sp,
+                    color = palette.ink,
+                )
+            }
         }
     }
     if (header) {

@@ -119,29 +119,37 @@ fun Composer(
         }
     }
 
-    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        if (files.size >= MAX_FILES) {
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
+        val room = (MAX_FILES - files.size).coerceAtLeast(0)
+        if (room == 0) {
             fileError = "一条消息最多带 $MAX_FILES 个文件"
             return@rememberLauncherForActivityResult
         }
         scope.launch {
             uploading = true
-            fileError = null
-            val picked = withContext(Dispatchers.IO) { readAsDataUrl(context, uri) }
-            if (picked == null) {
-                uploading = false
-                fileError = "文件读不出来，或者超过 20MB"
-                return@launch
+            fileError = if (uris.size > room) "一条消息最多带 $MAX_FILES 个文件，多的没放进来" else null
+            var failed = 0
+            for (uri in uris.take(room)) {
+                val picked = withContext(Dispatchers.IO) { readAsDataUrl(context, uri) }
+                if (picked == null) {
+                    failed++
+                    continue
+                }
+                try {
+                    val uploaded = DeckApp.instance.api.uploadFile(picked.name, picked.dataUrl)
+                    files = files + uploaded
+                } catch (error: Exception) {
+                    failed++
+                    if (fileError == null) {
+                        fileError = if (error is DeckException) error.message else "上传失败：${error.message}"
+                    }
+                }
             }
-            try {
-                val uploaded = DeckApp.instance.api.uploadFile(picked.name, picked.dataUrl)
-                files = files + uploaded
-            } catch (error: Exception) {
-                fileError = if (error is DeckException) error.message else "上传失败：${error.message}"
-            } finally {
-                uploading = false
+            if (failed > 0 && fileError == null) {
+                fileError = "$failed 个文件没传上去（读不出来或超过 20MB）"
             }
+            uploading = false
         }
     }
 
