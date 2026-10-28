@@ -1,22 +1,34 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
+// 后端地址不进仓库：由本机的 local.properties 注入（已在 .gitignore 里）。
+// 没配置就用占位地址；用户在 App 里也可以自己填服务器。
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val deckBaseUrl: String = (localProperties.getProperty("deck.baseUrl") ?: "https://example.com")
+    .trim()
+    .trimEnd('/')
+
 android {
-    namespace = "icu.taffy.deck"
+    namespace = "com.agentdeck.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "icu.taffy.deck"
+        applicationId = "com.agentdeck.app"
         minSdk = 24
         targetSdk = 35
         versionCode = 2
         versionName = "1.1"
 
-        // 后端地址：只认 HTTPS，换服务器改这里
-        buildConfigField("String", "BASE_URL", "\"https://example.com\"")
+        // 自己部署：改 local.properties 的 deck.baseUrl，或在登录页填服务器地址
+        buildConfigField("String", "BASE_URL", "\"$deckBaseUrl\"")
     }
 
     buildTypes {

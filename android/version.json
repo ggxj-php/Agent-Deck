@@ -1,6 +1,0 @@
-{
-  "versionCode": 2,
-  "versionName": "1.1",
-  "notes": "· 消息正文改为原生渲染，滚动更顺\n· 公式用 LaTeX 原生排版，图片内联显示并支持缩放\n· 新增附件下载与下载管理\n· 修复代码片段消失、消息被拆条、空白占位等问题",
-  "url": "https://gitee.com/your-org/Agent-Deck/releases"
-}
