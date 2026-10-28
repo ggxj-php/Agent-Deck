@@ -999,11 +999,10 @@ def _dot_graph_plain(data):
         attrs = {"label": _dot_label(n["label"]),
                  "shape": "ellipse" if n.get("kind") == "circle" else "box"}
         attrs.update(_dot_colors(n.get("color")))
-        lines.append(f'  {name_of[n["id"]]} [{_dot_attr(attrs)}];')
+        lines.append(f'  "n_{_dot_label(n["id"])}" [{_dot_attr(attrs)}];')
     for a, b, label in edges:
         attrs = {"label": _dot_label(label)} if label else {}
-        lines.append(f'  {name_of.get(a, "n_" + _dot_label(a))} -> '
-                     f'{name_of.get(b, "n_" + _dot_label(b))} [{_dot_attr(attrs)}];')
+        lines.append(f'  "n_{_dot_label(a)}" -> "n_{_dot_label(b)}" [{_dot_attr(attrs)}];')
     lines.append("}")
     return "\n".join(lines)
 
