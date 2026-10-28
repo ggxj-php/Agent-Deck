@@ -315,6 +315,11 @@ CORE_PROMPT = r"""【共享规矩 · 所有身份卡都适用】
     python-docx（`import docx`）写 Word、pypdf 读 PDF、openpyxl 写 Excel 都已装好，
     别再手搓 OOXML / zip 包（又慢又容易出错）。用前可以先 `python -c "import docx"` 确认一下。
 
+32. 【画图用中文】画 ER 图 / 数据流图 / 流程图时，节点、属性、连线标签一律写**中文**：
+    不要用 building_id、spot_no、user_name 这类英文标识符，要写成「楼编号」「车位编号」「用户名」；
+    主键/外键仍用 PK / FK 标在中文后面（如「楼编号 PK」）。
+    只有当用户明确要求英文（比如做英文题、写接口文档）时才用英文。
+
 """
 
 SYSTEM_PROMPT = """你是一个乐于助人的中文 AI 助手。
