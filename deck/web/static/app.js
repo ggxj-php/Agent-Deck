@@ -2134,7 +2134,7 @@ inputEl.addEventListener('input', autosize);
    会走「外部内容边界」，比直接塞多模态请求安全。这一轮结束服务端会把临时
    图片删掉，服务器上不留原图。 */
 
-const IMAGE_MAX_BYTES = 4 * 1024 * 1024; // 单张上限，超了直接拦掉，别让 base64 撑爆请求
+const IMAGE_MAX_BYTES = 10 * 1024 * 1024; // 单张上限 10MB，超了前端直接提示用户
 
 function renderAttachBar() {
   attachBarEl.innerHTML = '';
@@ -2245,10 +2245,18 @@ imageInputEl.addEventListener('change', () => {
   imageInputEl.value = '';
   if (!files.length) return;
   let rejected = 0;
+  let tooBig = 0;
   files.forEach((file) => {
     if (pendingImages.length >= IMAGE_MAX_COUNT) { rejected += 1; return; }
     if (!file.type.startsWith('image/')) { rejected += 1; return; }
-    if (file.size > IMAGE_MAX_BYTES) { rejected += 1; return; }
+    if (file.size > IMAGE_MAX_BYTES) {
+      rejected += 1;
+      tooBig += 1;
+      if (tooBig === 1) {
+        statusEl.textContent = `图片太大了：${file.name}（${(file.size / 1024 / 1024).toFixed(1)}MB，单张上限 10MB）`;
+      }
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       if (pendingImages.length >= IMAGE_MAX_COUNT) return;
@@ -2260,7 +2268,7 @@ imageInputEl.addEventListener('change', () => {
     reader.onerror = () => { statusEl.textContent = t('readImageFailed'); };
     reader.readAsDataURL(file);
   });
-  if (rejected) {
+  if (rejected && !tooBig) {
     statusEl.textContent = t('imagesRejected', { n: rejected, max: IMAGE_MAX_COUNT });
   }
 });
@@ -2292,7 +2300,10 @@ window.addEventListener('drop', (ev) => {
   files.forEach((file) => {
     if (file.type && file.type.startsWith('image/')) {
       if (pendingImages.length >= IMAGE_MAX_COUNT) return;
-      if (file.size > IMAGE_MAX_BYTES) { statusEl.textContent = `图片太大：${file.name}`; return; }
+      if (file.size > IMAGE_MAX_BYTES) {
+        statusEl.textContent = `图片太大了：${file.name}（单张上限 10MB）`;
+        return;
+      }
       const reader = new FileReader();
       reader.onload = () => { pendingImages.push(reader.result); renderAttachBar(); };
       reader.readAsDataURL(file);

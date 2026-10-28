@@ -30,7 +30,7 @@ INDEX_PATH = os.path.join(PROJECT_ROOT, ".cache", "upload_index.json")
 MAX_BYTES = 4 * 1024 * 1024
 MAX_COUNT = 6
 MAX_SIDE = 8000
-MAX_AFTER_ENCODE = 3 * 1024 * 1024
+MAX_AFTER_ENCODE = 10 * 1024 * 1024
 TTL_SECONDS = 20 * 60          # 上传的图片只留 20 分钟，过期自动清掉
 SUMMARY_MAX_TOKENS = 500
 
