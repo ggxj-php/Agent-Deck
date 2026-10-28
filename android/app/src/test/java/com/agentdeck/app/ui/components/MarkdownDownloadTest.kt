@@ -17,7 +17,7 @@ class MarkdownDownloadTest {
 
     @Test
     fun linkWithEmojiPrefixStillBecomesCard() {
-        // 真实回复里的写法：👉 [示例角色饲养手册.docx](/d/3b7f...)
+        // 真实回复里的写法：👉 [手册.docx](/d/3b7f...)
         val blocks = parseMarkdown("👉 [手册.docx](/d/3b7fb6ea9b77b5599f26cf847cabccc4)")
         val download = blocks.filterIsInstance<MdBlock.Download>().single()
         assertEquals("手册.docx", download.label)
