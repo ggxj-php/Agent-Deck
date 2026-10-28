@@ -1,4 +1,9 @@
 package com.agentdeck.app.ui.components
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+
 import androidx.compose.ui.graphics.asImageBitmap
 
 
@@ -86,7 +91,8 @@ fun Composer(
     onStop: () -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
-    var image by remember { mutableStateOf<String?>(null) }
+    // 和网页端一样最多 6 张（后端 uploads.MAX_COUNT）
+    var images by remember { mutableStateOf<List<String>>(emptyList()) }
     var preparing by remember { mutableStateOf(false) }
     var files by remember { mutableStateOf<List<UploadedFile>>(emptyList()) }
     var uploading by remember { mutableStateOf(false) }
@@ -95,13 +101,21 @@ fun Composer(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
         scope.launch {
             preparing = true
-            val dataUrl = withContext(Dispatchers.IO) { toDataUrl(context, uri) }
+            val room = (IMAGE_MAX_COUNT - images.size).coerceAtLeast(0)
+            if (uris.size > room) fileError = "一次最多 $IMAGE_MAX_COUNT 张，多的先不放进来"
+            val added = withContext(Dispatchers.IO) {
+                uris.take(room).mapNotNull { uri -> toDataUrl(context, uri) }
+            }
             preparing = false
-            if (dataUrl != null) image = dataUrl else fileError = "这张图读不出来，换一张试试"
+            if (added.isEmpty()) {
+                fileError = "这张图读不出来，换一张试试"
+            } else {
+                images = images + added
+            }
         }
     }
 
@@ -131,7 +145,7 @@ fun Composer(
         }
     }
 
-    val canSend = !busy && !preparing && !uploading && (text.isNotBlank() || image != null || files.isNotEmpty())
+    val canSend = !busy && !preparing && !uploading && (text.isNotBlank() || images.isNotEmpty() || files.isNotEmpty())
     val placeholder = persona.placeholder.ifBlank { "和${persona.name}说点什么…" }
 
     Column(
@@ -146,55 +160,80 @@ fun Composer(
                 .background(palette.line),
         )
 
-        if (image != null || preparing || files.isNotEmpty() || uploading) {
+        if (images.isNotEmpty() || preparing || files.isNotEmpty() || uploading) {
             Column(
                 modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 9.dp),
             ) {
-                if (image != null || preparing) {
+                if (images.isNotEmpty() || preparing) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            color = palette.softFill,
-                            shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.dp, palette.line),
-                            modifier = Modifier.size(64.dp),
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .horizontalScroll(rememberScrollState()),
                         ) {
+                            images.forEachIndexed { index, dataUrl ->
+                                Box {
+                                    val localBitmap = remember(dataUrl) { decodeDataUri(dataUrl) }
+                                    if (localBitmap != null) {
+                                        androidx.compose.foundation.Image(
+                                            bitmap = localBitmap.asImageBitmap(),
+                                            contentDescription = "待发送的图片",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(58.dp)
+                                                .clip(RoundedCornerShape(12.dp)),
+                                        )
+                                    } else {
+                                        AsyncImage(
+                                            model = dataUrl,
+                                            contentDescription = "待发送的图片",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(58.dp)
+                                                .clip(RoundedCornerShape(12.dp)),
+                                        )
+                                    }
+                                    // 单张移除
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(2.dp)
+                                            .size(16.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xCC000000))
+                                            .clickable(enabled = !busy) {
+                                                images = images.filterIndexed { i, _ -> i != index }
+                                            },
+                                    ) {
+                                        Text("×", color = Color.White, fontSize = 10.sp)
+                                    }
+                                }
+                            }
                             if (preparing) {
-                                Box(contentAlignment = Alignment.Center) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(58.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(palette.softFill),
+                                ) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(18.dp),
                                         strokeWidth = 2.dp,
                                     )
                                 }
-                            } else {
-                                // 选中的图是 data URI，Coil 解不了，先自己解码成 Bitmap 再画
-                                val localBitmap = remember(image) {
-                                    image?.let { decodeDataUri(it) }
-                                }
-                                if (localBitmap != null) {
-                                    androidx.compose.foundation.Image(
-                                        bitmap = localBitmap.asImageBitmap(),
-                                        contentDescription = "待发送的图片",
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .size(64.dp)
-                                            .clip(RoundedCornerShape(14.dp)),
-                                    )
-                                } else {
-                                    AsyncImage(
-                                        model = image,
-                                        contentDescription = "待发送的图片",
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .size(64.dp)
-                                            .clip(RoundedCornerShape(14.dp)),
-                                    )
-                                }
                             }
                         }
-                        Spacer(Modifier.width(10.dp))
-                        Text("发送这张图", fontSize = 12.sp, color = palette.inkSoft)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (images.isEmpty()) "正在处理…" else "已选 ${images.size} 张",
+                            fontSize = 12.sp,
+                            color = palette.inkSoft,
+                        )
                         Spacer(Modifier.weight(1f))
-                        SmallCloseButton(enabled = !busy, palette = palette) { image = null }
+                        SmallCloseButton(enabled = !busy, palette = palette) { images = emptyList() }
                     }
                 }
 
@@ -369,9 +408,9 @@ fun Composer(
                     if (busy) {
                         onStop()
                     } else if (canSend) {
-                        onSend(text.trim(), listOfNotNull(image), files)
+                        onSend(text.trim(), images, files)
                         text = ""
-                        image = null
+                        images = emptyList()
                         files = emptyList()
                         fileError = null
                     }
@@ -433,6 +472,9 @@ private fun formatSize(bytes: Long): String = when {
     bytes < 1024 * 1024 -> "${bytes / 1024} KB"
     else -> String.format("%.1f MB", bytes / 1024.0 / 1024.0)
 }
+
+/** 一轮最多几张图，和后端 uploads.MAX_COUNT 对齐（网页端同值）。 */
+private const val IMAGE_MAX_COUNT = 6
 
 private data class PickedFile(val name: String, val dataUrl: String)
 
