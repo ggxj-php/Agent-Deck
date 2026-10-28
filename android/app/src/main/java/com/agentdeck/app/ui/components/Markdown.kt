@@ -156,13 +156,15 @@ fun parseMarkdown(source: String): List<MdBlock> {
         // $$ 公式块（可能跨行）
         if (trimmed.startsWith("$$")) {
             flushParagraph(paragraph)
+            var closed = trimmed.endsWith("$$") && trimmed.length > 3
             val body = StringBuilder(trimmed.removePrefix("$$"))
-            if (!body.endsWith("$$")) {
+            if (!closed) {
                 index++
                 while (index < lines.size) {
                     val current = lines[index]
                     if (current.trim().endsWith("$$")) {
                         body.append('\n').append(current.trim().removeSuffix("$$"))
+                        closed = true
                         break
                     }
                     body.append('\n').append(current)
@@ -172,7 +174,13 @@ fun parseMarkdown(source: String): List<MdBlock> {
                 body.setLength(body.length - 2)
             }
             index++
-            blocks += MdBlock.MathBlock(body.toString().trim())
+            if (closed) {
+                blocks += MdBlock.MathBlock(body.toString().trim())
+            } else {
+                // 还没闭合（流式中途）：先按普通文本显示，等 $$ 收尾再变公式，
+                // 否则会拿半截 LaTeX 去渲染，出现一堆原始命令
+                blocks += MdBlock.Paragraph("$$" + body.toString().trimEnd())
+            }
             continue
         }
 

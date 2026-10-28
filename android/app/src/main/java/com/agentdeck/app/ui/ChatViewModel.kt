@@ -408,6 +408,8 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
     }
 
     private fun finishTurn(sessionId: String) {
+        // 万一公式到最后都没闭合，挂起的表情包也得放出来，不能丢
+        forceFlushSticker()
         updateLastAssistant { it.copy(streaming = false) }
         _state.update { it.copy(busy = false) }
         viewModelScope.launch {
@@ -419,6 +421,33 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             }
         }
         viewModelScope.launch { /* 让最后一条正文的 WebView 有机会完成渲染 */ }
+    }
+
+    /** 公式块写了一半时先扣下的表情包。 */
+    private var deferredSticker: String? = null
+
+    /** 最后一段正文里 $$ 的数量是奇数，说明公式还没收尾。 */
+    private fun mathStillOpen(): Boolean {
+        val message = _state.value.messages.lastOrNull { it.role == Role.ASSISTANT } ?: return false
+        val text = message.blocks.lastOrNull { it is Block.Text } as? Block.Text ?: return false
+        return Regex("\\$\\$").findAll(text.markdown).count() % 2 == 1
+    }
+
+    private fun forceFlushSticker() {
+        val url = deferredSticker ?: return
+        deferredSticker = null
+        updateLastAssistant { msg ->
+            msg.copy(blocks = settleThinking(msg.blocks) + Block.Sticker(url))
+        }
+    }
+
+    private fun flushDeferredSticker() {
+        val url = deferredSticker ?: return
+        if (mathStillOpen()) return
+        deferredSticker = null
+        updateLastAssistant { msg ->
+            msg.copy(blocks = settleThinking(msg.blocks) + Block.Sticker(url))
+        }
     }
 
     /** 把最新一条助手消息的「等待首 token」占位状态更新一下。 */
@@ -450,15 +479,18 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                 msg.copy(blocks = blocks)
             }
 
-            is ChatEvent.Content -> updateLastAssistant { msg ->
-                val blocks = settleThinking(msg.blocks).toMutableList()
-                val last = blocks.lastOrNull()
-                if (last is Block.Text) {
-                    blocks[blocks.size - 1] = last.copy(markdown = last.markdown + event.text)
-                } else {
-                    blocks.add(Block.Text(event.text))
+            is ChatEvent.Content -> {
+                updateLastAssistant { msg ->
+                    val blocks = settleThinking(msg.blocks).toMutableList()
+                    val last = blocks.lastOrNull()
+                    if (last is Block.Text) {
+                        blocks[blocks.size - 1] = last.copy(markdown = last.markdown + event.text)
+                    } else {
+                        blocks.add(Block.Text(event.text))
+                    }
+                    msg.copy(blocks = blocks)
                 }
-                msg.copy(blocks = blocks)
+                flushDeferredSticker()
             }
 
             is ChatEvent.ToolPending -> setWaiting("正在准备 ${event.name}…")
@@ -483,8 +515,14 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             is ChatEvent.Sticker -> {
                 val url = stickerUrl(event.name, event.mood)
                 if (url.isNotEmpty()) {
-                    updateLastAssistant { msg ->
-                        msg.copy(blocks = settleThinking(msg.blocks) + Block.Sticker(url))
+                    if (mathStillOpen()) {
+                        // 公式还没收尾：先挂起，等闭合了再插进去，
+                        // 不然同一条公式会被表情包拆成两个 Text 块，两块都渲染不出来
+                        deferredSticker = url
+                    } else {
+                        updateLastAssistant { msg ->
+                            msg.copy(blocks = settleThinking(msg.blocks) + Block.Sticker(url))
+                        }
                     }
                 }
             }
