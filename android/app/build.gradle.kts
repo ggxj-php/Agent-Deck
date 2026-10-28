@@ -34,6 +34,18 @@ android {
         buildConfigField("String", "BASE_URL", "\"$deckBaseUrl\"")
     }
 
+    // 品牌覆盖：app/src/local/ 放私有名字和头像图标（该目录已被 gitignore 忽略），
+    // 开源默认 oss；私有包用 local。两者 applicationId 相同，不能同时安装。
+    flavorDimensions += "brand"
+    productFlavors {
+        create("oss") {
+            dimension = "brand"
+        }
+        create("local") {
+            dimension = "brand"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true

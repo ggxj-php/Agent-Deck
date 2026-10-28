@@ -518,8 +518,10 @@ private fun CopyWholeRow(message: UiMessage, palette: DeckPalette) {
     }
     if (plain.isEmpty()) return
     Row(
-        horizontalArrangement = Arrangement.End,
-        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp),
     ) {
         Surface(
             onClick = {

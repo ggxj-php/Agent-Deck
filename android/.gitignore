@@ -21,3 +21,6 @@ signing.properties
 # 本机路径、日志
 *.log
 *.hprof
+
+# 本地品牌覆盖（私有名字/头像），不进仓库
+app/src/local/

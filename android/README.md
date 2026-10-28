@@ -83,16 +83,25 @@ android/
     └── res/xml/             # 网络安全配置（禁明文）
 ```
 
-## 图标
+## 名字与图标
 
-启动器图标是**当前身份卡的头像**（打包时生成，见 `res/mipmap-*/ic_launcher*`）。
-换一套头像要重新生成图标再打包：
+默认（开源）包名 `com.agentdeck.app`、显示名 **Agent Deck**、图标是仓库内置的气泡图标。
 
-```bash
-python tools/gen_icons.py <头像图片路径>
+想换成自己的名字/头像，不需要改仓库里的任何资源：在 `android/app/src/local/res/` 放覆盖资源，
+这个目录已被 gitignore，不会被提交：
+
+```
+app/src/local/res/values/strings.xml          # <string name="app_name">你的名字</string>
+app/src/local/res/mipmap-*/ic_launcher.png    # 启动器图标（各密度）
+app/src/local/res/mipmap-anydpi-v26/ic_launcher.xml
 ```
 
-（Android 不允许运行时把下载的图片直接换成启动器图标，所以这里是静态资源。）
+然后按 flavor 构建：
+
+```bash
+./gradlew :app:assembleOssRelease    # 开源默认：Agent Deck + 气泡图标
+./gradlew :app:assembleLocalRelease  # 私有：用 app/src/local 里的名字和图标
+```
 
 ## 渲染与性能
 
