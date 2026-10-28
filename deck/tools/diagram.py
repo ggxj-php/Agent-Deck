@@ -1254,6 +1254,10 @@ def _dot_state(data):
     if isinstance(finals, str):
         finals = [finals]
     final_ids = {str(f) for f in finals}
+    if not final_ids:
+        # 模型经常漏给终态：名字里带这些词的，按终态（同心圆）画，别让图没有终止
+        final_ids = {st["name"] for st in states
+                     if re.search(r"(断线|挂断|关闭|结束|完成|终止|销毁|已取消|已退款|关机)", st["name"])}
     initial = str(data.get("initial") or "").strip()
     if not initial:
         initial = states[0]["name"]
