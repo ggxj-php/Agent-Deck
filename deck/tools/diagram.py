@@ -1272,11 +1272,7 @@ def _dot_state(data):
             lines.append(f'  {nid} [shape=point, width=0.18, height=0.18, fixedsize=true, '
                          f'style="filled", fillcolor="#1f2023", color="#1f2023", label=""];')
             continue
-        if st["name"] in final_ids or kind in ("final", "end", "终态", "终了"):
-            lines.append(f'  {nid} [shape=doublecircle, width=0.3, height=0.3, '
-                         f'style="filled", fillcolor="#ffe066", color="#1f2023", '
-                         f'label=""];')
-            continue
+        # 终态不在这里画：统一在最下面画一个同心圆，所有终态都连到它
         # 状态框按课本/课件标准画法：上=状态名（必有），中=状态变量，下=活动表。
         # 中间层和下层是可选内容，有就画、没有就不画（课件里「新建」就只有名字一层）。
         variable_lines = _state_lines(st["variables"])
@@ -1339,6 +1335,15 @@ def _dot_state(data):
             ev = seq[2] if len(seq) > 2 else ""
         if a in ids and b in ids:
             lines.append(f'  {ids[a]} -> {ids[b]} [label="{_dot_label(ev)}"];')
+    # 统一的终态：只画一个实心同心圆，多个终态各自连一条线过来（课本/课件都是这样）
+    terminal_states = [st["name"] for st in states
+                       if st["name"] in final_ids or st.get("kind") in ("final", "end")]
+    if terminal_states:
+        lines.append('  __final__ [shape=doublecircle, width=0.3, height=0.3, '
+                     'style="filled", fillcolor="#ffe066", color="#1f2023", label=""];')
+        for name in terminal_states:
+            if name in ids:
+                lines.append(f'  {ids[name]} -> __final__ [label=""];')
     lines.append("}")
     return "\n".join(lines)
 
