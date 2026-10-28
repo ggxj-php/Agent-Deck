@@ -24,10 +24,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 
 /**
  * 全屏看图：双指缩放、拖动，双击在原尺寸和 2.5 倍之间切换。
@@ -39,6 +41,20 @@ fun ZoomableImageDialog(
     description: String?,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
+    // 预览按高分辨率栅格化：SVG 默认只按屏幕尺寸解一次（1200px 左右），放大就糊了
+    val request = remember(model) {
+        when (model) {
+            is String -> ImageRequest.Builder(context)
+                .data(model)
+                .size(3072, 3072)
+                .crossfade(false)
+                .build()
+
+            else -> model
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -53,7 +69,7 @@ fun ZoomableImageDialog(
 
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             AsyncImage(
-                model = model,
+                model = request,
                 contentDescription = description,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier

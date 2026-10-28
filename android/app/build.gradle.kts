@@ -15,13 +15,12 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // 后端地址：只认 HTTPS，换服务器改这里（或用 -Pdeck.baseUrl=... 覆盖，见 README）
+        // 后端地址：只认 HTTPS，换服务器改这里
         buildConfigField("String", "BASE_URL", "\"https://example.com\"")
     }
 
     buildTypes {
         release {
-            // 混淆打开：WebView 桥方法必须保留，见 proguard-rules.pro
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -71,5 +70,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.svg)
     implementation(libs.jlatexmath)
+
+    testImplementation("junit:junit:4.13.2")
     debugImplementation(libs.androidx.ui.tooling)
 }

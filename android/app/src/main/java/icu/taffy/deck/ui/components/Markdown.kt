@@ -30,7 +30,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -60,10 +62,14 @@ sealed interface MdBlock {
     data object Rule : MdBlock
     data class MathBlock(val latex: String) : MdBlock
     data class Picture(val url: String, val alt: String) : MdBlock
+
+    /** agent 给的临时附件链接（/d/<token>/<name>），需要登录态才能下。 */
+    data class Download(val label: String, val path: String) : MdBlock
 }
 
 private val STICKER = Regex("""\[sticker:([A-Za-z_]+)(?::([^\]\s]+))?]""")
 private val IMAGE_LINE = Regex("""^!\[([^\]]*)]\(([^)\s]+)\)$""")
+private val DOWNLOAD_LINE = Regex("""^\[([^\]]*)]\((/d/[^)\s]+)\)$""")
 private val HEADING = Regex("""^(#{1,6})\s+(.*)$""")
 private val BULLET = Regex("""^\s*[-*+]\s+(.*)$""")
 private val ORDERED = Regex("""^\s*(\d+)[.)]\s+(.*)$""")
@@ -87,11 +93,15 @@ fun parseMarkdown(source: String): List<MdBlock> {
             doubleDollar != null -> blocks += MdBlock.MathBlock(doubleDollar.groupValues[1].trim())
             singleDollar != null -> blocks += MdBlock.MathBlock(singleDollar.groupValues[1].trim())
             else -> {
+                val download = DOWNLOAD_LINE.find(text)
                 val image = IMAGE_LINE.find(text)
-                if (image != null) {
-                    blocks += MdBlock.Picture(image.groupValues[2], image.groupValues[1])
-                } else {
-                    blocks += MdBlock.Paragraph(demath(text))
+                when {
+                    download != null -> blocks += MdBlock.Download(
+                        download.groupValues[1],
+                        download.groupValues[2],
+                    )
+                    image != null -> blocks += MdBlock.Picture(image.groupValues[2], image.groupValues[1])
+                    else -> blocks += MdBlock.Paragraph(demath(text))
                 }
             }
         }
@@ -249,11 +259,14 @@ private fun MdBlockView(
     baseUrl: String,
     onPreview: (String) -> Unit,
 ) {
+    // 打开字体合成，保证没有粗体字面的中文字体也能"加粗"
+    val syncedStyle = TextStyle(fontSynthesis = FontSynthesis.All)
     when (block) {
         is MdBlock.Heading -> {
             val text = remember(block.text, palette.accent) { inline(block.text, palette) }
             Text(
                 text = text,
+                style = syncedStyle,
                 fontSize = when (block.level) {
                     1 -> 19.sp
                     2 -> 17.sp
@@ -261,7 +274,7 @@ private fun MdBlockView(
                     else -> 15.sp
                 },
                 lineHeight = 24.sp,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.W800,
                 color = palette.ink,
                 modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
             )
@@ -271,6 +284,7 @@ private fun MdBlockView(
             val text = remember(block.text, palette.accent) { inline(block.text, palette) }
             Text(
                 text = text,
+                style = syncedStyle,
                 fontSize = 15.sp,
                 lineHeight = 22.sp,
                 color = palette.ink,
@@ -286,6 +300,7 @@ private fun MdBlockView(
                     val text = remember(item, palette.accent) { inline(item, palette) }
                     Text(
                         text = text,
+                        style = syncedStyle,
                         fontSize = 15.sp,
                         lineHeight = 22.sp,
                         color = palette.ink,
@@ -302,6 +317,7 @@ private fun MdBlockView(
                     val text = remember(item, palette.accent) { inline(item, palette) }
                     Text(
                         text = text,
+                        style = syncedStyle,
                         fontSize = 15.sp,
                         lineHeight = 22.sp,
                         color = palette.ink,
@@ -357,6 +373,7 @@ private fun MdBlockView(
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = text,
+                    style = syncedStyle,
                     fontSize = 14.sp,
                     lineHeight = 21.sp,
                     fontStyle = FontStyle.Italic,
@@ -399,6 +416,13 @@ private fun MdBlockView(
             LatexImage(latex = block.latex, palette = palette)
         }
 
+        is MdBlock.Download -> DownloadCard(
+            label = block.label,
+            path = block.path,
+            baseUrl = baseUrl,
+            palette = palette,
+        )
+
         is MdBlock.Picture -> AsyncImage(
             model = resolveUrl(baseUrl, block.url),
             contentDescription = block.alt,
@@ -431,6 +455,7 @@ private fun TableRow(
             val text = remember(raw, palette.accent) { inline(raw, palette) }
             Text(
                 text = text,
+                style = TextStyle(fontSynthesis = FontSynthesis.All),
                 fontSize = 12.5.sp,
                 lineHeight = 18.sp,
                 fontWeight = if (header) FontWeight.SemiBold else FontWeight.Normal,
@@ -446,8 +471,12 @@ private fun TableRow(
 
 /* ---------------- 行内格式 ---------------- */
 
+/** 测试入口：只关心行内解析出来的纯文本，便于用单测验证内容没被吞。 */
+internal fun inlinePlainText(text: String, palette: DeckPalette): String = inline(text, palette).text
+
 private fun inline(text: String, palette: DeckPalette): AnnotatedString = buildAnnotatedString {
-    val bold = SpanStyle(fontWeight = FontWeight.Bold)
+    // 中文字体大多没有独立的 Bold 字重，W900 + fontSynthesis 合成出来的加粗才看得出来
+    val bold = SpanStyle(fontWeight = FontWeight.W900, color = Color(0xFF171219))
     val italic = SpanStyle(fontStyle = FontStyle.Italic)
     val strike = SpanStyle(textDecoration = TextDecoration.LineThrough)
     val code = SpanStyle(
@@ -606,20 +635,23 @@ private fun demathExpr(input: String): String {
     return text
 }
 
-/** 把 $...$ / $$...$$ / \(...\) / \[...\] 都翻成可读文本；代码块里的内容原样保留。 */
+/** 把 $...$ / $$...$$ / \(...\) / \[...\] 都翻成可读文本；代码片段原样保留。 */
 fun demath(source: String): String {
-    val pieces = source.split(Regex("""(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)"""))
-    return pieces.joinToString("") { piece ->
-        if (piece.startsWith("```") || piece.startsWith("~~~") ||
-            (piece.startsWith("`") && piece.endsWith("`") && piece.length > 1)
-        ) {
-            piece
-        } else {
-            piece
-                .replace(Regex("""\$\$([\s\S]+?)\$\$""")) { demathExpr(it.groupValues[1]) }
-                .replace(Regex("""\$([^$\n]+?)\$""")) { demathExpr(it.groupValues[1]) }
-                .replace(Regex("""\\\[([\s\S]+?)\\\]""")) { demathExpr(it.groupValues[1]) }
-                .replace(Regex("""\\\(([\s\S]+?)\\\)""")) { demathExpr(it.groupValues[1]) }
-        }
+    val codePattern = Regex("""(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)""")
+    val out = StringBuilder()
+    var last = 0
+    // 不能用 split(Regex)：Kotlin 会连分隔符（代码片段）一起丢掉，导致行内代码凭空消失
+    for (match in codePattern.findAll(source)) {
+        out.append(demathText(source.substring(last, match.range.first)))
+        out.append(match.value)
+        last = match.range.last + 1
     }
+    out.append(demathText(source.substring(last)))
+    return out.toString()
 }
+
+private fun demathText(segment: String): String = segment
+    .replace(Regex("""\$\$([\s\S]+?)\$\$""")) { demathExpr(it.groupValues[1]) }
+    .replace(Regex("""\$([^$\n]+?)\$""")) { demathExpr(it.groupValues[1]) }
+    .replace(Regex("""\\\[([\s\S]+?)\\\]""")) { demathExpr(it.groupValues[1]) }
+    .replace(Regex("""\\\(([\s\S]+?)\\\)""")) { demathExpr(it.groupValues[1]) }

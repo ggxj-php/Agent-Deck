@@ -50,6 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import icu.taffy.deck.ui.Block
 import icu.taffy.deck.ui.Role
 import icu.taffy.deck.ui.UiMessage
@@ -220,15 +221,7 @@ private fun AssistantMessage(
                     is Block.Sticker -> {
                         if (block.url.isNotBlank()) {
                             Spacer(Modifier.height(4.dp))
-                            AsyncImage(
-                                model = block.url,
-                                contentDescription = "表情包",
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier
-                                    .heightIn(max = 132.dp)
-                                    .widthIn(max = 160.dp)
-                                    .clickable { onPreview(block.url) },
-                            )
+                            StickerImage(block.url, onPreview)
                             Spacer(Modifier.height(4.dp))
                         }
                     }
@@ -240,6 +233,23 @@ private fun AssistantMessage(
             }
         }
     }
+}
+
+@Composable
+private fun StickerImage(url: String, onPreview: (String) -> Unit) {
+    // 加载失败就整块收起来，别留一块空白占着版面
+    var failed by remember(url) { mutableStateOf(false) }
+    if (failed) return
+    AsyncImage(
+        model = url,
+        contentDescription = "表情包",
+        contentScale = ContentScale.Fit,
+        onError = { failed = true },
+        modifier = Modifier
+            .heightIn(max = 132.dp)
+            .widthIn(max = 160.dp)
+            .clickable { onPreview(url) },
+    )
 }
 
 @Composable
@@ -409,6 +419,11 @@ private fun ArtifactBlock(
         return
     }
     val url = "$baseUrl/api/artifact/${block.id}/svg"
+    val context = LocalContext.current
+    // 内联按 1600px 栅格化，缩放/小屏看文字都够清楚
+    val request = remember(url) {
+        ImageRequest.Builder(context).data(url).size(1600, 1600).build()
+    }
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         if (block.title.isNotBlank()) {
             Text(
@@ -420,7 +435,7 @@ private fun ArtifactBlock(
         }
         // 产物本来就是 SVG，用 Coil 解码后直接显示；点一下能全屏放大
         AsyncImage(
-            model = url,
+            model = request,
             contentDescription = block.title.ifBlank { "生成的图" },
             contentScale = ContentScale.Fit,
             onError = { failed = true },
