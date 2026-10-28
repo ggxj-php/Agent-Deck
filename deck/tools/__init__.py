@@ -23,10 +23,11 @@ from . import (
     search,
     sticker,
     text,
+    textstat,
 )
 
 _MODULES = (basics, kb, search, files, docs, download, forensics, runner, sticker, render, diagram,
-            asm_sim, asm86, mcu, logic, numconv, calc, text)
+            asm_sim, asm86, mcu, logic, numconv, calc, text, textstat)
 
 # 这些工具把「外部内容」带进上下文：网页正文、搜索结果、知识库片段、
 # 文件/文档里的文字、图片里读出来的字、二进制里挖出来的串、甚至文件名。
@@ -102,7 +103,7 @@ TOOL_GROUPS = {
     "text": {
         "label": "文本处理",
         "desc": "正则调试、文本 diff、JSON 处理",
-        "tools": ("regex_test", "diff_text", "json_tool"),
+        "tools": ("regex_test", "diff_text", "json_tool", "count_text"),
     },
 }
 
