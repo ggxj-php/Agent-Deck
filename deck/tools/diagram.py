@@ -841,13 +841,22 @@ _DOT_BIN = shutil.which("dot")
 _DOT_LOCK = threading.Lock()
 
 
-def _dot_svg(dot_src, timeout=8):
-    """把 DOT 交给 dot 生成响应式 SVG（失败返回空串，调用方退回内置布局）。"""
-    if not _DOT_BIN:
+def _dot_svg(dot_src, timeout=8, engine="dot"):
+    """把 DOT 交给 graphviz 生成响应式 SVG（失败返回空串，调用方退回内置布局）。
+
+    engine 默认 dot；ER 图的属性布点要用 neato 才会按指定坐标画。
+    """
+    args = []
+    if "pin=true" in dot_src:
+        engine, args = "neato", ["-n2"]      # 坐标已在 DOT 里，只让 neato 连边
+    binary = _DOT_BIN
+    if engine != "dot":
+        binary = shutil.which(engine) or _DOT_BIN
+    if not binary:
         return ""
     try:
         with _DOT_LOCK:
-            proc = subprocess.run([_DOT_BIN, "-Tsvg"], input=dot_src.encode("utf-8"),
+            proc = subprocess.run([binary, "-Tsvg", *args], input=dot_src.encode("utf-8"),
                                   capture_output=True, timeout=timeout)
         if proc.returncode != 0:
             return ""
@@ -994,61 +1003,158 @@ def _dot_dataflow(data):
     return "\n".join(lines)
 
 
-def _dot_er(data):
-    """ER 图（经典 Chen 画法，对应课本 / 黑板那套）：
-    实体 = 长方形，关系 = 菱形，属性 = 椭圆形；属性用细线连到实体，
-    关系用线连到实体，边上标 1:1 / 1:N / N:M 的基数。
+def _er_parse(data):
+    """把 ER 数据整理成 (实体列表, 关系列表)。
+
+    实体：{"name", "attributes": [{"name", "pk"?, "fk"?} | "名字"]}
+    关系：{"from", "to", "label", "cardinality": "N:M"}
     """
-    entities = data.get("entities") or data.get("tables") or []
-    relations = data.get("relations") or data.get("links") or []
+    entities, relations = [], []
+    for ent in data.get("entities") or data.get("tables") or []:
+        if isinstance(ent, dict):
+            name = str(ent.get("name") or ent.get("label") or "").strip()
+            attrs = ent.get("attributes") or ent.get("fields") or []
+        else:
+            name, attrs = str(ent).strip(), []
+        if not name:
+            continue
+        entities.append({"name": name, "attributes": [a for a in attrs
+                                                      if (a.get("name") if isinstance(a, dict) else a)]})
+    for rel in data.get("relations") or data.get("links") or []:
+        if not isinstance(rel, dict):
+            continue
+        a, b = str(rel.get("from") or "").strip(), str(rel.get("to") or "").strip()
+        if a and b:
+            relations.append({"from": a, "to": b,
+                              "label": str(rel.get("label") or rel.get("name") or ""),
+                              "cardinality": str(rel.get("cardinality") or "")})
+    return entities, relations
+
+
+def _er_skeleton_positions(entities, relations):
+    """先用 dot 把「实体 + 关系菱形」的骨架排好，拿到每个节点的坐标（英寸）。"""
+    lines = [_dot_graph(rankdir="TB", splines="line", nodesep=2.1, ranksep=2.7)]
+    ids = {}
+    for i, ent in enumerate(entities):
+        ids[ent["name"]] = f"e{i}"
+        lines.append(f'  e{i} [shape=box, width=1.0, height=0.45, '
+                     f'label="{_dot_label(ent["name"])}"];')
+    for j, rel in enumerate(relations):
+        rid = f"r{j}"
+        lines.append(f'  {rid} [shape=diamond, width=1.15, height=0.55, '
+                     f'label="{_dot_label(rel["label"] or "关系")}"];')
+        lines.append(f'  {ids[rel["from"]]} -> {rid} [arrowhead=none];')
+        lines.append(f'  {rid} -> {ids[rel["to"]]};')
+    lines.append("}")
+    src = "\n".join(lines)
+    binary = _DOT_BIN
+    if not binary:
+        return {}
+    try:
+        with _DOT_LOCK:
+            proc = subprocess.run([binary, "-Tplain"], input=src.encode("utf-8"),
+                                  capture_output=True, timeout=8)
+        if proc.returncode != 0:
+            return {}
+        pos = {}
+        for line in proc.stdout.decode("utf-8", "ignore").splitlines():
+            parts = line.split(" ")
+            if parts[0] == "node" and len(parts) >= 4:
+                try:
+                    pos[parts[1]] = (float(parts[2]), float(parts[3]))
+                except ValueError:
+                    continue
+        return pos
+    except Exception:                        # noqa: BLE001
+        return {}
+
+
+def _dot_er(data):
+    """ER 图（经典 Chen 画法，按课本排版）：
+    实体 = 长方形；关系 = 菱形；属性 = 椭圆形，绕着所属实体一圈摆放。
+    两遍布局：先 dot 排实体/关系骨架，再用 neato 按固定坐标画，
+    属性和实体之间用不带箭头的细线连，关系两侧标 1 / N / M。
+    """
+    entities, relations = _er_parse(data)
     if not entities:
         return ""
-    lines = [_dot_graph(rankdir="LR", splines="polyline", nodesep=0.5, ranksep=0.9)]
-    names = []
-    for ei, ent in enumerate(entities):
-        if isinstance(ent, dict):
-            name = str(ent.get("name") or ent.get("label") or "")
-            attrs_list = ent.get("attributes") or ent.get("fields") or []
-        else:
-            name, attrs_list = str(ent), []
-        names.append(name)
-        nid = f"e{ei}"
-        lines.append(f'  {nid} [shape=box, style="filled", fillcolor="#dbe9ff", '
-                     f'color="#3c73c4", fontcolor="#1d4076", label="{_dot_label(name)}"];')
-        for ai, attr in enumerate(attrs_list[:10]):
+    pos = _er_skeleton_positions(entities, relations)
+
+    PT = 72.0                              # neato 的 pos 用「点」，1 英寸 = 72 点
+
+    def coord(name, fallback=(0.0, 0.0)):
+        x, y = pos.get(name, fallback)
+        return x * PT, y * PT
+
+    lines = [
+        "graph G {",
+        '  graph [bgcolor="transparent", splines=false, overlap=false, '
+        f'pad=0.3, fontname="{DOT_FONT}"];',
+        '  node [fontname="' + DOT_FONT + '", fontsize=13, penwidth=1.4];',
+        '  edge [color="#9aa0ae", penwidth=1.2, fontname="' + DOT_FONT + '", fontsize=11];',
+    ]
+    # 实体
+    ent_ids = {}
+    for i, ent in enumerate(entities):
+        x, y = coord(f"e{i}")
+        ent_ids[ent["name"]] = f"e{i}"
+        lines.append(f'  e{i} [shape=box, width=1.0, height=0.45, fixedsize=true, '
+                     f'pos="{x:.3f},{y:.3f}!", pin=true, style="filled", fillcolor="#dbe9ff", '
+                     f'color="#3c73c4", fontcolor="#1d4076", label="{_dot_label(ent["name"])}"];')
+    # 关系
+    rel_ids = {}
+    for j, rel in enumerate(relations):
+        x, y = coord(f"r{j}")
+        rel_ids[j] = f"r{j}"
+        lines.append(f'  r{j} [shape=diamond, width=1.15, height=0.55, fixedsize=true, '
+                     f'pos="{x:.3f},{y:.3f}!", pin=true, style="filled", fillcolor="#ffefc9", '
+                     f'color="#c39327", fontcolor="#6b4d08", label="{_dot_label(rel["label"] or "关系")}"];')
+    # 关系连线 + 基数
+    for j, rel in enumerate(relations):
+        card = rel["cardinality"]
+        tail, head = ("", "")
+        if ":" in card:
+            tail, head = [x.strip() for x in card.split(":", 1)]
+        lines.append(f'  {ent_ids[rel["from"]]} -- r{j} [taillabel="{tail}", '
+                     f'labeldistance=1, fontcolor="#6b4d08"];')
+        lines.append(f'  r{j} -- {ent_ids[rel["to"]]} [taillabel="{head}", '
+                     f'labeldistance=1, fontcolor="#6b4d08"];')
+    # 属性：绕实体一圈（从正上方开始顺时针），半径随属性数变大
+    for i, ent in enumerate(entities):
+        ex, ey = coord(f"e{i}")
+        attrs = ent["attributes"][:12]
+        count = len(attrs)
+        if not count:
+            continue
+        radius = (1.15 + 0.09 * count) * PT
+        for aidx, attr in enumerate(attrs):
             if isinstance(attr, dict):
                 aname = str(attr.get("name") or attr.get("label") or "")
                 pk = bool(attr.get("pk") or attr.get("primary"))
                 fk = bool(attr.get("fk") or attr.get("foreign"))
             else:
                 aname, pk, fk = str(attr), False, False
-            mark = "PK " if pk else ("FK " if fk else "")
-            aid = f"a{ei}_{ai}"
-            lines.append(f'  {aid} [shape=ellipse, style="filled", fillcolor="#ffffff", '
+            if not aname:
+                continue
+            mark = " PK" if pk else (" FK" if fk else "")
+            angle = -math.pi / 2 + (2 * math.pi * aidx / count)
+            ax = ex + radius * math.cos(angle)
+            ay = ey - radius * math.sin(angle) * 0.78
+            nid = f"a{i}_{aidx}"
+            lines.append(f'  {nid} [shape=ellipse, fixedsize=true, width=0.95, height=0.42, '
+                         f'pos="{ax:.3f},{ay:.3f}!", pin=true, style="filled", fillcolor="#ffffff", '
                          f'color="#9aa0ae", fontcolor="#3d404a", fontsize=12, '
-                         f'label="{_dot_label(mark + aname)}"];')
-            lines.append(f'  {nid} -> {aid} [arrowhead=none, color="#9aa0ae"];')
-    idx = {name: f"e{i}" for i, name in enumerate(names)}
-    for ri, rel in enumerate(relations):
-        if not isinstance(rel, dict):
-            continue
-        a, b = str(rel.get("from")), str(rel.get("to"))
-        if a not in idx or b not in idx:
-            continue
-        rid = f"r{ri}"
-        rlabel = str(rel.get("label") or rel.get("name") or "")
-        lines.append(f'  {rid} [shape=diamond, style="filled", fillcolor="#ffefc9", '
-                     f'color="#c39327", fontcolor="#6b4d08", label="{_dot_label(rlabel)}"];')
-        card = str(rel.get("cardinality") or "").strip()
-        tail = head = ""
-        if ":" in card:
-            tail, head = [x.strip() for x in card.split(":", 1)]
-        lines.append(f'  {idx[a]} -> {rid} [arrowhead=none, taillabel="{tail}", '
-                     f'labeldistance="2", fontcolor="#6b4d08"];')
-        lines.append(f'  {idx[b]} -> {rid} [arrowhead=none, taillabel="{head}", '
-                     f'labeldistance="2", fontcolor="#6b4d08"];')
+                         f'label="{_dot_label(aname + mark)}"];')
+            lines.append(f'  e{i} -- {nid} [arrowhead=none, color="#9aa0ae"];')
     lines.append("}")
-    return "\n".join(lines)
+    # neato 固定坐标渲染在大图上会画出毛边/虚线伪影，这里改让 dot 自己排：
+    # 把 pos / pin / fixedsize 去掉，符号（矩形/菱形/椭圆）保持不变。
+    out = []
+    for line in "\n".join(lines).split("\n"):
+        line = re.sub(r'pos="[^"]*", ', "", line)
+        line = line.replace("pin=true, ", "").replace("fixedsize=true, ", "")
+        out.append(line)
+    return "\n".join(out)
 
 
 def _dot_arch(data):
