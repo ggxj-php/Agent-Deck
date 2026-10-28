@@ -334,6 +334,9 @@ CORE_PROMPT = r"""【共享规矩 · 所有身份卡都适用】
     - 活动表按「事件名(参数表)/动作表达式」写，常用事件名 entry / exit / do，
       例：activities: [{"event": "do", "action": "timer++"}] 或 ["entry/置timer=0", "do/响铃"]
     - 状态变量写 variables（字符串或列表），如 variables: "timer=0"
+    - **必须给 transitions**（每条 {from, to, event}），箭头上的事件表达式就是 event；
+      只给 states 不给 transitions 的话，图会按顺序自动连线、箭头没有文字，
+      而且工具回执里会提示你补——看到提示就补上重新画
     - **每个状态都要写 activities（这个状态下干什么）**，哪怕只是一句
       `do/等待处理`；只写状态名会画成光秃秃一个单栏框，不像课本图
     - **状态变量只在题目明确给出时才写**，而且必须是这个状态**真的会用到的**：

@@ -1525,12 +1525,20 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
         doc = doc.replace("</body>", f"<script>{script}</script></body>", 1)
     aid = render._store(doc, str(title or ""))
     _remember_svg(aid, svg)
-    return json.dumps({
+    payload = {
         "ok": True,
         "artifact_id": aid,
         "title": str(title or ""),
         "note": "已经画成卡片给用户看了，正文里一两句话说明画的是什么就行，别再贴任何 SVG/HTML。",
-    }, ensure_ascii=False)
+    }
+    if key == "state":
+        transitions = (data.get("transitions") or data.get("edges") or [])
+        if not transitions:
+            payload["warning"] = (
+                "你没给 transitions，图里的状态转移是按 states 顺序自动连的（所以箭头没有事件表达式）。"
+                "请补上真实的 transitions（每条含 from / to / event），重新调用一次 draw_diagram。"
+            )
+    return json.dumps(payload, ensure_ascii=False)
 
 
 SPECS = [
