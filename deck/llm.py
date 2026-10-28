@@ -1,7 +1,7 @@
 """模型接入层：只负责发请求，不掺业务逻辑。"""
 import threading
 
-from openai import OpenAI
+from openai import APIConnectionError, APITimeoutError, OpenAI
 
 from . import settings
 from .config import MAX_TOKENS, THINKING_PARAM
@@ -27,7 +27,14 @@ def _client(api_key, base_url):
     with _clients_lock:
         client = _clients.get(slot)
         if client is None:
-            client = OpenAI(api_key=api_key, base_url=base_url)
+            # 上游偶尔会「握手成功但一直不吐数据」：不设超时就会挂到 SDK 默认的 10 分钟，
+            # 前端等不住先断了，用户看到的就是「一直思考中 / 断在半路」。
+            # 这里给每段数据一个 60 秒的空闲上限，兜住卡死的连接。
+            client = OpenAI(
+                api_key=api_key, base_url=base_url,
+                timeout=45.0,       # 流式下等价于「45 秒收不到新数据就报错」（前端 60 秒才判超时，要抢在前面）
+                max_retries=0,
+            )
             _clients[slot] = client
         return client
 
@@ -124,7 +131,17 @@ def stream_chat(messages: list, tools: list, model: str = "",
     pending_sent = set()   # 已经发过「正在准备工具」事件的下标
     finish = None
 
-    for chunk in stream:
+    iterator = iter(stream)
+    while True:
+        try:
+            chunk = next(iterator)
+        except StopIteration:
+            break
+        except (APITimeoutError, APIConnectionError) as exc:
+            raise RuntimeError(
+                "模型接口超时/断开了（45 秒没收到新数据）。再发一次试试；"
+                "如果反复出现，多半是上游服务在抽风，等几分钟。"
+            ) from exc
         if not chunk.choices:
             continue
         choice = chunk.choices[0]
@@ -157,7 +174,6 @@ def stream_chat(messages: list, tools: list, model: str = "",
                         yield "tool_pending", piece.function.name
                 if piece.function.arguments:
                     slot["arguments"] += piece.function.arguments
-
     text = "".join(text_parts)
     message = {"role": "assistant", "content": text or None}
     if calls:
