@@ -61,9 +61,10 @@ fun LatexImage(
     latex: String,
     palette: DeckPalette,
     modifier: Modifier = Modifier,
+    textSize: Int = 17,
 ) {
     val density = LocalDensity.current
-    val sizePx = with(density) { 17.sp.toPx() }.toInt()
+    val sizePx = with(density) { textSize.sp.toPx() }.toInt()
     val color = palette.ink.toArgbColor()
 
     var bitmap by remember(latex, sizePx, color) { mutableStateOf<Bitmap?>(null) }

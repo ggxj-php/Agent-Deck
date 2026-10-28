@@ -35,11 +35,19 @@ class MarkdownInlineTest {
     }
 
     @Test
-    fun mathRendersToUnicode() {
+    fun inlineMathStaysRawForRenderer() {
+        // 解析阶段保留原始 $...$，由渲染层拆成文字+公式混排（以前在这里 demath 成文字，公式就没了）
         val blocks = parseMarkdown("面积 \$S_{\\text{总}} = 3600\$")
         val text = blocks.filterIsInstance<MdBlock.Paragraph>().first().text
         assertTrue("实际输出：$text", text.contains("3600"))
-        assertTrue("下标没转换：$text", !text.contains("\\text"))
+        assertTrue("公式被提前转成文字了：$text", text.contains("$"))
+    }
+
+    @Test
+    fun demathStillConvertsStandaloneLatex() {
+        val out = demath("面积 \$S_{\\text{总}} = 3600\$")
+        assertTrue("实际输出：$out", out.contains("3600"))
+        assertTrue("兜底文本没转换：$out", !out.contains("\\text"))
     }
 
     @Test

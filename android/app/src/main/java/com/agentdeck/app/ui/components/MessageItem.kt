@@ -1,4 +1,6 @@
 package com.agentdeck.app.ui.components
+import androidx.compose.ui.graphics.asImageBitmap
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.draw.alpha
 import kotlinx.coroutines.delay
@@ -113,8 +115,25 @@ private fun UserMessage(
             message.images.forEach { raw ->
                 val url = resolveUrl(baseUrl, raw)
                 val context = LocalContext.current
+                // 刚发出去的图片是 data URI，Coil 解不了，先自己解成 Bitmap
+                val localBitmap = remember(url) {
+                    if (isDataUri(url)) decodeDataUri(url) else null
+                }
                 val request = remember(url) {
                     ImageRequest.Builder(context).data(url).size(1200, 1200).build()
+                }
+                if (localBitmap != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = localBitmap.asImageBitmap(),
+                        contentDescription = "发送的图片",
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 240.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onPreview(url) },
+                    )
+                    return@forEach
                 }
                 AsyncImage(
                     model = request,

@@ -27,8 +27,8 @@ android {
         applicationId = "com.agentdeck.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 7
+        versionName = "1.6"
 
         // 自己部署：改 local.properties 的 deck.baseUrl，或在登录页填服务器地址
         buildConfigField("String", "BASE_URL", "\"$deckBaseUrl\"")

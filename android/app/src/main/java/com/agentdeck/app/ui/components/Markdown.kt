@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.agentdeck.app.ui.components
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
@@ -78,6 +80,27 @@ sealed interface MdBlock {
 private val STICKER = Regex("""\[sticker:([A-Za-z_]+)(?::([^\]\s]+))?]""")
 private val FENCE = Regex("""^\s*(`{3,}|~{3,})\s*([A-Za-z0-9+#._-]*)\s*$""")
 private val IMAGE_LINE = Regex("""^!\[([^\]]*)]\(([^)\s]+)\)$""")
+
+/** 行内公式：$...$、$$...$$、\(...\) 都算。 */
+private val INLINE_MATH = Regex("""\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$|\\\(([\s\S]+?)\\\)""")
+
+internal data class InlineSegment(val text: String, val math: Boolean)
+
+internal fun splitInlineMath(source: String): List<InlineSegment> {
+    val out = mutableListOf<InlineSegment>()
+    var last = 0
+    for (match in INLINE_MATH.findAll(source)) {
+        if (match.range.first > last) {
+            out.add(InlineSegment(source.substring(last, match.range.first), false))
+        }
+        val latex = match.groupValues.drop(1).firstOrNull { it.isNotEmpty() } ?: ""
+        out.add(InlineSegment(latex, true))
+        last = match.range.last + 1
+    }
+    if (last < source.length) out.add(InlineSegment(source.substring(last), false))
+    return out
+}
+
 private val DOWNLOAD_LINE = Regex("""\[([^\]]*)]\((/d/[^)\s]+)\)""")
 private val HEADING = Regex("""^(#{1,6})\s+(.*)$""")
 private val BULLET = Regex("""^\s*[-*+]\s+(.*)$""")
@@ -120,7 +143,7 @@ fun parseMarkdown(source: String): List<MdBlock> {
                     }
 
                     image != null -> blocks += MdBlock.Picture(image.groupValues[2], image.groupValues[1])
-                    else -> blocks += MdBlock.Paragraph(demath(text))
+                    else -> blocks += MdBlock.Paragraph(text)
                 }
             }
         }
@@ -314,15 +337,45 @@ private fun MdBlockView(
         }
 
         is MdBlock.Paragraph -> {
-            val text = remember(block.text, palette.accent) { inline(block.text, palette) }
-            Text(
-                text = text,
-                style = syncedStyle,
-                fontSize = 15.sp,
-                lineHeight = 22.sp,
-                color = palette.ink,
-                modifier = Modifier.padding(vertical = 3.dp),
-            )
+            val segments = remember(block.text) { splitInlineMath(block.text) }
+            if (segments.none { it.math }) {
+                val text = remember(block.text, palette.accent) { inline(block.text, palette) }
+                Text(
+                    text = text,
+                    style = syncedStyle,
+                    fontSize = 15.sp,
+                    lineHeight = 22.sp,
+                    color = palette.ink,
+                    modifier = Modifier.padding(vertical = 3.dp),
+                )
+            } else {
+                // 行内公式：文字和公式混排（网页端 KaTeX 的行内效果）
+                androidx.compose.foundation.layout.FlowRow(
+                    modifier = Modifier.padding(vertical = 3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    segments.forEach { segment ->
+                        if (segment.math) {
+                            LatexImage(
+                                latex = segment.text,
+                                palette = palette,
+                                textSize = 15,
+                            )
+                        } else if (segment.text.isNotBlank()) {
+                            Text(
+                                text = remember(segment.text, palette.accent) {
+                                    inline(demath(segment.text), palette)
+                                },
+                                style = syncedStyle,
+                                fontSize = 15.sp,
+                                lineHeight = 22.sp,
+                                color = palette.ink,
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         is MdBlock.Bullet -> Column(modifier = Modifier.padding(vertical = 2.dp)) {
@@ -428,7 +481,9 @@ private fun MdBlockView(
         )
 
         is MdBlock.Picture -> AsyncImage(
-            model = resolveUrl(baseUrl, block.url),
+            model = resolveUrl(baseUrl, block.url).let { url ->
+                if (isDataUri(url)) decodeDataUri(url) ?: url else url
+            },
             contentDescription = block.alt,
             contentScale = ContentScale.FillWidth,
             modifier = Modifier

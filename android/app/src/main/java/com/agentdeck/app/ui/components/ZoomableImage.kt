@@ -70,10 +70,15 @@ fun ZoomableImageDialog(
     var saved by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
 
+    // data URI 先解成 Bitmap，Coil 不认这种写法
+    val localBitmap = remember(model) {
+        (model as? String)?.takeIf { it.startsWith("data:") }?.let { decodeDataUri(it) }
+    }
     // 预览按高分辨率栅格化：SVG 默认只按屏幕尺寸解一次（1200px 左右），放大就糊了
-    val request = remember(model) {
-        when (model) {
-            is String -> ImageRequest.Builder(context)
+    val request = remember(model, localBitmap) {
+        when {
+            localBitmap != null -> localBitmap
+            model is String -> ImageRequest.Builder(context)
                 .data(model)
                 .size(3072, 3072)
                 .crossfade(false)

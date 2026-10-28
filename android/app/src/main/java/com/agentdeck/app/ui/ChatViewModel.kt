@@ -408,8 +408,8 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
     }
 
     private fun finishTurn(sessionId: String) {
-        // 万一公式到最后都没闭合，挂起的表情包也得放出来，不能丢
-        forceFlushSticker()
+        // 这一轮结束了，排队的表情包全部放出来
+        flushStickers(force = true)
         updateLastAssistant { it.copy(streaming = false) }
         _state.update { it.copy(busy = false) }
         viewModelScope.launch {
@@ -423,8 +423,11 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
         viewModelScope.launch { /* 让最后一条正文的 WebView 有机会完成渲染 */ }
     }
 
-    /** 公式块写了一半时先扣下的表情包。 */
-    private var deferredSticker: String? = null
+    /**
+     * 排队中的表情包：和网页端的 queuedStickers 一样，先收着，
+     * 等正文出现句末标点/换行再插，避免把一句话从中间劈开。
+     */
+    private val queuedStickers = ArrayDeque<String>()
 
     /** 最后一段正文里 $$ 的数量是奇数，说明公式还没收尾。 */
     private fun mathStillOpen(): Boolean {
@@ -433,20 +436,40 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
         return Regex("\\$\\$").findAll(text.markdown).count() % 2 == 1
     }
 
-    private fun forceFlushSticker() {
-        val url = deferredSticker ?: return
-        deferredSticker = null
-        updateLastAssistant { msg ->
-            msg.copy(blocks = settleThinking(msg.blocks) + Block.Sticker(url))
-        }
+    private fun lastAssistantText(): String? {
+        val message = _state.value.messages.lastOrNull { it.role == Role.ASSISTANT } ?: return null
+        return (message.blocks.lastOrNull { it is Block.Text } as? Block.Text)?.markdown
     }
 
-    private fun flushDeferredSticker() {
-        val url = deferredSticker ?: return
-        if (mathStillOpen()) return
-        deferredSticker = null
-        updateLastAssistant { msg ->
-            msg.copy(blocks = settleThinking(msg.blocks) + Block.Sticker(url))
+    /**
+     * 把排队的表情包放出来。force=false 时只有正文刚好停在句子边界才插，
+     * 判断规则和网页端 flushQueuedStickers 一致（句末标点 / 换行 / 没在代码块里）。
+     */
+    private fun flushStickers(force: Boolean = false) {
+        if (queuedStickers.isEmpty()) return
+        if (!force) {
+            val text = lastAssistantText()
+            if (text.isNullOrEmpty()) {
+                // 回复一开头就是表情包：立刻显示，别让气泡空着
+            } else {
+                if (mathStillOpen()) return
+                val fences = Regex("```").findAll(text).count()
+                if (fences % 2 == 1) return
+                if (!endsAtSentenceBoundary(text)) return
+            }
+        }
+        if (force) {
+            while (queuedStickers.isNotEmpty()) {
+                val url = queuedStickers.removeFirst()
+                updateLastAssistant { msg ->
+                    msg.copy(blocks = settleThinking(msg.blocks) + Block.Sticker(url))
+                }
+            }
+        } else {
+            val url = queuedStickers.removeFirst()
+            updateLastAssistant { msg ->
+                msg.copy(blocks = settleThinking(msg.blocks) + Block.Sticker(url))
+            }
         }
     }
 
@@ -490,15 +513,18 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                     }
                     msg.copy(blocks = blocks)
                 }
-                flushDeferredSticker()
+                flushStickers()
             }
 
             is ChatEvent.ToolPending -> setWaiting("正在准备 ${event.name}…")
 
-            is ChatEvent.ToolStart -> updateLastAssistant { msg ->
+            is ChatEvent.ToolStart -> {
+                flushStickers(force = true)
+                updateLastAssistant { msg ->
                 val blocks = settleThinking(msg.blocks).toMutableList()
-                blocks.add(Block.Tool(event.name, event.arguments, null, false))
-                msg.copy(blocks = blocks)
+                    blocks.add(Block.Tool(event.name, event.arguments, null, false))
+                    msg.copy(blocks = blocks)
+                }
             }
 
             is ChatEvent.ToolEnd -> updateLastAssistant { msg ->
@@ -515,20 +541,17 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             is ChatEvent.Sticker -> {
                 val url = stickerUrl(event.name, event.mood)
                 if (url.isNotEmpty()) {
-                    if (mathStillOpen()) {
-                        // 公式还没收尾：先挂起，等闭合了再插进去，
-                        // 不然同一条公式会被表情包拆成两个 Text 块，两块都渲染不出来
-                        deferredSticker = url
-                    } else {
-                        updateLastAssistant { msg ->
-                            msg.copy(blocks = settleThinking(msg.blocks) + Block.Sticker(url))
-                        }
-                    }
+                    queuedStickers.addLast(url)
+                    // 正文还没开始（或刚好停在句子边界）就立刻显示
+                    flushStickers()
                 }
             }
 
-            is ChatEvent.Artifact -> updateLastAssistant { msg ->
-                msg.copy(blocks = settleThinking(msg.blocks) + Block.Artifact(event.id, event.title))
+            is ChatEvent.Artifact -> {
+                flushStickers(force = true)
+                updateLastAssistant { msg ->
+                    msg.copy(blocks = settleThinking(msg.blocks) + Block.Artifact(event.id, event.title))
+                }
             }
 
             is ChatEvent.Cut -> updateLastAssistant { msg ->
