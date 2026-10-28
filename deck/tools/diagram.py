@@ -1258,7 +1258,7 @@ def _dot_state(data):
     if not initial:
         initial = states[0]["name"]
 
-    lines = [_dot_graph(rankdir="TB", splines="polyline", nodesep=0.55, ranksep=0.75)]
+    lines = [_dot_graph(rankdir="TB", splines="polyline", nodesep=0.55, ranksep=0.75, pad=0.45)]
     ids = {}
     for i, st in enumerate(states):
         nid = f"s{i}"
@@ -1281,15 +1281,11 @@ def _dot_state(data):
         # 下面：活动表，语法「事件名(参数表)/动作表达式」，entry / exit / do 是常用事件名
         for line in _state_lines(st["activities"]):
             rows.append(f'<tr><td>{_esc(line)}</td></tr>')
-        if len(rows) > 1:
-            label = ('<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" '
-                     'bgcolor="#ffffff">' + "".join(rows) + "</table>>")
-            lines.append(f'  {nid} [shape=box, style="rounded", fillcolor="#ffffff", '
-                         f'color="#1f2023", label={label}];')
-        else:
-            lines.append(f'  {nid} [shape=box, style="rounded,filled", fillcolor="#eef4ff", '
-                         f'color="#3c73c4", fontcolor="#1d4076", '
-                         f'label="{_dot_label(st["name"])}"];')
+        # 所有状态用同一种框：圆角矩形 + 黑边；有变量/活动表就分栏
+        label = ('<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" '
+                 'bgcolor="#ffffff">' + "".join(rows) + "</table>>")
+        lines.append(f'  {nid} [shape=box, style="rounded", fillcolor="#ffffff", '
+                     f'color="#1f2023", label={label}];')
     # 初始事件箭头
     if initial in ids:
         lines.append('  __start__ [shape=point, width=0.18, height=0.18, fixedsize=true, '
