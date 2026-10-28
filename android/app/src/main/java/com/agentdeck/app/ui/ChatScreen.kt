@@ -282,7 +282,7 @@ private fun UpdateDialog(
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    text = "更新包默认从 Gitee 下载",
+                    text = "更新包从服务器下载",
                     fontSize = 11.sp,
                     color = palette.inkSoft,
                 )
@@ -298,7 +298,7 @@ private fun UpdateDialog(
                     runCatching { context.startActivity(intent) }
                     onDismiss()
                 },
-            ) { Text("去 Gitee 更新", color = palette.accent) }
+            ) { Text("去服务器下载", color = palette.accent) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("稍后", color = palette.inkSoft) }
