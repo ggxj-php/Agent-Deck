@@ -78,7 +78,7 @@ sealed interface MdBlock {
 private val STICKER = Regex("""\[sticker:([A-Za-z_]+)(?::([^\]\s]+))?]""")
 private val FENCE = Regex("""^\s*(`{3,}|~{3,})\s*([A-Za-z0-9+#._-]*)\s*$""")
 private val IMAGE_LINE = Regex("""^!\[([^\]]*)]\(([^)\s]+)\)$""")
-private val DOWNLOAD_LINE = Regex("""^\[([^\]]*)]\((/d/[^)\s]+)\)$""")
+private val DOWNLOAD_LINE = Regex("""\[([^\]]*)]\((/d/[^)\s]+)\)""")
 private val HEADING = Regex("""^(#{1,6})\s+(.*)$""")
 private val BULLET = Regex("""^\s*[-*+]\s+(.*)$""")
 private val ORDERED = Regex("""^\s*(\d+)[.)]\s+(.*)$""")
@@ -106,10 +106,19 @@ fun parseMarkdown(source: String): List<MdBlock> {
                 val download = DOWNLOAD_LINE.find(text)
                 val image = IMAGE_LINE.find(text)
                 when {
-                    download != null -> blocks += MdBlock.Download(
-                        download.groupValues[1],
-                        download.groupValues[2],
-                    )
+                    // 链接可能带前缀（比如「👉 [手册.docx](/d/xxx)」），前后文字拆成段落，
+                    // 中间那段一定要渲染成可下载的卡片，而不是普通文字链接。
+                    download != null -> {
+                        val before = text.substring(0, download.range.first).trim()
+                        if (before.isNotEmpty()) blocks += MdBlock.Paragraph(demath(before))
+                        blocks += MdBlock.Download(
+                            download.groupValues[1].ifBlank { "下载附件" },
+                            download.groupValues[2],
+                        )
+                        val after = text.substring(download.range.last + 1).trim()
+                        if (after.isNotEmpty()) blocks += MdBlock.Paragraph(demath(after))
+                    }
+
                     image != null -> blocks += MdBlock.Picture(image.groupValues[2], image.groupValues[1])
                     else -> blocks += MdBlock.Paragraph(demath(text))
                 }

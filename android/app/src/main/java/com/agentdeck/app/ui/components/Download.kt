@@ -46,7 +46,9 @@ fun DownloadCard(
 ) {
     val context = LocalContext.current
     val fullUrl = if (path.startsWith("http")) path else baseUrl + path
-    val fallbackName = path.trimEnd('/').substringAfterLast('/').ifBlank { "附件" }
+    // /d/<token> 的末段是 token，直接用会把文件名存成哈希；链接文字有扩展名时优先用它
+    val fallbackName = label.takeIf { it.contains('.') && it.length <= 80 }
+        ?: path.trimEnd('/').substringAfterLast('/').ifBlank { "附件" }
     val tasks by DownloadCenter.tasks.collectAsState()
     val task = tasks.lastOrNull { it.url == fullUrl }
 

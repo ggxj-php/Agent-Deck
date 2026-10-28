@@ -522,7 +522,9 @@ private fun ArtifactCard(block: Block.Artifact, baseUrl: String, palette: DeckPa
 private fun CopyWholeRow(message: UiMessage, palette: DeckPalette) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var copied by remember(message.id) { mutableStateOf(false) }
-    val plain = remember(message.id) {
+    // 不能只按 id 记忆：流式消息第一次组合时 blocks 是空的，
+    // 记住空串之后就永远不显示「复制」了（刚生成完的消息没复制键就是这个原因）。
+    val plain = remember(message.blocks) {
         message.blocks.filterIsInstance<Block.Text>()
             .joinToString("\n\n") { it.markdown }
             .trim()
