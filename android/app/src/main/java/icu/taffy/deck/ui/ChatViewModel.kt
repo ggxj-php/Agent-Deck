@@ -261,7 +261,9 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                 val page = api.history(id)
                 _state.update {
                     it.copy(
-                        messages = HistoryParser.toMessages(page.history) { name -> stickerUrl(name, "") },
+                        messages = HistoryParser.toMessages(page.history) { mood, name ->
+                            stickerUrl(name, mood)
+                        },
                         context = page.context,
                         currentSessionId = id,
                     )

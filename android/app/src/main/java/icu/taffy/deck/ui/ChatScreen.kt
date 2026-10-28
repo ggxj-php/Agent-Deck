@@ -80,6 +80,7 @@ import icu.taffy.deck.BuildConfig
 import icu.taffy.deck.data.SessionSummary
 import icu.taffy.deck.ui.components.Composer
 import icu.taffy.deck.ui.components.MessageItem
+import icu.taffy.deck.ui.components.ZoomableImageDialog
 import icu.taffy.deck.ui.theme.LocalPalette
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -97,6 +98,7 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
     val snackbar = remember { SnackbarHostState() }
     var pendingDelete by remember { mutableStateOf<SessionSummary?>(null) }
     var showPasswordDialog by remember { mutableStateOf(false) }
+    var previewUrl by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.toast) {
         state.toast?.let { message ->
@@ -162,7 +164,7 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                 }
             },
         ) { padding ->
-            MessageList(state, palette, Modifier.padding(padding))
+            MessageList(state, palette, Modifier.padding(padding)) { previewUrl = it }
         }
     }
 
@@ -192,6 +194,10 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                 showPasswordDialog = false
             },
         )
+    }
+
+    previewUrl?.let { url ->
+        ZoomableImageDialog(model = url, description = null) { previewUrl = null }
     }
 }
 
@@ -471,10 +477,12 @@ private fun MessageList(
     state: ChatUiState,
     palette: icu.taffy.deck.ui.theme.DeckPalette,
     modifier: Modifier = Modifier,
+    onPreview: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val latestMessages by rememberUpdatedState(state.messages)
+    val streaming by rememberUpdatedState(state.busy)
 
     // 是否贴着底部：最后一条完整露出、且离底不超过 120px 才算「跟随中」
     fun pinned(): Boolean {
@@ -490,10 +498,12 @@ private fun MessageList(
         }
     }
 
-    // 流式输出时不做每帧滚动：120ms 跟一次，且只在用户没往上翻的时候跟
+    // 只有正在流式输出时才跟随滚动；空闲时这个循环什么都不做，
+    // 免得一边看历史、它一边每 120ms 动一下布局。
     LaunchedEffect(listState) {
         while (isActive) {
             delay(120)
+            if (!streaming) continue
             val messages = latestMessages
             if (messages.isEmpty()) continue
             if (!listState.isScrollInProgress && pinned()) {
@@ -510,12 +520,17 @@ private fun MessageList(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
         ) {
-            items(items = state.messages, key = { it.id }) { message ->
+            items(
+                items = state.messages,
+                key = { it.id },
+                contentType = { it.role.name },
+            ) { message ->
                 MessageItem(
                     message = message,
                     baseUrl = BuildConfig.BASE_URL,
                     palette = palette,
                     avatarUrl = state.persona.avatarUrl(BuildConfig.BASE_URL),
+                    onPreview = onPreview,
                 )
             }
             item { Spacer(Modifier.height(8.dp)) }

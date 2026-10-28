@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,15 +65,21 @@ fun MessageItem(
     baseUrl: String,
     palette: DeckPalette,
     avatarUrl: String,
+    onPreview: (String) -> Unit = {},
 ) {
     when (message.role) {
-        Role.USER -> UserMessage(message, baseUrl, palette)
-        Role.ASSISTANT -> AssistantMessage(message, baseUrl, palette, avatarUrl)
+        Role.USER -> UserMessage(message, baseUrl, palette, onPreview)
+        Role.ASSISTANT -> AssistantMessage(message, baseUrl, palette, avatarUrl, onPreview)
     }
 }
 
 @Composable
-private fun UserMessage(message: UiMessage, baseUrl: String, palette: DeckPalette) {
+private fun UserMessage(
+    message: UiMessage,
+    baseUrl: String,
+    palette: DeckPalette,
+    onPreview: (String) -> Unit,
+) {
     val text = (message.blocks.filterIsInstance<Block.Text>().firstOrNull()?.markdown).orEmpty()
     Row(
         modifier = Modifier
@@ -88,14 +95,16 @@ private fun UserMessage(message: UiMessage, baseUrl: String, palette: DeckPalett
                 .padding(horizontal = 13.dp, vertical = 10.dp),
         ) {
             message.images.forEach { raw ->
+                val url = resolveUrl(baseUrl, raw)
                 AsyncImage(
-                    model = resolveUrl(baseUrl, raw),
+                    model = url,
                     contentDescription = "发送的图片",
                     contentScale = ContentScale.FillWidth,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 240.dp)
-                        .clip(RoundedCornerShape(12.dp)),
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onPreview(url) },
                 )
                 Spacer(Modifier.height(6.dp))
             }
@@ -160,6 +169,7 @@ private fun AssistantMessage(
     baseUrl: String,
     palette: DeckPalette,
     avatarUrl: String,
+    onPreview: (String) -> Unit,
 ) {
     val bubbleShape = RoundedCornerShape(
         topStart = 5.dp,
@@ -195,10 +205,11 @@ private fun AssistantMessage(
             for (block in message.blocks) {
                 when (block) {
                     is Block.Text -> {
-                        MarkdownWebView(
-                            markdown = block.markdown,
+                        MarkdownText(
+                            text = block.markdown,
+                            palette = palette,
                             baseUrl = baseUrl,
-                            modifier = Modifier.fillMaxWidth(),
+                            onPreview = onPreview,
                         )
                     }
 
@@ -207,21 +218,24 @@ private fun AssistantMessage(
                     is Block.Tool -> ToolCard(block, palette)
 
                     is Block.Sticker -> {
-                        Spacer(Modifier.height(4.dp))
-                        AsyncImage(
-                            model = block.url,
-                            contentDescription = "表情包",
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier
-                                .heightIn(max = 132.dp)
-                                .widthIn(max = 160.dp),
-                        )
-                        Spacer(Modifier.height(4.dp))
+                        if (block.url.isNotBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            AsyncImage(
+                                model = block.url,
+                                contentDescription = "表情包",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .heightIn(max = 132.dp)
+                                    .widthIn(max = 160.dp)
+                                    .clickable { onPreview(block.url) },
+                            )
+                            Spacer(Modifier.height(4.dp))
+                        }
                     }
 
                     is Block.Notice -> NoticeRow(block.text, block.isError, palette)
 
-                    is Block.Artifact -> ArtifactCard(block, baseUrl, palette)
+                    is Block.Artifact -> ArtifactBlock(block, baseUrl, palette, onPreview)
                 }
             }
         }
@@ -379,6 +393,44 @@ private fun NoticeRow(text: String, isError: Boolean, palette: DeckPalette) {
         )
         Spacer(Modifier.width(5.dp))
         Text(text = text, fontSize = 12.sp, lineHeight = 17.sp, color = color)
+    }
+}
+
+@Composable
+private fun ArtifactBlock(
+    block: Block.Artifact,
+    baseUrl: String,
+    palette: DeckPalette,
+    onPreview: (String) -> Unit,
+) {
+    var failed by remember(block.id) { mutableStateOf(false) }
+    if (failed) {
+        ArtifactCard(block, baseUrl, palette)
+        return
+    }
+    val url = "$baseUrl/api/artifact/${block.id}/svg"
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        if (block.title.isNotBlank()) {
+            Text(
+                text = block.title,
+                fontSize = 12.5.sp,
+                color = palette.inkSoft,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+        }
+        // 产物本来就是 SVG，用 Coil 解码后直接显示；点一下能全屏放大
+        AsyncImage(
+            model = url,
+            contentDescription = block.title.ifBlank { "生成的图" },
+            contentScale = ContentScale.Fit,
+            onError = { failed = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 60.dp, max = 460.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.White)
+                .clickable { onPreview(url) },
+        )
     }
 }
 

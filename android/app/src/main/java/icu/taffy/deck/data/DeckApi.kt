@@ -44,6 +44,9 @@ class DeckApi(context: android.content.Context) {
         .retryOnConnectionFailure(true)
         .build()
 
+    /** 给 Coil 复用：图片/产物也要带上登录 cookie。 */
+    val httpClient: OkHttpClient get() = client
+
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
     @Volatile

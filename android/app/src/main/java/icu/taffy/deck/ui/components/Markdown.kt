@@ -1,0 +1,625 @@
+package icu.taffy.deck.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import icu.taffy.deck.ui.theme.DeckPalette
+
+/* ------------------------------------------------------------------
+ * 原生 markdown 渲染：不再为每条消息开 WebView。
+ * 覆盖模型实际会输出的子集：标题 / 段落 / 列表 / 代码块 / 行内代码 /
+ * 引用 / 表格 / 分割线 / 链接 / 图片 / $$ 公式块 / 表情包标记。
+ * 数学按网页同一套规则降级成 Unicode，读起来不费劲。
+ * ------------------------------------------------------------------ */
+
+sealed interface MdBlock {
+    data class Heading(val level: Int, val text: String) : MdBlock
+    data class Paragraph(val text: String) : MdBlock
+    data class Bullet(val items: List<String>) : MdBlock
+    data class Numbered(val items: List<Pair<String, String>>) : MdBlock
+    data class Code(val lang: String, val code: String) : MdBlock
+    data class Quote(val text: String) : MdBlock
+    data class Table(val header: List<String>, val rows: List<List<String>>) : MdBlock
+    data object Rule : MdBlock
+    data class MathBlock(val latex: String) : MdBlock
+    data class Picture(val url: String, val alt: String) : MdBlock
+}
+
+private val STICKER = Regex("""\[sticker:([A-Za-z_]+)(?::([^\]\s]+))?]""")
+private val IMAGE_LINE = Regex("""^!\[([^\]]*)]\(([^)\s]+)\)$""")
+private val HEADING = Regex("""^(#{1,6})\s+(.*)$""")
+private val BULLET = Regex("""^\s*[-*+]\s+(.*)$""")
+private val ORDERED = Regex("""^\s*(\d+)[.)]\s+(.*)$""")
+private val RULE = Regex("""^\s*([-*_])\1{2,}\s*$""")
+private val TABLE_DIVIDER = Regex("""^\s*\|?[\s:|-]+\|[\s:|-]*$""")
+
+fun parseMarkdown(source: String): List<MdBlock> {
+    val blocks = mutableListOf<MdBlock>()
+    val lines = source.split("\n")
+    var index = 0
+
+    fun flushParagraph(buffer: MutableList<String>) {
+        if (buffer.isEmpty()) return
+        val text = buffer.joinToString("\n").trim()
+        buffer.clear()
+        if (text.isEmpty()) return
+        // 整段就是一个公式（$...$ / $$...$$）：交给原生 LaTeX 渲染
+        val singleDollar = Regex("""^\$([^$\n]+)\$$""").find(text)
+        val doubleDollar = Regex("""^\$\$([\s\S]+)\$\$$""").find(text)
+        when {
+            doubleDollar != null -> blocks += MdBlock.MathBlock(doubleDollar.groupValues[1].trim())
+            singleDollar != null -> blocks += MdBlock.MathBlock(singleDollar.groupValues[1].trim())
+            else -> {
+                val image = IMAGE_LINE.find(text)
+                if (image != null) {
+                    blocks += MdBlock.Picture(image.groupValues[2], image.groupValues[1])
+                } else {
+                    blocks += MdBlock.Paragraph(demath(text))
+                }
+            }
+        }
+    }
+
+    val paragraph = mutableListOf<String>()
+    while (index < lines.size) {
+        val line = lines[index]
+        val trimmed = line.trim()
+
+        // 代码块
+        if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+            flushParagraph(paragraph)
+            val fence = trimmed.take(3)
+            val lang = trimmed.removePrefix(fence).trim()
+            val code = StringBuilder()
+            index++
+            while (index < lines.size && !lines[index].trim().startsWith(fence)) {
+                code.append(lines[index]).append('\n')
+                index++
+            }
+            index++ // 跳过结束围栏
+            blocks += MdBlock.Code(lang, code.toString().trimEnd('\n'))
+            continue
+        }
+
+        // $$ 公式块（可能跨行）
+        if (trimmed.startsWith("$$")) {
+            flushParagraph(paragraph)
+            val body = StringBuilder(trimmed.removePrefix("$$"))
+            if (!body.endsWith("$$")) {
+                index++
+                while (index < lines.size) {
+                    val current = lines[index]
+                    if (current.trim().endsWith("$$")) {
+                        body.append('\n').append(current.trim().removeSuffix("$$"))
+                        break
+                    }
+                    body.append('\n').append(current)
+                    index++
+                }
+            } else {
+                body.setLength(body.length - 2)
+            }
+            index++
+            blocks += MdBlock.MathBlock(body.toString().trim())
+            continue
+        }
+
+        // 空行：段落结束
+        if (trimmed.isEmpty()) {
+            flushParagraph(paragraph)
+            index++
+            continue
+        }
+
+        // 分割线
+        if (RULE.matches(trimmed)) {
+            flushParagraph(paragraph)
+            blocks += MdBlock.Rule
+            index++
+            continue
+        }
+
+        // 标题
+        val heading = HEADING.find(trimmed)
+        if (heading != null) {
+            flushParagraph(paragraph)
+            blocks += MdBlock.Heading(heading.groupValues[1].length, demath(heading.groupValues[2].trim()))
+            index++
+            continue
+        }
+
+        // 表格
+        if (trimmed.startsWith("|") && index + 1 < lines.size && TABLE_DIVIDER.matches(lines[index + 1].trim())) {
+            flushParagraph(paragraph)
+            val header = splitRow(trimmed)
+            val rows = mutableListOf<List<String>>()
+            index += 2
+            while (index < lines.size && lines[index].trim().startsWith("|")) {
+                rows += splitRow(lines[index].trim())
+                index++
+            }
+            blocks += MdBlock.Table(header, rows)
+            continue
+        }
+
+        // 引用
+        if (trimmed.startsWith(">")) {
+            flushParagraph(paragraph)
+            val quote = StringBuilder()
+            while (index < lines.size && lines[index].trim().startsWith(">")) {
+                if (quote.isNotEmpty()) quote.append('\n')
+                quote.append(lines[index].trim().removePrefix(">").trim())
+                index++
+            }
+            blocks += MdBlock.Quote(demath(quote.toString()))
+            continue
+        }
+
+        // 无序列表
+        if (BULLET.matches(line)) {
+            flushParagraph(paragraph)
+            val items = mutableListOf<String>()
+            while (index < lines.size && BULLET.matches(lines[index])) {
+                items += demath(BULLET.find(lines[index])!!.groupValues[1])
+                index++
+            }
+            blocks += MdBlock.Bullet(items)
+            continue
+        }
+
+        // 有序列表
+        if (ORDERED.matches(line)) {
+            flushParagraph(paragraph)
+            val items = mutableListOf<Pair<String, String>>()
+            while (index < lines.size && ORDERED.matches(lines[index])) {
+                val match = ORDERED.find(lines[index])!!
+                items += match.groupValues[1] to demath(match.groupValues[2])
+                index++
+            }
+            blocks += MdBlock.Numbered(items)
+            continue
+        }
+
+        paragraph += line
+        index++
+    }
+    flushParagraph(paragraph)
+    return blocks
+}
+
+private fun splitRow(line: String): List<String> =
+    line.trim().trim('|').split('|').map { demath(it.trim()) }
+
+@Composable
+fun MarkdownText(
+    text: String,
+    palette: DeckPalette,
+    baseUrl: String,
+    onPreview: (String) -> Unit = {},
+) {
+    val blocks = remember(text) { parseMarkdown(text) }
+    Column {
+        for (block in blocks) {
+            MdBlockView(block, palette, baseUrl, onPreview)
+        }
+    }
+}
+
+@Composable
+private fun MdBlockView(
+    block: MdBlock,
+    palette: DeckPalette,
+    baseUrl: String,
+    onPreview: (String) -> Unit,
+) {
+    when (block) {
+        is MdBlock.Heading -> {
+            val text = remember(block.text, palette.accent) { inline(block.text, palette) }
+            Text(
+                text = text,
+                fontSize = when (block.level) {
+                    1 -> 19.sp
+                    2 -> 17.sp
+                    3 -> 16.sp
+                    else -> 15.sp
+                },
+                lineHeight = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = palette.ink,
+                modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
+            )
+        }
+
+        is MdBlock.Paragraph -> {
+            val text = remember(block.text, palette.accent) { inline(block.text, palette) }
+            Text(
+                text = text,
+                fontSize = 15.sp,
+                lineHeight = 22.sp,
+                color = palette.ink,
+                modifier = Modifier.padding(vertical = 3.dp),
+            )
+        }
+
+        is MdBlock.Bullet -> Column(modifier = Modifier.padding(vertical = 2.dp)) {
+            block.items.forEach { item ->
+                Row(modifier = Modifier.padding(vertical = 1.dp)) {
+                    Text("•", fontSize = 15.sp, color = palette.accent)
+                    Spacer(Modifier.width(6.dp))
+                    val text = remember(item, palette.accent) { inline(item, palette) }
+                    Text(
+                        text = text,
+                        fontSize = 15.sp,
+                        lineHeight = 22.sp,
+                        color = palette.ink,
+                    )
+                }
+            }
+        }
+
+        is MdBlock.Numbered -> Column(modifier = Modifier.padding(vertical = 2.dp)) {
+            block.items.forEach { (number, item) ->
+                Row(modifier = Modifier.padding(vertical = 1.dp)) {
+                    Text("$number.", fontSize = 15.sp, color = palette.accent)
+                    Spacer(Modifier.width(6.dp))
+                    val text = remember(item, palette.accent) { inline(item, palette) }
+                    Text(
+                        text = text,
+                        fontSize = 15.sp,
+                        lineHeight = 22.sp,
+                        color = palette.ink,
+                    )
+                }
+            }
+        }
+
+        is MdBlock.Code -> {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 5.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF23252F)),
+            ) {
+                if (block.lang.isNotBlank()) {
+                    Text(
+                        text = block.lang,
+                        fontSize = 10.sp,
+                        color = Color(0xFF9AA0B5),
+                        modifier = Modifier.padding(start = 10.dp, top = 7.dp),
+                    )
+                }
+                SelectionContainer {
+                    Text(
+                        text = block.code,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        color = Color(0xFFE6E6EE),
+                        modifier = Modifier
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
+
+        is MdBlock.Quote -> {
+            val text = remember(block.text, palette.accent) { inline(block.text, palette) }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .heightIn(min = 18.dp)
+                        .background(palette.line, RoundedCornerShape(2.dp)),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = text,
+                    fontSize = 14.sp,
+                    lineHeight = 21.sp,
+                    fontStyle = FontStyle.Italic,
+                    color = palette.inkSoft,
+                )
+            }
+        }
+
+        is MdBlock.Table -> {
+            val columns = maxOf(block.header.size, block.rows.maxOfOrNull { it.size } ?: 0)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 5.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, palette.line, RoundedCornerShape(8.dp)),
+            ) {
+                TableRow(block.header, columns, palette, header = true)
+                block.rows.forEach { row -> TableRow(row, columns, palette, header = false) }
+            }
+        }
+
+        MdBlock.Rule -> Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+                .height(1.dp)
+                .background(palette.line),
+        )
+
+        is MdBlock.MathBlock -> Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 5.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(palette.softFill)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            LatexImage(latex = block.latex, palette = palette)
+        }
+
+        is MdBlock.Picture -> AsyncImage(
+            model = resolveUrl(baseUrl, block.url),
+            contentDescription = block.alt,
+            contentScale = ContentScale.FillWidth,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .heightIn(max = 280.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .clickable { onPreview(resolveUrl(baseUrl, block.url)) },
+        )
+    }
+}
+
+@Composable
+private fun TableRow(
+    cells: List<String>,
+    columns: Int,
+    palette: DeckPalette,
+    header: Boolean,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (header) palette.softFill else Color.Transparent)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+        for (column in 0 until columns) {
+            val raw = cells.getOrElse(column) { "" }
+            val text = remember(raw, palette.accent) { inline(raw, palette) }
+            Text(
+                text = text,
+                fontSize = 12.5.sp,
+                lineHeight = 18.sp,
+                fontWeight = if (header) FontWeight.SemiBold else FontWeight.Normal,
+                color = palette.ink,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+    if (header) {
+        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(palette.line))
+    }
+}
+
+/* ---------------- 行内格式 ---------------- */
+
+private fun inline(text: String, palette: DeckPalette): AnnotatedString = buildAnnotatedString {
+    val bold = SpanStyle(fontWeight = FontWeight.Bold)
+    val italic = SpanStyle(fontStyle = FontStyle.Italic)
+    val strike = SpanStyle(textDecoration = TextDecoration.LineThrough)
+    val code = SpanStyle(
+        fontFamily = FontFamily.Monospace,
+        fontSize = 13.sp,
+        color = palette.pinkDeep,
+        background = palette.softFill.copy(alpha = 0.9f),
+    )
+
+    var i = 0
+    while (i < text.length) {
+        when {
+            text.startsWith("**", i) -> {
+                val end = text.indexOf("**", i + 2)
+                if (end > i) {
+                    pushStyle(bold)
+                    append(text.substring(i + 2, end))
+                    pop()
+                    i = end + 2
+                } else {
+                    append("**"); i += 2
+                }
+            }
+
+            text.startsWith("~~", i) -> {
+                val end = text.indexOf("~~", i + 2)
+                if (end > i) {
+                    pushStyle(strike)
+                    append(text.substring(i + 2, end))
+                    pop()
+                    i = end + 2
+                } else {
+                    append("~~"); i += 2
+                }
+            }
+
+            text[i] == '`' -> {
+                val end = text.indexOf('`', i + 1)
+                if (end > i) {
+                    pushStyle(code)
+                    append(text.substring(i + 1, end))
+                    pop()
+                    i = end + 1
+                } else {
+                    append('`'); i++
+                }
+            }
+
+            text.startsWith("*", i) || text.startsWith("_", i) -> {
+                val marker = text[i].toString()
+                val end = text.indexOf(marker, i + 1)
+                if (end > i + 1 && !text[i + 1].isWhitespace()) {
+                    pushStyle(italic)
+                    append(text.substring(i + 1, end))
+                    pop()
+                    i = end + 1
+                } else {
+                    append(marker); i++
+                }
+            }
+
+            text.startsWith("[", i) -> {
+                val close = text.indexOf(']', i + 1)
+                val open = if (close > i && close + 1 < text.length && text[close + 1] == '(') {
+                    text.indexOf(')', close + 2)
+                } else -1
+                if (close > i && open > close) {
+                    val label = text.substring(i + 1, close)
+                    val url = text.substring(close + 2, open).trim()
+                    if (url.startsWith("http://") || url.startsWith("https://")) {
+                        withLink(
+                            LinkAnnotation.Url(
+                                url,
+                                TextLinkStyles(
+                                    SpanStyle(
+                                        color = palette.accent,
+                                        textDecoration = TextDecoration.Underline,
+                                    )
+                                ),
+                            )
+                        ) { append(label.ifBlank { url }) }
+                        i = open + 1
+                    } else {
+                        append(label)
+                        i = open + 1
+                    }
+                } else {
+                    append('['); i++
+                }
+            }
+
+            else -> {
+                append(text[i]); i++
+            }
+        }
+    }
+}
+
+/* ---------------- LaTeX → Unicode ---------------- */
+
+private val MATH_WORDS = mapOf(
+    "times" to "×", "cdot" to "·", "div" to "÷", "pm" to "±", "mp" to "∓",
+    "le" to "≤", "leq" to "≤", "ge" to "≥", "geq" to "≥", "ne" to "≠", "neq" to "≠",
+    "approx" to "≈", "equiv" to "≡", "sim" to "∼", "propto" to "∝",
+    "infty" to "∞", "sum" to "∑", "prod" to "∏", "int" to "∫", "oint" to "∮",
+    "partial" to "∂", "nabla" to "∇", "forall" to "∀", "exists" to "∃",
+    "in" to "∈", "notin" to "∉", "subset" to "⊂", "subseteq" to "⊆",
+    "supset" to "⊃", "supseteq" to "⊇", "cup" to "∪", "cap" to "∩",
+    "emptyset" to "∅", "therefore" to "∴", "because" to "∵",
+    "rightarrow" to "→", "to" to "→", "Rightarrow" to "⇒", "implies" to "⇒",
+    "leftarrow" to "←", "Leftarrow" to "⇐", "leftrightarrow" to "↔",
+    "Leftrightarrow" to "⇔", "iff" to "⇔", "mapsto" to "↦",
+    "ldots" to "…", "cdots" to "…", "dots" to "…", "vdots" to "⋮", "ddots" to "⋱",
+    "angle" to "∠", "perp" to "⊥", "parallel" to "∥", "triangle" to "△", "circ" to "∘",
+    "degree" to "°", "quad" to "  ", "qquad" to "    ",
+    "alpha" to "α", "beta" to "β", "gamma" to "γ", "delta" to "δ", "epsilon" to "ε",
+    "varepsilon" to "ε", "zeta" to "ζ", "eta" to "η", "theta" to "θ", "iota" to "ι",
+    "kappa" to "κ", "lambda" to "λ", "mu" to "μ", "nu" to "ν", "xi" to "ξ", "pi" to "π",
+    "rho" to "ρ", "sigma" to "σ", "tau" to "τ", "upsilon" to "υ", "phi" to "φ",
+    "varphi" to "φ", "chi" to "χ", "psi" to "ψ", "omega" to "ω",
+    "Gamma" to "Γ", "Delta" to "Δ", "Theta" to "Θ", "Lambda" to "Λ", "Xi" to "Ξ",
+    "Pi" to "Π", "Sigma" to "Σ", "Upsilon" to "Υ", "Phi" to "Φ", "Psi" to "Ψ",
+    "Omega" to "Ω",
+)
+
+private val FRAC = Regex("""\\(?:d|t)?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}""")
+private val SQRT_N = Regex("""\\sqrt\s*\[([^\]]*)]\s*\{([^{}]*)\}""")
+private val SQRT = Regex("""\\sqrt\s*\{([^{}]*)\}""")
+private val SUP = Regex("""\^\s*\{([^{}]*)\}""")
+private val SUB = Regex("""_\s*\{([^{}]*)\}""")
+private val TEXT_CMD = Regex("""\\(?:text|mathrm|mathbf|mathit|operatorname)\s*\{([^{}]*)\}""")
+private val LEFT_RIGHT = Regex("""\\(?:left|right)\s*""")
+private val SPACING = Regex("""\\[,;!]""")
+private val COMMAND = Regex("""\\([A-Za-z]+)""")
+
+private fun renderMathBody(source: String): String =
+    demathExpr(source).replace(Regex("""\s+"""), " ").trim()
+
+private fun demathExpr(input: String): String {
+    var text = input
+    // 先把 \text{...} / \mathrm{...} 这层壳剥掉：否则 S_{\text{总}} 这种嵌套花括号
+    // 会让后面的下标/分式正则一个都匹配不上（之前数学没渲染出来就是这个原因）。
+    repeat(3) {
+        text = text.replace(TEXT_CMD, "$1")
+    }
+    text = text.replace(SUP, "^($1)")
+    text = text.replace(SUB, "_($1)")
+    text = text.replace(FRAC, "($1)/($2)")
+    text = text.replace(SQRT_N, "$1√($2)")
+    text = text.replace(SQRT, "√($1)")
+    text = text.replace(LEFT_RIGHT, "")
+    text = text.replace(SPACING, " ")
+    text = text.replace(COMMAND) { match ->
+        MATH_WORDS[match.groupValues[1]] ?: match.value
+    }
+    return text
+}
+
+/** 把 $...$ / $$...$$ / \(...\) / \[...\] 都翻成可读文本；代码块里的内容原样保留。 */
+fun demath(source: String): String {
+    val pieces = source.split(Regex("""(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)"""))
+    return pieces.joinToString("") { piece ->
+        if (piece.startsWith("```") || piece.startsWith("~~~") ||
+            (piece.startsWith("`") && piece.endsWith("`") && piece.length > 1)
+        ) {
+            piece
+        } else {
+            piece
+                .replace(Regex("""\$\$([\s\S]+?)\$\$""")) { demathExpr(it.groupValues[1]) }
+                .replace(Regex("""\$([^$\n]+?)\$""")) { demathExpr(it.groupValues[1]) }
+                .replace(Regex("""\\\[([\s\S]+?)\\\]""")) { demathExpr(it.groupValues[1]) }
+                .replace(Regex("""\\\(([\s\S]+?)\\\)""")) { demathExpr(it.groupValues[1]) }
+        }
+    }
+}

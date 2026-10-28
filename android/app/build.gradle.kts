@@ -69,5 +69,7 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.okhttp)
     implementation(libs.coil.compose)
+    implementation(libs.coil.svg)
+    implementation(libs.jlatexmath)
     debugImplementation(libs.androidx.ui.tooling)
 }
