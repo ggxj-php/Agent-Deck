@@ -64,7 +64,15 @@ import com.agentdeck.app.ui.UiMessage
 import com.agentdeck.app.ui.theme.DeckPalette
 
 fun resolveUrl(baseUrl: String, raw: String): String =
-    if (raw.startsWith("http://") || raw.startsWith("https://")) raw else baseUrl + raw
+    // data: 是本地图片（刚发出去还没上传的那张），不能拼服务器地址，否则整条 URL 作废
+    if (
+        raw.startsWith("http://") || raw.startsWith("https://") ||
+        raw.startsWith("data:") || raw.startsWith("content:") || raw.startsWith("file:")
+    ) {
+        raw
+    } else {
+        baseUrl + raw
+    }
 
 /** 一条消息：用户是右侧渐变气泡，助手是左侧头像 + 白底气泡，尺寸和网页端对齐。 */
 @Composable

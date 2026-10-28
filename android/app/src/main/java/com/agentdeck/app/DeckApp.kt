@@ -4,6 +4,7 @@ import android.app.Application
 import coil.Coil
 import coil.ImageLoader
 import coil.decode.SvgDecoder
+import com.agentdeck.app.data.CrashReporter
 import com.agentdeck.app.data.DeckApi
 
 /**
@@ -24,6 +25,10 @@ class DeckApp : Application() {
             .components { add(SvgDecoder.Factory()) }
             .build()
         Coil.setImageLoader(loader)
+
+        // 装崩溃兜底：出错不闪退，先存日志、开崩溃页，再尝试上报
+        CrashReporter.install(this)
+        CrashReporter.uploadPending(this)
     }
 
     companion object {

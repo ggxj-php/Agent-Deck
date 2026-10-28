@@ -103,12 +103,12 @@ private fun androidx.compose.ui.graphics.Color.toArgbColor(): Int = android.grap
 )
 
 /** 渲染失败时的兜底：把 LaTeX 命令换成可读的 Unicode（和网页端同一套规则）。 */
-internal fun demathForFallback(latex: String): String {
+internal fun demathForFallback(latex: String): String = runCatching {
     var text = latex
-    text = text.replace(Regex("""\\(?:text|mathrm|mathbf|mathit|operatorname)\s*\{([^{}]*)}"""), "$1")
-    text = text.replace(Regex("""\\(?:d|t)?frac\s*\{([^{}]*)\}\s*\{([^{}]*)}"""), "($1)/($2)")
-    text = text.replace(Regex("""\\sqrt\s*\{([^{}]*)}"""), "√($1)")
-    text = text.replace(Regex("""_\s*\{([^{}]*)}"""), "_($1)")
-    text = text.replace(Regex("""\^\s*\{([^{}]*)}"""), "^($1)")
-    return demath(text)
-}
+    text = text.replace(Regex("""\\(?:text|mathrm|mathbf|mathit|operatorname)\s*\{([^{}]*)\}"""), "$1")
+    text = text.replace(Regex("""\\(?:d|t)?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}"""), "($1)/($2)")
+    text = text.replace(Regex("""\\sqrt\s*\{([^{}]*)\}"""), "√($1)")
+    text = text.replace(Regex("""_\s*\{([^{}]*)\}"""), "_($1)")
+    text = text.replace(Regex("""\^\s*\{([^{}]*)\}"""), "^($1)")
+    demath(text)
+}.getOrElse { latex }
