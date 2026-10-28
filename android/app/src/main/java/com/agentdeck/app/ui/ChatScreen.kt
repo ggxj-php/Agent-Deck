@@ -1,4 +1,10 @@
 package com.agentdeck.app.ui
+import androidx.compose.ui.platform.LocalContext
+
+import androidx.compose.ui.graphics.Color
+
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -101,6 +107,45 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
     var showPasswordDialog by remember { mutableStateOf(false) }
     var previewUrl by remember { mutableStateOf<String?>(null) }
     var showDownloads by remember { mutableStateOf(false) }
+    var confirmExit by remember { mutableStateOf(false) }
+    val activity = LocalContext.current as? android.app.Activity
+
+    // 返回键：抽屉开着先收抽屉；否则问一句再退出（和网页端 close 确认一个意思）
+    androidx.activity.compose.BackHandler(enabled = !showDownloads) {
+        if (drawerState.isOpen) {
+            scope.launch { drawerState.close() }
+        } else {
+            confirmExit = true
+        }
+    }
+
+    if (confirmExit) {
+        AlertDialog(
+            onDismissRequest = { confirmExit = false },
+            containerColor = Color.White,
+            title = { Text("退出应用", fontSize = 17.sp, color = palette.ink) },
+            text = {
+                Text(
+                    "确定要退出 Agent Deck 吗？",
+                    fontSize = 13.sp,
+                    color = palette.inkSoft,
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        confirmExit = false
+                        activity?.finish()
+                    },
+                ) { Text("退出", color = palette.accent) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { confirmExit = false }) {
+                    Text("取消", color = palette.inkSoft)
+                }
+            },
+        )
+    }
 
     if (showDownloads) {
         DownloadCenterScreen(palette) { showDownloads = false }
@@ -556,12 +601,22 @@ private fun MessageList(
         }
     }
 
+    // 用户一旦手动滑动，就停止自动跟随（发新消息或点「回到底部」才恢复）
+    var userTookOver by remember { mutableStateOf(false) }
+    val dragging by listState.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(dragging) {
+        if (dragging && streaming) userTookOver = true
+    }
+    LaunchedEffect(state.busy) {
+        if (state.busy) userTookOver = false
+    }
+
     // 只有正在流式输出时才跟随滚动；空闲时这个循环什么都不做，
     // 免得一边看历史、它一边每 120ms 动一下布局。
-    LaunchedEffect(listState) {
+    LaunchedEffect(listState, userTookOver) {
         while (isActive) {
             delay(120)
-            if (!streaming) continue
+            if (!streaming || userTookOver) continue
             val messages = latestMessages
             if (messages.isEmpty()) continue
             if (!listState.isScrollInProgress && pinned()) {
@@ -605,6 +660,7 @@ private fun MessageList(
         ) {
             Surface(
                 onClick = {
+                    userTookOver = false
                     scope.launch {
                         val messages = latestMessages
                         if (messages.isEmpty()) return@launch
@@ -771,7 +827,35 @@ private fun DrawerContent(
                 .padding(top = 6.dp),
         ) {
             DrawerFootButton("改密码", palette, onChangePassword, Modifier.weight(1f))
-            DrawerFootButton("退出登录", palette, onLogout, Modifier.weight(1f))
+            var confirmLogout by remember { mutableStateOf(false) }
+            DrawerFootButton("退出登录", palette, { confirmLogout = true }, Modifier.weight(1f))
+            if (confirmLogout) {
+            AlertDialog(
+                onDismissRequest = { confirmLogout = false },
+                containerColor = Color.White,
+                title = { Text("退出登录", fontSize = 17.sp, color = palette.ink) },
+                text = {
+                    Text(
+                        "退出后需要重新输入账号密码，确定退出吗？",
+                        fontSize = 13.sp,
+                        color = palette.inkSoft,
+                    )
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            confirmLogout = false
+                            onLogout()
+                        },
+                    ) { Text("退出", color = palette.accent) }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { confirmLogout = false }) {
+                        Text("取消", color = palette.inkSoft)
+                    }
+                },
+            )
+            }
         }
         Text(
             text = "Agent Deck v${BuildConfig.VERSION_NAME}",

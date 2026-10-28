@@ -15,7 +15,6 @@ import com.agentdeck.app.data.Persona
 import com.agentdeck.app.data.SessionSummary
 import com.agentdeck.app.data.UpdateChecker
 import com.agentdeck.app.data.UploadedFile
-import com.agentdeck.app.ui.theme.LauncherIcon
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,7 +49,6 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             val persona = runCatching { api.persona() }.getOrDefault(Persona())
             stickerLib = runCatching { api.stickers() }.getOrDefault(emptyMap())
             _state.update { it.copy(persona = persona, serverUrl = api.baseUrl) }
-            LauncherIcon.sync(DeckApp.instance, persona.theme)
 
             try {
                 val account = api.me()
@@ -181,7 +179,6 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
         val sessions = runCatching { api.sessions() }.getOrDefault(emptyList())
         stickerLib = runCatching { api.stickers() }.getOrDefault(emptyMap())
         api.syncWebViewCookie()
-        LauncherIcon.sync(DeckApp.instance, persona.theme)
         _state.update {
             it.copy(
                 loggingIn = false,

@@ -1,4 +1,7 @@
 package com.agentdeck.app.ui.components
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.runtime.LaunchedEffect
+
 
 import android.content.Intent
 import android.net.Uri
@@ -210,12 +213,14 @@ private fun AssistantMessage(
             for (block in message.blocks) {
                 when (block) {
                     is Block.Text -> {
-                        MarkdownText(
-                            text = block.markdown,
-                            palette = palette,
-                            baseUrl = baseUrl,
-                            onPreview = onPreview,
-                        )
+                        androidx.compose.foundation.text.selection.SelectionContainer {
+                            MarkdownText(
+                                text = block.markdown,
+                                palette = palette,
+                                baseUrl = baseUrl,
+                                onPreview = onPreview,
+                            )
+                        }
                     }
 
                     is Block.Thinking -> ThinkingCard(block, palette)
@@ -235,6 +240,7 @@ private fun AssistantMessage(
                     is Block.Artifact -> ArtifactBlock(block, baseUrl, palette, onPreview)
                 }
             }
+            CopyWholeRow(message, palette)
         }
     }
 }
@@ -495,6 +501,56 @@ private fun ArtifactCard(block: Block.Artifact, baseUrl: String, palette: DeckPa
                     fontSize = 10.5.sp,
                     color = palette.inkSoft,
                 )
+            }
+        }
+    }
+}
+
+/** 每條回复顶部：一键复制整条正文（贴纸/工具卡片不参与）。 */
+@Composable
+private fun CopyWholeRow(message: UiMessage, palette: DeckPalette) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var copied by remember(message.id) { mutableStateOf(false) }
+    val plain = remember(message.id) {
+        message.blocks.filterIsInstance<Block.Text>()
+            .joinToString("\n\n") { it.markdown }
+            .trim()
+    }
+    if (plain.isEmpty()) return
+    Row(
+        horizontalArrangement = Arrangement.End,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Surface(
+            onClick = {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(plain))
+                copied = true
+            },
+            color = Color.Transparent,
+            shape = RoundedCornerShape(6.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.ContentCopy,
+                    contentDescription = null,
+                    modifier = Modifier.size(12.dp),
+                    tint = if (copied) palette.accent else palette.inkSoft,
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = if (copied) "已复制" else "复制",
+                    fontSize = 10.5.sp,
+                    color = if (copied) palette.accent else palette.inkSoft,
+                )
+            }
+        }
+        LaunchedEffect(copied) {
+            if (copied) {
+                kotlinx.coroutines.delay(1500)
+                copied = false
             }
         }
     }

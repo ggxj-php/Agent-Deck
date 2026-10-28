@@ -1,4 +1,13 @@
 package com.agentdeck.app.ui.components
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+
 
 import android.content.ContentValues
 import android.content.Context
@@ -307,173 +316,296 @@ fun DownloadCenterScreen(palette: DeckPalette, onBack: () -> Unit) {
     val tasks by DownloadCenter.tasks.collectAsState()
     val context = LocalContext.current
 
+    // 按手机返回键应该回聊天页，而不是直接退出 App
+    androidx.activity.compose.BackHandler { onBack() }
+
+    val running = tasks.count { it.status == DownloadStatus.RUNNING }
+    val done = tasks.count { it.status == DownloadStatus.DONE }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(palette.bg)
             .statusBarsPadding(),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(palette.bubble)
-                .padding(horizontal = 4.dp, vertical = 6.dp),
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Rounded.ArrowBack,
-                    contentDescription = "返回",
-                    tint = palette.ink,
+                .background(
+                    Brush.verticalGradient(listOf(palette.pinkPale, palette.pinkMist.copy(alpha = 0.35f), palette.bg)),
                 )
-            }
-            Text(
-                text = "下载管理",
-                fontSize = 16.sp,
-                color = palette.ink,
-                modifier = Modifier.weight(1f),
-            )
-            if (tasks.any { it.status != DownloadStatus.RUNNING }) {
-                TextButton(onClick = { DownloadCenter.clearFinished() }) {
-                    Text("清除已完成", fontSize = 12.5.sp, color = palette.inkSoft)
+                .padding(start = 6.dp, end = 10.dp, top = 6.dp, bottom = 14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = "返回",
+                        tint = palette.ink,
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("下载管理", fontSize = 17.sp, color = palette.ink)
+                    Text(
+                        text = if (tasks.isEmpty()) "还没有任务" else "$running 个进行中 · $done 个已完成",
+                        fontSize = 11.sp,
+                        color = palette.inkSoft,
+                    )
+                }
+                if (tasks.any { it.status != DownloadStatus.RUNNING }) {
+                    Surface(
+                        onClick = { DownloadCenter.clearFinished() },
+                        shape = RoundedCornerShape(999.dp),
+                        color = palette.bubble.copy(alpha = 0.9f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, palette.line),
+                    ) {
+                        Text(
+                            "清除已完成",
+                            fontSize = 11.5.sp,
+                            color = palette.inkSoft,
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                        )
+                    }
                 }
             }
         }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(palette.line),
-        )
 
         if (tasks.isEmpty()) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Icon(
-                    Icons.Rounded.Download,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = palette.inkSoft,
-                )
-                Spacer(Modifier.height(10.dp))
-                Text("还没有下载任务", fontSize = 13.sp, color = palette.inkSoft)
-            }
-            return
+            EmptyDownloads(palette)
+            return@Column
         }
 
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
             items(tasks, key = { it.id }) { task ->
-                DownloadRow(task, palette, context)
+                DownloadCard(task, palette, context)
             }
         }
     }
 }
 
 @Composable
-private fun DownloadRow(task: DownloadTask, palette: DeckPalette, context: Context) {
+private fun EmptyDownloads(palette: DeckPalette) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(78.dp)
+                .background(palette.activeFill, CircleShape),
+        ) {
+            Icon(
+                Icons.Rounded.Download,
+                contentDescription = null,
+                modifier = Modifier.size(34.dp),
+                tint = palette.accent,
+            )
+        }
+        Spacer(Modifier.height(14.dp))
+        Text("还没有下载任务", fontSize = 14.sp, color = palette.ink)
+        Spacer(Modifier.height(5.dp))
+        Text(
+            "在对话里点附件卡片，就会出现在这里",
+            fontSize = 11.5.sp,
+            color = palette.inkSoft,
+        )
+    }
+}
+
+@Composable
+private fun DownloadCard(task: DownloadTask, palette: DeckPalette, context: Context) {
     Surface(
         color = palette.bubble,
-        shape = RoundedCornerShape(12.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, palette.line),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 5.dp),
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, palette.line.copy(alpha = 0.55f)),
+        shadowElevation = 2.dp,
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Text(
-                text = task.name,
-                fontSize = 13.5.sp,
-                color = palette.ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(6.dp))
+        Row(modifier = Modifier.padding(12.dp)) {
+            StatusBadge(task.status, palette)
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = task.name,
+                    fontSize = 13.5.sp,
+                    color = palette.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
 
-            when (task.status) {
-                DownloadStatus.RUNNING -> {
+                Spacer(Modifier.height(5.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = when (task.status) {
+                            DownloadStatus.RUNNING -> {
+                                if (task.total > 0) {
+                                    "${formatSize(task.bytes)} / ${formatSize(task.total)}"
+                                } else {
+                                    formatSize(task.bytes)
+                                }
+                            }
+
+                            DownloadStatus.DONE -> "已完成 · ${formatSize(task.bytes)}"
+                            DownloadStatus.FAILED -> "下载失败"
+                            DownloadStatus.CANCELED -> "已取消"
+                        },
+                        fontSize = 11.sp,
+                        color = palette.inkSoft,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    if (task.status == DownloadStatus.RUNNING) {
+                        SpeedChip(task.speed, palette)
+                    } else if (task.status == DownloadStatus.DONE) {
+                        Text(
+                            text = "100%",
+                            fontSize = 11.sp,
+                            color = palette.accent,
+                        )
+                    }
+                }
+
+                if (task.status == DownloadStatus.RUNNING) {
                     val ratio = if (task.total > 0) (task.bytes.toFloat() / task.total) else 0f
+                    Spacer(Modifier.height(7.dp))
                     LinearProgressIndicator(
                         progress = { ratio.coerceIn(0f, 1f) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(5.dp)
+                            .height(6.dp)
                             .clip(RoundedCornerShape(999.dp)),
                         color = palette.accent,
                         trackColor = palette.trackFill,
                     )
-                    Spacer(Modifier.height(6.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = buildString {
-                                if (task.total > 0) {
-                                    append("${formatSize(task.bytes)} / ${formatSize(task.total)} · ")
-                                    append("${(ratio * 100).toInt()}%")
-                                } else {
-                                    append(formatSize(task.bytes))
-                                }
-                            },
-                            fontSize = 11.5.sp,
-                            color = palette.inkSoft,
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            text = if (task.speed > 0) "${formatSize(task.speed)}/s" else "连接中…",
-                            fontSize = 11.5.sp,
-                            color = palette.accent,
-                        )
-                        TextButton(onClick = { DownloadCenter.cancel(task.id) }) {
-                            Text("取消", fontSize = 12.sp, color = palette.inkSoft)
-                        }
-                    }
-                }
-
-                DownloadStatus.DONE -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Rounded.Download,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = palette.accent,
-                    )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "已完成 · ${formatSize(task.bytes)}",
-                        fontSize = 11.5.sp,
+                        text = if (task.total > 0) "${(ratio * 100).toInt()}%" else "准备中…",
+                        fontSize = 10.5.sp,
                         color = palette.inkSoft,
                     )
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { DownloadCenter.open(context, task) }) {
-                        Icon(Icons.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp), tint = palette.accent)
-                        Spacer(Modifier.width(4.dp))
-                        Text("打开", fontSize = 12.sp, color = palette.accent)
-                    }
-                    TextButton(onClick = { DownloadCenter.remove(task.id) }) {
-                        Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(14.dp), tint = palette.inkSoft)
-                    }
                 }
 
-                DownloadStatus.FAILED -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = task.error ?: "下载失败",
-                        fontSize = 11.5.sp,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { DownloadCenter.remove(task.id) }) {
-                        Text("移除", fontSize = 12.sp, color = palette.inkSoft)
-                    }
-                }
-
-                DownloadStatus.CANCELED -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("已取消", fontSize = 11.5.sp, color = palette.inkSoft, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { DownloadCenter.remove(task.id) }) {
-                        Text("移除", fontSize = 12.sp, color = palette.inkSoft)
-                    }
-                }
+                Spacer(Modifier.height(3.dp))
+                ActionsRow(task, palette, context)
             }
         }
+    }
+}
+
+@Composable
+private fun StatusBadge(status: DownloadStatus, palette: DeckPalette) {
+    val (bg, fg) = when (status) {
+        DownloadStatus.RUNNING -> palette.activeFill to palette.accent
+        DownloadStatus.DONE -> Color(0xFFE7F7EC) to Color(0xFF2E9B52)
+        DownloadStatus.FAILED -> Color(0xFFFDEAEA) to Color(0xFFD14949)
+        DownloadStatus.CANCELED -> palette.trackFill to palette.inkSoft
+    }
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(38.dp)
+            .background(bg, CircleShape),
+    ) {
+        when (status) {
+            DownloadStatus.RUNNING -> CircularProgressIndicator(
+                strokeWidth = 2.dp,
+                color = fg,
+                modifier = Modifier.size(17.dp),
+            )
+
+            DownloadStatus.DONE -> Icon(
+                Icons.Rounded.Check,
+                contentDescription = null,
+                modifier = Modifier.size(19.dp),
+                tint = fg,
+            )
+
+            DownloadStatus.FAILED -> Icon(
+                Icons.Rounded.ErrorOutline,
+                contentDescription = null,
+                modifier = Modifier.size(19.dp),
+                tint = fg,
+            )
+
+            DownloadStatus.CANCELED -> Icon(
+                Icons.Rounded.Close,
+                contentDescription = null,
+                modifier = Modifier.size(19.dp),
+                tint = fg,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SpeedChip(speed: Long, palette: DeckPalette) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = palette.activeFill,
+    ) {
+        Text(
+            text = if (speed > 0) "${formatSize(speed)}/s" else "连接中…",
+            fontSize = 10.5.sp,
+            color = palette.accent,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+        )
+    }
+}
+
+@Composable
+private fun ActionsRow(task: DownloadTask, palette: DeckPalette, context: Context) {
+    Row(
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        when (task.status) {
+            DownloadStatus.RUNNING -> SmallAction("取消", Icons.Rounded.Close, palette.inkSoft) {
+                DownloadCenter.cancel(task.id)
+            }
+
+            DownloadStatus.DONE -> {
+                SmallAction("打开", Icons.Rounded.OpenInNew, palette.accent) {
+                    DownloadCenter.open(context, task)
+                }
+                SmallAction("移除", Icons.Rounded.DeleteOutline, palette.inkSoft) {
+                    DownloadCenter.remove(task.id)
+                }
+            }
+
+            DownloadStatus.FAILED -> {
+                SmallAction("重试", Icons.Rounded.Refresh, palette.accent) {
+                    DownloadCenter.remove(task.id)
+                    DownloadCenter.start(task.url, task.name)
+                }
+                SmallAction("移除", Icons.Rounded.DeleteOutline, palette.inkSoft) {
+                    DownloadCenter.remove(task.id)
+                }
+            }
+
+            DownloadStatus.CANCELED -> SmallAction("移除", Icons.Rounded.DeleteOutline, palette.inkSoft) {
+                DownloadCenter.remove(task.id)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmallAction(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 7.dp)) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(13.dp), tint = tint)
+        Spacer(Modifier.width(3.dp))
+        Text(text, fontSize = 11.5.sp, color = tint)
     }
 }
 
