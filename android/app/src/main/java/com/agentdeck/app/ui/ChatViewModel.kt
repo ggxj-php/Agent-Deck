@@ -279,11 +279,13 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             try {
                 _state.update { it.copy(currentSessionId = id) }
                 val page = api.history(id)
+                val loaded = HistoryParser.toMessages(page.history) { mood, name ->
+                    stickerUrl(name, mood)
+                }
+                syncNextId(loaded)
                 _state.update {
                     it.copy(
-                        messages = HistoryParser.toMessages(page.history) { mood, name ->
-                            stickerUrl(name, mood)
-                        },
+                        messages = loaded,
                         context = page.context,
                         currentSessionId = id,
                     )
@@ -313,6 +315,12 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
         }
     }
 
+    /** 历史消息用的是 1..N，自增 id 必须跳过它们，否则 LazyColumn 的 key 会重复。 */
+    private fun syncNextId(messages: List<UiMessage>) {
+        val max = messages.maxOfOrNull { it.id } ?: 0L
+        if (max >= nextId) nextId = max + 1
+    }
+
     // ---------------- 发送 ----------------
 
     fun send(
@@ -340,7 +348,12 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                             images = images,
                             files = files,
                         ),
-                        UiMessage(id = assistantId, role = Role.ASSISTANT, streaming = true),
+                        UiMessage(
+                            id = assistantId,
+                            role = Role.ASSISTANT,
+                            streaming = true,
+                            startedAt = System.currentTimeMillis(),
+                        ),
                     ),
                     busy = true,
                     toast = null,

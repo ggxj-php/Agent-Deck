@@ -1,4 +1,8 @@
 package com.agentdeck.app.ui.components
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.draw.alpha
+import kotlinx.coroutines.delay
+
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.runtime.LaunchedEffect
 
@@ -210,6 +214,9 @@ private fun AssistantMessage(
                 .border(1.dp, palette.line, bubbleShape)
                 .padding(horizontal = 13.dp, vertical = 10.dp),
         ) {
+            if (message.streaming && message.blocks.isEmpty()) {
+                LoadingBubble(palette, message.startedAt)
+            }
             for (block in message.blocks) {
                 when (block) {
                     is Block.Text -> {
@@ -555,5 +562,45 @@ private fun CopyWholeRow(message: UiMessage, palette: DeckPalette) {
                 copied = false
             }
         }
+    }
+}
+
+/**
+ * 发出消息后、第一个事件回来之前：三个跳动的点 + 「正在思考… N 秒」。
+ * 和网页端 `showLoading()` 一致——想很久的时候也能看出它没卡死。
+ */
+@Composable
+private fun LoadingBubble(palette: DeckPalette, startedAt: Long) {
+    val start = remember(startedAt) {
+        if (startedAt > 0) startedAt else System.currentTimeMillis()
+    }
+    var seconds by remember { mutableStateOf(0) }
+    LaunchedEffect(start) {
+        while (true) {
+            delay(1000)
+            seconds = ((System.currentTimeMillis() - start) / 1000).toInt()
+        }
+    }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        repeat(3) { index ->
+            val alpha by animateFloatAsState(
+                targetValue = if (seconds % 3 == index) 1f else 0.35f,
+                label = "dot$index",
+            )
+            Box(
+                modifier = Modifier
+                    .padding(end = 4.dp)
+                    .size(6.dp)
+                    .alpha(alpha)
+                    .background(palette.accent, CircleShape),
+            )
+        }
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = "正在思考… ${seconds}s",
+            fontSize = 12.5.sp,
+            color = palette.inkSoft,
+        )
     }
 }

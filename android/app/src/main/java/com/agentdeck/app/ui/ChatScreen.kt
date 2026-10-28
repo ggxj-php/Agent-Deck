@@ -613,6 +613,18 @@ private fun MessageList(
     LaunchedEffect(state.currentSessionId) {
         following = true
     }
+    LaunchedEffect(state.busy) {
+        if (state.busy) following = true
+    }
+
+    // 打开会话 / 历史刚加载完：直接贴到最新一条，不用用户自己滑
+    LaunchedEffect(state.messages.size) {
+        val messages = latestMessages
+        if (following && messages.isNotEmpty()) {
+            listState.scrollToItem(messages.lastIndex)
+            listState.scrollBy(1_000_000f)
+        }
+    }
 
     // 只有正在流式输出、且用户没有接管时才跟随；空闲时这个循环什么都不做。
     LaunchedEffect(listState, following, streaming) {
@@ -647,7 +659,8 @@ private fun MessageList(
         ) {
             items(
                 items = state.messages,
-                key = { it.id },
+                // 带上 role/开始时间兜底，万一外层 id 撞了也不至于整页崩
+                key = { "${it.id}:${it.role}:${it.startedAt}" },
                 contentType = { it.role.name },
             ) { message ->
                 MessageItem(

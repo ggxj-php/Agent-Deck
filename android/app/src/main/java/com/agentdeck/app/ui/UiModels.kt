@@ -46,6 +46,8 @@ data class UiMessage(
     val images: List<String> = emptyList(),
     val files: List<UploadedFile> = emptyList(),
     val streaming: Boolean = false,
+    /** 流式回复的开始时间，用来显示「正在思考… Ns」。 */
+    val startedAt: Long = 0L,
 )
 
 data class ChatUiState(
