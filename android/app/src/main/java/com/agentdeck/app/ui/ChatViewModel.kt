@@ -353,6 +353,9 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                             role = Role.ASSISTANT,
                             streaming = true,
                             startedAt = System.currentTimeMillis(),
+                            waiting = true,
+                            waitingLabel = "正在思考…",
+                            waitingSince = System.currentTimeMillis(),
                         ),
                     ),
                     busy = true,
@@ -418,9 +421,23 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
         viewModelScope.launch { /* 让最后一条正文的 WebView 有机会完成渲染 */ }
     }
 
+    /** 把最新一条助手消息的「等待首 token」占位状态更新一下。 */
+    private fun setWaiting(label: String) {
+        val now = System.currentTimeMillis()
+        updateLastAssistant { it.copy(waiting = true, waitingLabel = label, waitingSince = now) }
+    }
+
+    private fun clearWaiting() {
+        updateLastAssistant { it.copy(waiting = false) }
+    }
+
     // ---------------- 事件归并 ----------------
 
     private fun handle(event: ChatEvent) {
+        // 和网页端 handleEvent() 一样：除 sticker 外，任何事件都先撤掉「思考中」占位；
+        // 表情包不算，因为模型常先甩一张图再去跑十几秒的工具。
+        if (event !is ChatEvent.Sticker) clearWaiting()
+
         when (event) {
             is ChatEvent.Thinking -> updateLastAssistant { msg ->
                 val blocks = msg.blocks.toMutableList()
@@ -444,7 +461,7 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                 msg.copy(blocks = blocks)
             }
 
-            is ChatEvent.ToolPending -> Unit   // 只是进度提示，交给状态栏
+            is ChatEvent.ToolPending -> setWaiting("正在准备 ${event.name}…")
 
             is ChatEvent.ToolStart -> updateLastAssistant { msg ->
                 val blocks = settleThinking(msg.blocks).toMutableList()
@@ -459,7 +476,8 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                     val tool = blocks[index] as Block.Tool
                     blocks[index] = tool.copy(result = event.result, done = true)
                 }
-                msg.copy(blocks = blocks)
+                // 工具跑完还要等模型下一轮，先挂个「正在思考…」，别让界面空着
+                msg.copy(blocks = blocks, waiting = true, waitingLabel = "正在思考…", waitingSince = System.currentTimeMillis())
             }
 
             is ChatEvent.Sticker -> {

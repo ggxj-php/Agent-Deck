@@ -214,9 +214,6 @@ private fun AssistantMessage(
                 .border(1.dp, palette.line, bubbleShape)
                 .padding(horizontal = 13.dp, vertical = 10.dp),
         ) {
-            if (message.streaming && message.blocks.isEmpty()) {
-                LoadingBubble(palette, message.startedAt)
-            }
             for (block in message.blocks) {
                 when (block) {
                     is Block.Text -> {
@@ -246,6 +243,13 @@ private fun AssistantMessage(
 
                     is Block.Artifact -> ArtifactBlock(block, baseUrl, palette, onPreview)
                 }
+            }
+            if (message.waiting) {
+                LoadingBubble(
+                    palette = palette,
+                    since = message.waitingSince,
+                    label = message.waitingLabel,
+                )
             }
             CopyWholeRow(message, palette)
         }
@@ -570,9 +574,9 @@ private fun CopyWholeRow(message: UiMessage, palette: DeckPalette) {
  * 和网页端 `showLoading()` 一致——想很久的时候也能看出它没卡死。
  */
 @Composable
-private fun LoadingBubble(palette: DeckPalette, startedAt: Long) {
-    val start = remember(startedAt) {
-        if (startedAt > 0) startedAt else System.currentTimeMillis()
+private fun LoadingBubble(palette: DeckPalette, since: Long, label: String) {
+    val start = remember(since) {
+        if (since > 0) since else System.currentTimeMillis()
     }
     var seconds by remember { mutableStateOf(0) }
     LaunchedEffect(start) {
@@ -598,7 +602,7 @@ private fun LoadingBubble(palette: DeckPalette, startedAt: Long) {
         }
         Spacer(Modifier.width(4.dp))
         Text(
-            text = "正在思考… ${seconds}s",
+            text = "$label ${seconds}s",
             fontSize = 12.5.sp,
             color = palette.inkSoft,
         )
