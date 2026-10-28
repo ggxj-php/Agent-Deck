@@ -1303,11 +1303,12 @@ def _dot_state(data):
             rows.append('<tr><td>' + "<br/>".join(_esc(line) for line in variable_lines) + '</td></tr>')
         if activity_lines:
             rows.append('<tr><td>' + "<br/>".join(_esc(line) for line in activity_lines) + '</td></tr>')
-        # 所有状态用同一种框：圆角矩形 + 黑边；有变量/活动表就分栏
-        label = ('<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" '
-                 'bgcolor="#ffffff">' + "".join(rows) + "</table>>")
+        # 单个圆角外框 + 内部横线：table 不画边框，行与行之间用 <hr/> 画横线。
+        # 之前 cellborder=1 会在圆角框里再套一个方框，成了双层边框，和课本不一致。
+        label = ('<<table border="0" cellborder="0" cellspacing="0" cellpadding="5">'
+                 + "<hr/>".join(rows) + "</table>>")
         lines.append(f'  {nid} [shape=box, style="rounded", fillcolor="#ffffff", '
-                     f'color="#1f2023", label={label}];')
+                     f'color="#1f2023", penwidth=1.2, label={label}];')
     # 初始箭头：标签用题目里真实的触发事件（initial_event），没有就不标；
     # 「初始事件」只是课本符号图里的说明文字，不是图内容
     if initial in ids:
