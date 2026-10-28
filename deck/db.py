@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS users (
     disabled      INTEGER NOT NULL DEFAULT 0,   -- 1 = 封号，登录/接口一律拒绝
     ban_until     REAL    NOT NULL DEFAULT 0,   -- 封到这个时间（0 = 永久；到点自动解封）
     note          TEXT    NOT NULL DEFAULT '',  -- 后台备注
-    last_login    REAL    NOT NULL DEFAULT 0
+    last_login    REAL    NOT NULL DEFAULT 0,
+    last_active   REAL    NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS auth_tokens (
@@ -97,10 +98,13 @@ def _migrate(conn):
         "ban_until": "REAL NOT NULL DEFAULT 0",
         "note": "TEXT NOT NULL DEFAULT ''",
         "last_login": "REAL NOT NULL DEFAULT 0",
+        "last_active": "REAL NOT NULL DEFAULT 0",
     }
     for name, ddl in additions.items():
         if name not in user_cols:
             conn.execute(f"ALTER TABLE users ADD COLUMN {name} {ddl}")
+    # 老用户以前没记 last_login（默认 0）：按「注册即上次登录」补成注册时间
+    conn.execute("UPDATE users SET last_login = created_at WHERE last_login = 0")
 
 
 def init():

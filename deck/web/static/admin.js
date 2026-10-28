@@ -1874,6 +1874,7 @@ function renderUsers(meId) {
       <td>${user.sessions}</td>
       <td>${fmtTime(user.created_at)}</td>
       <td>${fmtTime(user.last_login)}</td>
+      <td>${fmtTime(user.last_active)}</td>
       <td>${badge}${banned}</td>`;
     const ops = document.createElement('td');
     ops.className = 'user-ops';

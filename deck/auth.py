@@ -145,9 +145,9 @@ def create_user(name, password, invited_by="", is_admin=False, note=""):
         cur = conn.execute(
             "INSERT INTO users (name, password_hash, invite_code, invited_by, created_at, "
             "                   is_admin, disabled, note, last_login) "
-            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0)",
+            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
             (name, hash_password(password), code, invited_by, now,
-             1 if is_admin else 0, note or ""),
+             1 if is_admin else 0, note or "", now),
         )
         user_id = cur.lastrowid
     return {"id": user_id, "name": name, "invite_code": code,
@@ -247,6 +247,15 @@ def ban_detail(user, now=None):
             "text": f"账号已被封禁，解封时间 {stamp}（还剩 {_left_text(until - now)}）"}
 
 
+def touch_active(user_id):
+    """记录「最近一次使用 agent 对话」的时间（后台看活跃度用）。"""
+    if not user_id:
+        return
+    with db.cursor() as conn:
+        conn.execute("UPDATE users SET last_active = ? WHERE id = ?",
+                     (time.time(), int(user_id)))
+
+
 def public_user(user):
     """给前端看的用户信息（绝不带密码哈希）。"""
     if not user:
@@ -260,7 +269,8 @@ def public_user(user):
             "banned": is_banned(user),
             "note": user.get("note", ""),
             "created_at": user.get("created_at", 0),
-            "last_login": user.get("last_login", 0)}
+            "last_login": user.get("last_login", 0),
+            "last_active": user.get("last_active", 0)}
 
 
 # ---------------- 管理员 ----------------

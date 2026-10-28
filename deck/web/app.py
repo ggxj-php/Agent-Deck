@@ -613,6 +613,8 @@ def chat(req: ChatRequest, request: Request):
     if not sess:
         raise HTTPException(status_code=404, detail="会话不存在喵（可能被删了，刷新一下）")
 
+    auth.touch_active(user["id"])      # 后台「最近使用」按最后一次对话时间算
+
     # 附件：只带 id，服务端查索引拼成标记，让模型按类型用 read_pdf / read_doc / read_file 去读。
     # 文件内容一律走「外部内容」包装（见 tools/__init__.py 的 UNTRUSTED_TOOLS），
     # 里面写「忽略之前的指令」也不会被执行。

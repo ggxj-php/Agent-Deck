@@ -606,7 +606,7 @@ def list_users(request: Request):
     with db.cursor() as conn:
         rows = conn.execute(
             "SELECT id, name, invite_code, invited_by, created_at, is_admin, disabled, "
-            "       ban_until, note, last_login FROM users ORDER BY id"
+            "       ban_until, note, last_login, last_active FROM users ORDER BY id"
         ).fetchall()
     return {"users": [_user_row(row) for row in rows], "me": me["id"],
             "total": len(rows)}
