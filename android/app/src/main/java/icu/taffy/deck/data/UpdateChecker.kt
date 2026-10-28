@@ -22,11 +22,14 @@ data class UpdateInfo(
  */
 object UpdateChecker {
 
-    /** Gitee 的 raw 地址（默认源）。 */
-    private const val GITEE_JSON =
-        "https://gitee.com/your-org/Agent-Deck/raw/feat/android-app/android/version.json"
+    /**
+     * Gitee 的 raw 地址不支持带斜杠的分支名（feat/android-app 会被截断），
+     * 所以走 API contents 接口，用 ref 参数指定分支，再把 base64 内容解出来。
+     */
+    private const val GITEE_API =
+        "https://gitee.com/api/v5/repos/your-org/Agent-Deck/contents/android/version.json?ref=feat%2Fandroid-app"
 
-    /** GitHub 兜底。 */
+    /** GitHub 兜底（raw 支持带斜杠的 ref）。 */
     private const val GITHUB_JSON =
         "https://raw.githubusercontent.com/your-org/Agent-Deck/feat/android-app/android/version.json"
 
@@ -40,7 +43,7 @@ object UpdateChecker {
 
     /** 有新版返回 [UpdateInfo]，已是最新/检查失败返回 null。 */
     suspend fun check(): UpdateInfo? = withContext(Dispatchers.IO) {
-        val json = fetch(GITEE_JSON) ?: fetch(GITHUB_JSON) ?: return@withContext null
+        val json = fetchFromGitee() ?: fetch(GITHUB_JSON) ?: return@withContext null
         val info = runCatching {
             val obj = JSONObject(json)
             UpdateInfo(
@@ -52,6 +55,16 @@ object UpdateChecker {
         }.getOrNull() ?: return@withContext null
 
         if (info.versionCode > BuildConfig.VERSION_CODE) info else null
+    }
+
+    /** Gitee API 返回的是 {content: base64, encoding: "base64", ...}。 */
+    private fun fetchFromGitee(): String? {
+        val raw = fetch(GITEE_API) ?: return null
+        return runCatching {
+            val content = JSONObject(raw).optString("content").replace("\n", "").replace("\r", "")
+            if (content.isEmpty()) return null
+            String(android.util.Base64.decode(content, android.util.Base64.DEFAULT), Charsets.UTF_8)
+        }.getOrNull()
     }
 
     private fun fetch(url: String): String? = runCatching {
