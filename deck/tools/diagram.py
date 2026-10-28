@@ -1281,6 +1281,20 @@ def _dot_state(data):
         # 中间层和下层是可选内容，有就画、没有就不画（课件里「新建」就只有名字一层）。
         variable_lines = _state_lines(st["variables"])
         activity_lines = _state_lines(st["activities"])
+        # 变量层只保留「真的用得上」的：有赋值（timer=0）或者活动表里引用了它。
+        # 模型常常给所有状态都塞个 timer，但该状态的活动根本不碰 timer，
+        # 那种就该按两层画（状态名 + 活动表）。
+        if variable_lines:
+            activity_text = " ".join(activity_lines)
+            kept = []
+            for line in variable_lines:
+                name = re.split(r"[=:：]", line, 1)[0].strip()
+                if "=" in line or ":" in line or "：" in line:
+                    kept.append(line)
+                elif name and re.search(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])",
+                                        activity_text):
+                    kept.append(line)
+            variable_lines = kept
         # 三栏固定：状态名 / 状态变量 / 活动表。
         # 活动表里有多条（比如 entry 一行、do 一行）时，用 <br/> 放在**同一栏**里，
         # 不能一格一行，否则就变成四五层了。
