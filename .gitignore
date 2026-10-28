@@ -33,3 +33,12 @@ personas/
 # 覆盖率数据，别提交
 .coverage
 .coverage.*
+
+# 用户自己的崩溃上报脚本/数据，不进仓库
+crash_receiver.py
+crashes/
+
+# 只放服务器、不进仓库：APK、下载页、App 版本信息
+deck/web/static/app/
+deck/web/static/download.html
+deck/web/static/app-version.json

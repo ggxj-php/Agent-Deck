@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
-from .. import auth, capabilities, config_report, db, llm, persona, settings, store, tools
+from .. import auth, capabilities, config_report, db, geoip, llm, persona, settings, store, tools
 from ..config import CONTEXT_COMPRESS_AT, EMBED_DIM
 from ..kb import stats as kb_stats
 from . import blacklist, sysinfo, traffic, update
@@ -596,6 +596,8 @@ def _user_row(row):
     item["ban_until"] = float(item.get("ban_until") or 0)
     item["banned"] = auth.is_banned(item)          # 临时封禁到期后这里就是 False
     item["sessions"] = store.count_for_user(item["id"])
+    item["last_ip"] = item.get("last_ip") or ""
+    item["ip_location"] = geoip.lookup(item["last_ip"])
     return item
 
 
@@ -606,7 +608,10 @@ def list_users(request: Request):
     with db.cursor() as conn:
         rows = conn.execute(
             "SELECT id, name, invite_code, invited_by, created_at, is_admin, disabled, "
-            "       ban_until, note, last_login, last_active FROM users ORDER BY id"
+            "       ban_until, note, last_login, last_active, "
+            "       (SELECT ip FROM auth_tokens t WHERE t.user_id = users.id "
+            "        ORDER BY t.created_at DESC LIMIT 1) AS last_ip "
+            "FROM users ORDER BY id"
         ).fetchall()
     return {"users": [_user_row(row) for row in rows], "me": me["id"],
             "total": len(rows)}

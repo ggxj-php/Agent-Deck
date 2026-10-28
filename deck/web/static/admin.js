@@ -1875,6 +1875,7 @@ function renderUsers(meId) {
       <td>${fmtTime(user.created_at)}</td>
       <td>${fmtTime(user.last_login)}</td>
       <td>${fmtTime(user.last_active)}</td>
+      <td title="${escapeHtml(user.last_ip || '')}">${escapeHtml(user.ip_location || '—')}</td>
       <td>${badge}${banned}</td>`;
     const ops = document.createElement('td');
     ops.className = 'user-ops';
