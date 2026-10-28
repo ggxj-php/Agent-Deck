@@ -1,4 +1,6 @@
 package com.agentdeck.app.ui
+import androidx.compose.ui.input.pointer.pointerInput
+
 import androidx.compose.ui.platform.LocalContext
 
 import androidx.compose.ui.graphics.Color
@@ -601,27 +603,27 @@ private fun MessageList(
         }
     }
 
-    // 用户一旦手动滑动，就停止自动跟随（发新消息或点「回到底部」才恢复）
-    var userTookOver by remember { mutableStateOf(false) }
+    // 自动跟随：生成期间默认贴着底部；用户一碰屏幕就立刻停，不抢。
+    // 以前用 pinned() 当前置条件，内容一长就被判成「没贴底」从而再也不滚，所以改成开关模型。
+    var following by remember { mutableStateOf(true) }
     val dragging by listState.interactionSource.collectIsDraggedAsState()
     LaunchedEffect(dragging) {
-        if (dragging && streaming) userTookOver = true
+        if (dragging) following = false
     }
-    LaunchedEffect(state.busy) {
-        if (state.busy) userTookOver = false
+    LaunchedEffect(state.currentSessionId) {
+        following = true
     }
 
-    // 只有正在流式输出时才跟随滚动；空闲时这个循环什么都不做，
-    // 免得一边看历史、它一边每 120ms 动一下布局。
-    LaunchedEffect(listState, userTookOver) {
+    // 只有正在流式输出、且用户没有接管时才跟随；空闲时这个循环什么都不做。
+    LaunchedEffect(listState, following, streaming) {
         while (isActive) {
-            delay(120)
-            if (!streaming || userTookOver) continue
+            delay(80)
+            if (!streaming || !following) continue
             val messages = latestMessages
             if (messages.isEmpty()) continue
-            if (!listState.isScrollInProgress && pinned()) {
+            if (!listState.isScrollInProgress) {
                 listState.scrollToItem(messages.lastIndex)
-                listState.scrollBy(500_000f)
+                listState.scrollBy(1_000_000f)
             }
         }
     }
@@ -630,7 +632,17 @@ private fun MessageList(
         if (state.messages.isEmpty()) EmptyHero(state, palette)
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    // 任何一次触摸/滑动都算用户接管，立刻停止自动跟随
+                    awaitPointerEventScope {
+                        while (true) {
+                            awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                            if (following) following = false
+                        }
+                    }
+                },
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
         ) {
             items(
@@ -660,7 +672,7 @@ private fun MessageList(
         ) {
             Surface(
                 onClick = {
-                    userTookOver = false
+                    following = true
                     scope.launch {
                         val messages = latestMessages
                         if (messages.isEmpty()) return@launch
