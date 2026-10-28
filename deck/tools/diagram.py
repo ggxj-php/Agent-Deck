@@ -882,6 +882,27 @@ def _inject_open_rects(svg, dot_src, prefix="_store_"):
 
 
 
+def _fix_hr_lines(svg):
+    """graphviz 的 <hr/> 会输出高度为 0 的 polygon（4 个点 y 全相同），
+    带描边时 miter 会在端点拉出斜刺，看起来像歪线。这里把它们换成干净的 <line>。"""
+    if not svg:
+        return svg
+    pattern = re.compile(r'<polygon fill="#1f2023" stroke="#1f2023" points="([^"]+)"\s*/>')
+
+    def repl(m):
+        nums = [float(v) for v in re.findall(r"-?\d+(?:\.\d+)?", m.group(1))]
+        if len(nums) < 8:
+            return m.group(0)
+        xs, ys = nums[0::2], nums[1::2]
+        if max(ys) - min(ys) > 0.01:
+            return m.group(0)          # 不是横线，别碰
+        return (f'<line x1="{min(xs):.1f}" y1="{sum(ys) / len(ys):.1f}" '
+                f'x2="{max(xs):.1f}" y2="{sum(ys) / len(ys):.1f}" '
+                'stroke="#1f2023" stroke-width="1.1"/>')
+
+    return pattern.sub(repl, svg)
+
+
 def _dot_svg(dot_src, timeout=8, engine="dot"):
     """把 DOT 交给 graphviz 生成响应式 SVG（失败返回空串，调用方退回内置布局）。
 
@@ -1261,6 +1282,10 @@ def _dot_state(data):
     initial = str(data.get("initial") or "").strip()
     if not initial:
         initial = states[0]["name"]
+    # 模型常把初始状态（如「新建」）只写在 initial 里、忘了放进 states：
+    # 那就补一个状态节点，不然初始圆点没地方连。
+    if initial and all(st["name"] != initial for st in states):
+        states.insert(0, {"name": initial, "variables": "", "activities": "", "kind": ""})
 
     lines = [_dot_graph(rankdir="TB", splines="polyline", nodesep=0.55, ranksep=0.75, pad=0.45)]
     ids = {}
@@ -1316,7 +1341,13 @@ def _dot_state(data):
             lines.append(f'  __start__ -> {ids[initial]} [label="{_dot_label(start_label)}"];')
         else:
             lines.append(f'  __start__ -> {ids[initial]} [label=""];')
-    for tr in data.get("transitions") or data.get("edges") or []:
+    raw_transitions = data.get("transitions") or data.get("edges") or []
+    if not raw_transitions and len(states) > 1:
+        # 模型有时只给状态列表、不给转移关系。这时按列表顺序串成链，
+        # 至少能画出有方向的流程图；比没有连线、所有状态挤在一排好。
+        raw_transitions = [[states[i]["name"], states[i + 1]["name"], ""]
+                           for i in range(len(states) - 1)]
+    for tr in raw_transitions:
         if isinstance(tr, dict):
             a = str(tr.get("from") or tr.get("source") or "")
             b = str(tr.get("to") or tr.get("target") or "")
@@ -1464,6 +1495,8 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
             dot_src = builder(data)
             if dot_src:
                 svg = _dot_svg(dot_src)
+                if svg and key == "state":
+                    svg = _fix_hr_lines(svg)
                 if svg and key == "dataflow":
                     svg = _inject_open_rects(svg, dot_src)
         except Exception:                # noqa: BLE001
