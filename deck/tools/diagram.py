@@ -1277,9 +1277,14 @@ def _dot_state(data):
         # 中间层和下层是可选内容，有就画、没有就不画（课件里「新建」就只有名字一层）。
         variable_lines = _state_lines(st["variables"])
         activity_lines = _state_lines(st["activities"])
+        # 三栏固定：状态名 / 状态变量 / 活动表。
+        # 活动表里有多条（比如 entry 一行、do 一行）时，用 <br/> 放在**同一栏**里，
+        # 不能一格一行，否则就变成四五层了。
         rows = [f'<tr><td><b>{_esc(st["name"])}</b></td></tr>']
-        rows.extend(f'<tr><td>{_esc(line)}</td></tr>' for line in variable_lines)
-        rows.extend(f'<tr><td>{_esc(line)}</td></tr>' for line in activity_lines)
+        if variable_lines:
+            rows.append('<tr><td>' + "<br/>".join(_esc(line) for line in variable_lines) + '</td></tr>')
+        if activity_lines:
+            rows.append('<tr><td>' + "<br/>".join(_esc(line) for line in activity_lines) + '</td></tr>')
         # 所有状态用同一种框：圆角矩形 + 黑边；有变量/活动表就分栏
         label = ('<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" '
                  'bgcolor="#ffffff">' + "".join(rows) + "</table>>")
