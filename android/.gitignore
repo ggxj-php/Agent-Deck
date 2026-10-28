@@ -1,0 +1,23 @@
+# Gradle / Android 构建产物
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# 签名与密钥：绝对不进仓库
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# 本机路径、日志
+*.log
+*.hprof

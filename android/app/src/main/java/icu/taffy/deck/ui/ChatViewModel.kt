@@ -1,0 +1,393 @@
+package icu.taffy.deck.ui
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import icu.taffy.deck.DeckApp
+import icu.taffy.deck.data.ChatEvent
+import icu.taffy.deck.data.ContextUsage
+import icu.taffy.deck.data.DeckApi
+import icu.taffy.deck.data.DeckException
+import icu.taffy.deck.data.Persona
+import icu.taffy.deck.data.SessionSummary
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+/**
+ * 聊天页的全部状态与动作。
+ *
+ * 事件流的归并规则跟网页端一致：思考块打头、正文按到达顺序追加、工具按「同名未收尾」配对、
+ * 正文一来就把思考块标成已完成。
+ */
+class ChatViewModel(private val api: DeckApi) : ViewModel() {
+
+    private val _state = MutableStateFlow(ChatUiState())
+    val state: StateFlow<ChatUiState> = _state.asStateFlow()
+
+    private var nextId = 1L
+    private var stickerLib: Map<String, List<String>> = emptyMap()
+    private var sendJob: Job? = null
+
+    init {
+        boot()
+    }
+
+    // ---------------- 启动 ----------------
+
+    private fun boot() {
+        viewModelScope.launch {
+            // 人设和表情包都是公开接口，先拿下来，登录页也能显示名字和欢迎语
+            val persona = runCatching { api.persona() }.getOrDefault(Persona())
+            stickerLib = runCatching { api.stickers() }.getOrDefault(emptyMap())
+            _state.update { it.copy(persona = persona) }
+
+            try {
+                val account = api.me()
+                val sessions = runCatching { api.sessions() }.getOrDefault(emptyList())
+                api.syncWebViewCookie()
+                _state.update {
+                    it.copy(
+                        booting = false,
+                        account = account,
+                        sessions = sessions,
+                        currentSessionId = sessions.firstOrNull()?.id,
+                    )
+                }
+                sessions.firstOrNull()?.let { openSession(it.id) }
+            } catch (error: DeckException) {
+                _state.update {
+                    it.copy(
+                        booting = false,
+                        account = null,
+                        loginError = if (error.code == 401) null else error.message,
+                    )
+                }
+            } catch (error: Exception) {
+                // 断网、DNS 失败、证书不对……都归到这里，别让首屏卡在转圈
+                _state.update {
+                    it.copy(
+                        booting = false,
+                        account = null,
+                        loginError = "连不上服务器：${error.message ?: error.javaClass.simpleName}",
+                    )
+                }
+            }
+        }
+    }
+
+    // ---------------- 登录 / 登出 ----------------
+
+    fun login(name: String, password: String) {
+        if (name.isBlank() || password.isEmpty()) {
+            _state.update { it.copy(loginError = "用户名和密码都得填") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(loggingIn = true, loginError = null) }
+            try {
+                api.login(name.trim(), password)
+                val account = api.me()
+                val persona = runCatching { api.persona() }.getOrDefault(Persona())
+                val sessions = runCatching { api.sessions() }.getOrDefault(emptyList())
+                stickerLib = runCatching { api.stickers() }.getOrDefault(emptyMap())
+                api.syncWebViewCookie()
+                _state.update {
+                    it.copy(
+                        loggingIn = false,
+                        account = account,
+                        persona = persona,
+                        sessions = sessions,
+                        currentSessionId = null,
+                        messages = emptyList(),
+                        context = ContextUsage(),
+                    )
+                }
+                sessions.firstOrNull()?.let { openSession(it.id) }
+            } catch (error: DeckException) {
+                _state.update { it.copy(loggingIn = false, loginError = error.message) }
+            } catch (error: Exception) {
+                _state.update {
+                    it.copy(loggingIn = false, loginError = "登录失败：${error.message ?: "网络异常"}")
+                }
+            }
+        }
+    }
+
+    fun logout() {
+        viewModelScope.launch {
+            api.logout()
+            api.syncWebViewCookie()
+            _state.update {
+                ChatUiState(booting = false, persona = it.persona)
+            }
+        }
+    }
+
+    // ---------------- 会话 ----------------
+
+    fun refreshSessions() {
+        viewModelScope.launch {
+            runCatching { api.sessions() }.onSuccess { list ->
+                _state.update { it.copy(sessions = list) }
+            }
+        }
+    }
+
+    fun newSession() {
+        if (_state.value.busy) return
+        viewModelScope.launch {
+            runCatching { api.createSession() }
+                .onSuccess { session ->
+                    _state.update {
+                        it.copy(
+                            sessions = listOf(session) + it.sessions,
+                            currentSessionId = session.id,
+                            messages = emptyList(),
+                            context = ContextUsage(),
+                        )
+                    }
+                }
+                .onFailure { report(it) }
+        }
+    }
+
+    fun openSession(id: String) {
+        if (_state.value.busy) return
+        viewModelScope.launch {
+            try {
+                _state.update { it.copy(currentSessionId = id) }
+                val page = api.history(id)
+                _state.update {
+                    it.copy(
+                        messages = HistoryParser.toMessages(page.history) { name -> stickerUrl(name, "") },
+                        context = page.context,
+                        currentSessionId = id,
+                    )
+                }
+            } catch (error: Exception) {
+                report(error)
+            }
+        }
+    }
+
+    fun deleteSession(id: String) {
+        viewModelScope.launch {
+            runCatching { api.deleteSession(id) }
+                .onSuccess {
+                    _state.update { current ->
+                        val remaining = current.sessions.filterNot { it.id == id }
+                        val nextId = if (current.currentSessionId == id) remaining.firstOrNull()?.id else current.currentSessionId
+                        current.copy(
+                            sessions = remaining,
+                            currentSessionId = nextId,
+                            messages = if (current.currentSessionId == id) emptyList() else current.messages,
+                        )
+                    }
+                    _state.value.currentSessionId?.let { openSession(it) }
+                }
+                .onFailure { report(it) }
+        }
+    }
+
+    // ---------------- 发送 ----------------
+
+    fun send(text: String, images: List<String> = emptyList(), thinking: Boolean = true) {
+        if (_state.value.busy) return
+        val message = text.trim()
+        if (message.isEmpty() && images.isEmpty()) return
+        val useThinking = thinking && _state.value.thinking
+
+        sendJob = viewModelScope.launch {
+            val sessionId = ensureSession() ?: return@launch
+            val userId = nextId++
+            val assistantId = nextId++
+            _state.update { current ->
+                current.copy(
+                    messages = current.messages + listOf(
+                        UiMessage(
+                            id = userId,
+                            role = Role.USER,
+                            blocks = listOf(Block.Text(message)),
+                            images = images,
+                        ),
+                        UiMessage(id = assistantId, role = Role.ASSISTANT, streaming = true),
+                    ),
+                    busy = true,
+                    toast = null,
+                )
+            }
+            try {
+                api.streamChat(sessionId, message, images, useThinking) { event -> handle(event) }
+            } catch (error: Exception) {
+                val reason: String = when (error) {
+                    is DeckException -> error.message ?: "请求失败"
+                    else -> "这条回复断在半路了：${error.message ?: "网络波动"}"
+                }
+                handle(ChatEvent.Error(reason))
+            } finally {
+                finishTurn(sessionId)
+            }
+        }
+    }
+
+    fun stop() {
+        api.cancelChat()
+    }
+
+    fun toggleThinking() {
+        _state.update { it.copy(thinking = !it.thinking) }
+    }
+
+    fun dismissToast() {
+        _state.update { it.copy(toast = null) }
+    }
+
+    private suspend fun ensureSession(): String? {
+        _state.value.currentSessionId?.let { return it }
+        return runCatching { api.createSession() }
+            .onSuccess { session ->
+                _state.update {
+                    it.copy(sessions = listOf(session) + it.sessions, currentSessionId = session.id)
+                }
+            }
+            .onFailure { report(it) }
+            .getOrNull()
+            ?.id
+    }
+
+    private fun finishTurn(sessionId: String) {
+        updateLastAssistant { it.copy(streaming = false) }
+        _state.update { it.copy(busy = false) }
+        viewModelScope.launch {
+            runCatching { api.contextUsage(sessionId) }.onSuccess { usage ->
+                _state.update { it.copy(context = usage) }
+            }
+            runCatching { api.sessions() }.onSuccess { list ->
+                _state.update { it.copy(sessions = list) }
+            }
+        }
+        viewModelScope.launch { /* 让最后一条正文的 WebView 有机会完成渲染 */ }
+    }
+
+    // ---------------- 事件归并 ----------------
+
+    private fun handle(event: ChatEvent) {
+        when (event) {
+            is ChatEvent.Thinking -> updateLastAssistant { msg ->
+                val blocks = msg.blocks.toMutableList()
+                val last = blocks.lastOrNull()
+                if (last is Block.Thinking && !last.done) {
+                    blocks[blocks.size - 1] = last.copy(text = last.text + event.text)
+                } else {
+                    blocks.add(Block.Thinking(event.text))
+                }
+                msg.copy(blocks = blocks)
+            }
+
+            is ChatEvent.Content -> updateLastAssistant { msg ->
+                val blocks = settleThinking(msg.blocks).toMutableList()
+                val last = blocks.lastOrNull()
+                if (last is Block.Text) {
+                    blocks[blocks.size - 1] = last.copy(markdown = last.markdown + event.text)
+                } else {
+                    blocks.add(Block.Text(event.text))
+                }
+                msg.copy(blocks = blocks)
+            }
+
+            is ChatEvent.ToolPending -> Unit   // 只是进度提示，交给状态栏
+
+            is ChatEvent.ToolStart -> updateLastAssistant { msg ->
+                val blocks = settleThinking(msg.blocks).toMutableList()
+                blocks.add(Block.Tool(event.name, event.arguments, null, false))
+                msg.copy(blocks = blocks)
+            }
+
+            is ChatEvent.ToolEnd -> updateLastAssistant { msg ->
+                val blocks = msg.blocks.toMutableList()
+                val index = blocks.indexOfLast { it is Block.Tool && it.name == event.name && !it.done }
+                if (index >= 0) {
+                    val tool = blocks[index] as Block.Tool
+                    blocks[index] = tool.copy(result = event.result, done = true)
+                }
+                msg.copy(blocks = blocks)
+            }
+
+            is ChatEvent.Sticker -> {
+                val url = stickerUrl(event.name, event.mood)
+                if (url.isNotEmpty()) {
+                    updateLastAssistant { msg ->
+                        msg.copy(blocks = settleThinking(msg.blocks) + Block.Sticker(url))
+                    }
+                }
+            }
+
+            is ChatEvent.Artifact -> updateLastAssistant { msg ->
+                msg.copy(blocks = settleThinking(msg.blocks) + Block.Artifact(event.id, event.title))
+            }
+
+            is ChatEvent.Cut -> updateLastAssistant { msg ->
+                msg.copy(
+                    blocks = msg.blocks + Block.Notice("回复被中断：${event.reason.ifEmpty { "网络中断" }}")
+                )
+            }
+
+            is ChatEvent.Compressed -> updateLastAssistant { msg ->
+                val before = event.beforeTokens / 1000
+                val after = event.afterTokens / 1000
+                msg.copy(
+                    blocks = msg.blocks + Block.Notice(
+                        "聊得太长啦，前面 ${event.dropped} 条旧记录被压成摘要（上下文 ${before}k → ${after}k）"
+                    )
+                )
+            }
+
+            is ChatEvent.Done -> event.context?.let { usage ->
+                _state.update { it.copy(context = usage) }
+            }
+
+            is ChatEvent.Error -> updateLastAssistant { msg ->
+                msg.copy(blocks = msg.blocks + Block.Notice("喵呜…出错了：${event.message}", isError = true))
+            }
+
+            is ChatEvent.Unknown -> Unit
+        }
+    }
+
+    private fun settleThinking(blocks: List<Block>): List<Block> =
+        blocks.map { if (it is Block.Thinking && !it.done) it.copy(done = true) else it }
+
+    private fun updateLastAssistant(transform: (UiMessage) -> UiMessage) {
+        _state.update { current ->
+            val list = current.messages.toMutableList()
+            val index = list.indexOfLast { it.role == Role.ASSISTANT }
+            if (index < 0) return@update current
+            list[index] = transform(list[index])
+            current.copy(messages = list)
+        }
+    }
+
+    private fun stickerUrl(name: String?, mood: String): String {
+        val chosen = name?.takeIf { it.isNotBlank() }
+            ?: stickerLib[mood]?.randomOrNull()
+            ?: return ""
+        return "${api.baseUrl}/api/persona/sticker/$chosen"
+    }
+
+    private fun report(error: Throwable) {
+        val text = if (error is DeckException) error.message else (error.message ?: "操作失败")
+        _state.update { it.copy(toast = text) }
+    }
+
+    companion object {
+        val Factory: ViewModelProvider.Factory = viewModelFactory {
+            initializer { ChatViewModel(DeckApp.instance.api) }
+        }
+    }
+}

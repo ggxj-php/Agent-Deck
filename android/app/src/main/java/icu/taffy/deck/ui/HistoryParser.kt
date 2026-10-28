@@ -1,0 +1,75 @@
+package icu.taffy.deck.ui
+
+import icu.taffy.deck.data.HistoryItem
+
+/**
+ * 把后端存的历史正文还原成内容块。
+ *
+ * 后端给的是「模型视角的纯文本」：助手正文里混着 `[[artifact:id|标题]]` 和
+ * `[sticker:mood:name]`，用户消息里带着 `[图片 #id uploads/xxx.jpg：摘要]` 标记。
+ * 这些标记不能直接丢给 markdown，得先拆出来，否则界面上会露出生硬的占位串。
+ */
+object HistoryParser {
+
+    private val ARTIFACT = Regex("""\[\[artifact:([0-9a-fA-F]{8,32})\|([^\]\n]*)\]\]""")
+    private val STICKER = Regex("""\[sticker:([A-Za-z_]+)(?::([^\]\s]+))?]""")
+    private val IMAGE_MARK = Regex("""\[图片 #([0-9a-fA-F]{6,32})[^\]]*]""")
+
+    fun toMessages(items: List<HistoryItem>, stickerUrl: (String) -> String): List<UiMessage> {
+        val out = ArrayList<UiMessage>()
+        var seed = 0L
+        for (item in items) {
+            seed += 1
+            when (item.role) {
+                "user" -> {
+                    val ids = IMAGE_MARK.findAll(item.text).map { it.groupValues[1] }.toList()
+                    val body = IMAGE_MARK.replace(item.text, "").trim()
+                    if (body.isEmpty() && ids.isEmpty()) continue
+                    out.add(
+                        UiMessage(
+                            id = seed,
+                            role = Role.USER,
+                            blocks = listOf(Block.Text(body.ifEmpty { "（这张图）" })),
+                            images = ids.map { "/api/uploads/$it" },
+                        )
+                    )
+                }
+
+                "assistant" -> {
+                    val blocks = ArrayList<Block>()
+                    var cursor = 0
+                    for (match in ARTIFACT.findAll(item.text)) {
+                        appendAssistantSegment(blocks, item.text.substring(cursor, match.range.first), stickerUrl)
+                        blocks.add(Block.Artifact(match.groupValues[1], match.groupValues[2]))
+                        cursor = match.range.last + 1
+                    }
+                    appendAssistantSegment(blocks, item.text.substring(cursor), stickerUrl)
+                    // 空回复（比如只调了工具）就不占位置
+                    if (blocks.isEmpty()) continue
+                    out.add(UiMessage(id = seed, role = Role.ASSISTANT, blocks = blocks))
+                }
+            }
+        }
+        return out
+    }
+
+    private fun appendAssistantSegment(
+        blocks: MutableList<Block>,
+        segment: String,
+        stickerUrl: (String) -> String,
+    ) {
+        if (segment.isEmpty()) return
+        var cursor = 0
+        var plain = StringBuilder()
+        for (match in STICKER.findAll(segment)) {
+            plain.append(segment, cursor, match.range.first)
+            cursor = match.range.last + 1
+            val text = plain.toString()
+            if (text.isNotBlank()) blocks.add(Block.Text(text))
+            plain = StringBuilder()
+            blocks.add(Block.Sticker(stickerUrl(match.groupValues[2])))
+        }
+        plain.append(segment.substring(cursor))
+        if (plain.isNotBlank()) blocks.add(Block.Text(plain.toString()))
+    }
+}

@@ -1,0 +1,8 @@
+# 保持 gradlew 是 LF，Windows 上检出也能直接跑；图片/二进制不参与换行转换
+* text=auto
+gradlew text eol=lf
+*.bat text eol=crlf
+*.sh text eol=lf
+*.png binary
+*.jpg binary
+*.jar binary
