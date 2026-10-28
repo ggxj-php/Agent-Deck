@@ -842,52 +842,44 @@ _DOT_LOCK = threading.Lock()
 
 
 def _inject_open_rects(svg, dot_src, prefix="_store_"):
-    """在数据存储的文字外补一个「右侧开口的长方形」。
+    """把数据存储节点的矩形换成「右侧开口」的长方形（课本里的数据存储符号）。
 
-    graphviz 2.43 不支持 HTML label 的 sides（试过只画三边，结果还是整框），
-    所以先把存储节点画成纯文字，再拿 dot -Tplain 的坐标自己补线：
-    画上、下、左三条边，右边留开口——就是课本里数据存储那个符号。
+    graphviz 2.43 不支持 HTML label 的 sides，所以先按普通 box 渲染（这样布局会
+    正常给它留位置、不会挤在一起），再把该节点 <g> 里的 polygon 换成三条边：
+    上边、下边、左边，右侧留开口。
     """
-    if not svg or not _DOT_BIN:
+    if not svg:
         return svg
-    try:
-        with _DOT_LOCK:
-            plain = subprocess.run([_DOT_BIN, "-Tplain"], input=dot_src.encode("utf-8"),
-                                   capture_output=True, timeout=8)
-        if plain.returncode != 0:
-            return svg
-    except Exception:                        # noqa: BLE001
-        return svg
-    lines = plain.stdout.decode("utf-8", "ignore").splitlines()
-    height = 0.0
-    boxes = []
-    for line in lines:
-        parts = line.split(" ")
-        if parts[0] == "graph" and len(parts) >= 4:
-            try:
-                height = float(parts[3])
-            except ValueError:
-                continue
-        elif parts[0] == "node" and len(parts) >= 6 and parts[1].startswith(prefix):
-            try:
-                x, y, w, h = (float(v) for v in parts[2:6])
-            except ValueError:
-                continue
-            boxes.append((x, y, w, h))
-    if not boxes:
-        return svg
-    parts_svg = []
-    for x, y, w, h in boxes:
-        cx, cy = x * 72.0, (height - y) * 72.0
-        bw, bh = w * 72.0 + 26.0, h * 72.0 + 20.0
-        left, top, bottom = cx - bw / 2, cy - bh / 2, cy + bh / 2
-        right = cx + bw / 2
-        parts_svg.append(
-            f'<g class="dfd-store"><path d="M{left:.1f},{top:.1f} H{right:.1f} '
-            f'M{left:.1f},{top:.1f} V{bottom:.1f} M{left:.1f},{bottom:.1f} H{right:.1f}" '
-            'fill="none" stroke="#4b5563" stroke-width="1.8"/></g>'
-        )
-    return svg.replace("</svg>", "".join(parts_svg) + "</svg>", 1)
+    # graphviz 的 <g id> 是 node1/node2… 这种自动编号，节点名在 <title> 里，
+    # 所以要按 title 前缀找
+    pattern = re.compile(r'(<g id="node\d+" class="node">)([\s\S]*?)(</g>)')
+    changed = 0
+
+    def fix(match):
+        nonlocal changed
+        head, body, tail = match.group(1), match.group(2), match.group(3)
+        title = re.search(r"<title>([^<]*)</title>", body)
+        if not title or not title.group(1).startswith(prefix):
+            return match.group(0)
+        poly = re.search(r'<polygon[^>]*points="([^"]+)"', body)
+        if not poly:
+            return match.group(0)
+        nums = [float(v) for v in re.findall(r'-?\d+(?:\.\d+)?', poly.group(1))]
+        if len(nums) < 8:
+            return match.group(0)
+        xs, ys = nums[0::2], nums[1::2]
+        left, right, top, bottom = min(xs), max(xs), min(ys), max(ys)
+        path = (f'<path d="M{left:.1f},{top:.1f} H{right:.1f} '
+                f'M{left:.1f},{top:.1f} V{bottom:.1f} '
+                f'M{left:.1f},{bottom:.1f} H{right:.1f}" '
+                'fill="none" stroke="#4b5563" stroke-width="1.8"/>')
+        body = body.replace(poly.group(0), path, 1)
+        changed += 1
+        return head + body + tail
+
+    svg = pattern.sub(fix, svg)
+    return svg
+
 
 
 def _dot_svg(dot_src, timeout=8, engine="dot"):
@@ -1007,10 +999,11 @@ def _dot_graph_plain(data):
         attrs = {"label": _dot_label(n["label"]),
                  "shape": "ellipse" if n.get("kind") == "circle" else "box"}
         attrs.update(_dot_colors(n.get("color")))
-        lines.append(f'  "n_{_dot_label(n["id"])}" [{_dot_attr(attrs)}];')
+        lines.append(f'  {name_of[n["id"]]} [{_dot_attr(attrs)}];')
     for a, b, label in edges:
         attrs = {"label": _dot_label(label)} if label else {}
-        lines.append(f'  "n_{_dot_label(a)}" -> "n_{_dot_label(b)}" [{_dot_attr(attrs)}];')
+        lines.append(f'  {name_of.get(a, "n_" + _dot_label(a))} -> '
+                     f'{name_of.get(b, "n_" + _dot_label(b))} [{_dot_attr(attrs)}];')
     lines.append("}")
     return "\n".join(lines)
 
@@ -1036,7 +1029,8 @@ def _dot_dataflow(data):
                      "color": "#3c73c4", "fontcolor": "#1d4076",
                      "label": _dot_label(n["label"])}
         elif k == "store":
-            attrs = {"shape": "none", "margin": "0.30,0.20", "fontsize": 13,
+            attrs = {"shape": "box", "style": "filled", "fillcolor": "#f8fafc",
+                     "color": "#4b5563", "penwidth": 1.0, "fontsize": 13,
                      "fontcolor": "#33333d", "label": _dot_label(n["label"])}
         else:
             attrs = {"shape": "ellipse", "style": "filled", "fillcolor": "#d8f3e0",
