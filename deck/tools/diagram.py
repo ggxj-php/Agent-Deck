@@ -1195,6 +1195,32 @@ def _dot_er(data):
     return "\n".join(out)
 
 
+def _state_lines(raw):
+    """状态变量 / 活动表统一成若干行文本。
+
+    支持：字符串（可含 \n）、列表（元素是字符串或 {"event": "do", "action": "响铃"}）。
+    活动表按课本语法输出成「事件名(参数表)/动作表达式」，例如 do/响铃。
+    """
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        return [line.strip() for line in raw.splitlines() if line.strip()]
+    lines = []
+    for item in raw if isinstance(raw, (list, tuple)) else [raw]:
+        if isinstance(item, dict):
+            event = str(item.get("event") or item.get("name") or "").strip()
+            action = str(item.get("action") or item.get("expr") or "").strip()
+            params = str(item.get("params") or "").strip()
+            if event and params:
+                event = f"{event}({params})"
+            lines.append(f"{event}/{action}" if action else event)
+        else:
+            text = str(item).strip()
+            if text:
+                lines.append(text)
+    return [line for line in lines if line]
+
+
 def _dot_state(data):
     """状态转换图（课本画法）：
     - 初始状态：实心小圆点，引出一条箭头指向第一个状态；
@@ -1214,7 +1240,8 @@ def _dot_state(data):
             states.append({
                 "name": name,
                 "variables": item.get("variables") or item.get("vars") or item.get("value") or "",
-                "activities": item.get("activities") or item.get("do") or item.get("action") or "",
+                "activities": (item.get("activities") or item.get("activity")
+                               or item.get("do") or item.get("action") or ""),
                 "kind": str(item.get("kind") or "").lower(),
             })
         else:
@@ -1247,10 +1274,13 @@ def _dot_state(data):
                          f'label=""];')
             continue
         rows = [f'<tr><td><b>{_esc(st["name"])}</b></td></tr>']
-        if st["variables"]:
-            rows.append(f'<tr><td>{_esc(st["variables"])}</td></tr>')
-        if st["activities"]:
-            rows.append(f'<tr><td>{_esc(st["activities"])}</td></tr>')
+        # 中间：状态变量名和值（可以是字符串或列表，一行一个）
+        variable_lines = _state_lines(st["variables"])
+        for line in variable_lines:
+            rows.append(f'<tr><td>{_esc(line)}</td></tr>')
+        # 下面：活动表，语法「事件名(参数表)/动作表达式」，entry / exit / do 是常用事件名
+        for line in _state_lines(st["activities"]):
+            rows.append(f'<tr><td>{_esc(line)}</td></tr>')
         if len(rows) > 1:
             label = ('<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" '
                      'bgcolor="#ffffff">' + "".join(rows) + "</table>>")
@@ -1269,7 +1299,13 @@ def _dot_state(data):
         if isinstance(tr, dict):
             a = str(tr.get("from") or tr.get("source") or "")
             b = str(tr.get("to") or tr.get("target") or "")
-            ev = tr.get("event") or tr.get("label") or ""
+            ev = str(tr.get("event") or tr.get("label") or "")
+            guard = str(tr.get("guard") or "").strip()
+            action = str(tr.get("action") or "").strip()
+            if guard:
+                ev = f"{ev}[{guard}]"
+            if action:
+                ev = f"{ev}/{action}"
         else:
             seq = list(tr) if isinstance(tr, (list, tuple)) else []
             if len(seq) < 2:
