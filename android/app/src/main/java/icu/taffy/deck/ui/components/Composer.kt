@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,9 +24,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -46,10 +51,14 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import icu.taffy.deck.DeckApp
+import icu.taffy.deck.data.DeckException
 import icu.taffy.deck.data.Persona
+import icu.taffy.deck.data.UploadedFile
 import icu.taffy.deck.ui.theme.DeckPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -58,34 +67,69 @@ import java.io.ByteArrayOutputStream
 import kotlin.math.max
 import kotlin.math.min
 
+private const val MAX_FILES = 6
+private const val MAX_FILE_BYTES = 20L * 1024 * 1024
+
 /**
- * 底部输入区，尺寸对齐网页端：44dp 圆形「+」、22dp 圆角输入框、44dp 渐变发送按钮。
+ * 底部输入区：图片、文件附件、多行输入、发送/停止。
+ *
+ * 「＋」展开图片/文件两个入口；文件会先传到 /api/uploads/file，拿到 id 后随消息一起发。
  */
 @Composable
 fun Composer(
     busy: Boolean,
     persona: Persona,
     palette: DeckPalette,
-    onSend: (String, List<String>) -> Unit,
+    onSend: (String, List<String>, List<UploadedFile>) -> Unit,
     onStop: () -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
     var image by remember { mutableStateOf<String?>(null) }
     var preparing by remember { mutableStateOf(false) }
+    var files by remember { mutableStateOf<List<UploadedFile>>(emptyList()) }
+    var uploading by remember { mutableStateOf(false) }
+    var fileError by remember { mutableStateOf<String?>(null) }
+    var menuOpen by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             preparing = true
             val dataUrl = withContext(Dispatchers.IO) { toDataUrl(context, uri) }
             preparing = false
-            if (dataUrl != null) image = dataUrl
+            if (dataUrl != null) image = dataUrl else fileError = "这张图读不出来，换一张试试"
         }
     }
 
-    val canSend = !busy && !preparing && (text.isNotBlank() || image != null)
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        if (files.size >= MAX_FILES) {
+            fileError = "一条消息最多带 $MAX_FILES 个文件"
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            uploading = true
+            fileError = null
+            val picked = withContext(Dispatchers.IO) { readAsDataUrl(context, uri) }
+            if (picked == null) {
+                uploading = false
+                fileError = "文件读不出来，或者超过 20MB"
+                return@launch
+            }
+            try {
+                val uploaded = DeckApp.instance.api.uploadFile(picked.name, picked.dataUrl)
+                files = files + uploaded
+            } catch (error: Exception) {
+                fileError = if (error is DeckException) error.message else "上传失败：${error.message}"
+            } finally {
+                uploading = false
+            }
+        }
+    }
+
+    val canSend = !busy && !preparing && !uploading && (text.isNotBlank() || image != null || files.isNotEmpty())
     val placeholder = persona.placeholder.ifBlank { "和${persona.name}说点什么…" }
 
     Column(
@@ -100,51 +144,108 @@ fun Composer(
                 .background(palette.line),
         )
 
-        if (image != null || preparing) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+        if (image != null || preparing || files.isNotEmpty() || uploading) {
+            Column(
                 modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 9.dp),
             ) {
-                Surface(
-                    color = palette.softFill,
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, palette.line),
-                    modifier = Modifier.size(72.dp),
-                ) {
-                    if (preparing) {
-                        Box(contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                if (image != null || preparing) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            color = palette.softFill,
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, palette.line),
+                            modifier = Modifier.size(64.dp),
+                        ) {
+                            if (preparing) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                }
+                            } else {
+                                AsyncImage(
+                                    model = image,
+                                    contentDescription = "待发送的图片",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .clip(RoundedCornerShape(14.dp)),
+                                )
+                            }
                         }
-                    } else {
-                        AsyncImage(
-                            model = image,
-                            contentDescription = "待发送的图片",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(72.dp)
-                                .clip(RoundedCornerShape(14.dp)),
-                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text("发送这张图", fontSize = 12.sp, color = palette.inkSoft)
+                        Spacer(Modifier.weight(1f))
+                        SmallCloseButton(enabled = !busy, palette = palette) { image = null }
                     }
                 }
-                Spacer(Modifier.width(10.dp))
-                Text("发送这张图", fontSize = 12.sp, color = palette.inkSoft)
-                Spacer(Modifier.weight(1f))
-                Surface(
-                    onClick = { image = null },
-                    enabled = !busy,
-                    shape = CircleShape,
-                    color = Color.White.copy(alpha = 0.9f),
-                    border = BorderStroke(1.dp, palette.line),
-                    modifier = Modifier.size(26.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Rounded.Close,
-                            contentDescription = "移除图片",
-                            modifier = Modifier.size(14.dp),
-                            tint = palette.inkSoft,
-                        )
+
+                files.forEach { file ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 6.dp),
+                    ) {
+                        Surface(
+                            color = palette.softFill,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, palette.line),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Description,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = palette.accent,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = file.name,
+                                        fontSize = 12.sp,
+                                        color = palette.ink,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = formatSize(file.size),
+                                        fontSize = 10.5.sp,
+                                        color = palette.inkSoft,
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        SmallCloseButton(enabled = !busy, palette = palette) { files = files - file }
                     }
+                }
+
+                if (uploading) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 6.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = palette.accent,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("正在上传…", fontSize = 11.5.sp, color = palette.inkSoft)
+                    }
+                }
+
+                fileError?.let { message ->
+                    Text(
+                        text = message,
+                        fontSize = 11.5.sp,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
                 }
             }
         }
@@ -153,20 +254,58 @@ fun Composer(
             verticalAlignment = Alignment.Bottom,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
         ) {
-            Surface(
-                onClick = { picker.launch("image/*") },
-                enabled = !busy,
-                shape = CircleShape,
-                color = palette.softFill,
-                border = BorderStroke(1.dp, palette.line),
-                modifier = Modifier.size(44.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.Image,
-                        contentDescription = "发图片",
-                        modifier = Modifier.size(20.dp),
-                        tint = palette.inkSoft,
+            Box {
+                Surface(
+                    onClick = { menuOpen = true },
+                    enabled = !busy,
+                    shape = CircleShape,
+                    color = palette.softFill,
+                    border = BorderStroke(1.dp, palette.line),
+                    modifier = Modifier.size(44.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.Add,
+                            contentDescription = "添加图片或文件",
+                            modifier = Modifier.size(20.dp),
+                            tint = palette.accent,
+                        )
+                    }
+                }
+                DropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false },
+                    containerColor = palette.bubble,
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("发图片", fontSize = 13.5.sp, color = palette.ink) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Rounded.Image,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = palette.inkSoft,
+                            )
+                        },
+                        onClick = {
+                            menuOpen = false
+                            imagePicker.launch("image/*")
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("发文件", fontSize = 13.5.sp, color = palette.ink) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Rounded.Description,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = palette.inkSoft,
+                            )
+                        },
+                        onClick = {
+                            menuOpen = false
+                            filePicker.launch(arrayOf("*/*"))
+                        },
                     )
                 }
             }
@@ -213,9 +352,11 @@ fun Composer(
                     if (busy) {
                         onStop()
                     } else if (canSend) {
-                        onSend(text.trim(), listOfNotNull(image))
+                        onSend(text.trim(), listOfNotNull(image), files)
                         text = ""
                         image = null
+                        files = emptyList()
+                        fileError = null
                     }
                 },
                 enabled = busy || canSend,
@@ -242,6 +383,55 @@ fun Composer(
             }
         }
     }
+}
+
+@Composable
+private fun SmallCloseButton(
+    enabled: Boolean,
+    palette: DeckPalette,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = CircleShape,
+        color = Color.White.copy(alpha = 0.9f),
+        border = BorderStroke(1.dp, palette.line),
+        modifier = Modifier.size(26.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                Icons.Rounded.Close,
+                contentDescription = "移除",
+                modifier = Modifier.size(14.dp),
+                tint = palette.inkSoft,
+            )
+        }
+    }
+}
+
+private fun formatSize(bytes: Long): String = when {
+    bytes <= 0 -> "未知大小"
+    bytes < 1024 -> "${bytes} B"
+    bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+    else -> String.format("%.1f MB", bytes / 1024.0 / 1024.0)
+}
+
+private data class PickedFile(val name: String, val dataUrl: String)
+
+/** 读文件成 data URL，顺手把名字取出来（上限 20MB，和服务端一致）。 */
+private fun readAsDataUrl(context: Context, uri: Uri): PickedFile? {
+    return runCatching {
+        val resolver = context.contentResolver
+        val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+            ?: "file.bin"
+        val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+        if (bytes.isEmpty() || bytes.size > MAX_FILE_BYTES) return null
+        val mime = resolver.getType(uri) ?: "application/octet-stream"
+        val encoded = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        PickedFile(name, "data:$mime;base64,$encoded")
+    }.getOrNull()
 }
 
 /** 最长边压到 1600px、JPEG 85，单张控制在 2MB 内再上传。 */

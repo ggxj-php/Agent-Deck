@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Image
@@ -98,12 +99,55 @@ private fun UserMessage(message: UiMessage, baseUrl: String, palette: DeckPalett
                 )
                 Spacer(Modifier.height(6.dp))
             }
+            message.files.forEach { file -> UserFileChip(file.name, file.size) }
             if (text.isNotBlank()) {
                 Text(
                     text = text,
                     fontSize = 15.sp,
                     lineHeight = 22.sp,
                     color = Color.White,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UserFileChip(name: String, size: Long) {
+    Surface(
+        color = Color.White.copy(alpha = 0.20f),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 6.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+        ) {
+            Icon(
+                Icons.Rounded.Description,
+                contentDescription = null,
+                modifier = Modifier.size(15.dp),
+                tint = Color.White,
+            )
+            Spacer(Modifier.width(7.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = name,
+                    fontSize = 12.sp,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = when {
+                        size <= 0 -> "附件"
+                        size < 1024 * 1024 -> "${size / 1024} KB"
+                        else -> String.format("%.1f MB", size / 1024.0 / 1024.0)
+                    },
+                    fontSize = 10.sp,
+                    color = Color.White.copy(alpha = 0.85f),
                 )
             }
         }

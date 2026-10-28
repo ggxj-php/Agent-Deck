@@ -34,7 +34,13 @@ class MainActivity : ComponentActivity() {
                 ) {
                     when {
                         state.booting -> SplashScreen()
-                        state.account == null -> LoginScreen(state, viewModel::login)
+                        state.account == null -> LoginScreen(
+                            state = state,
+                            onLogin = viewModel::login,
+                            onRegister = viewModel::register,
+                            onSwitchMode = viewModel::switchAuthMode,
+                            onRefreshCaptcha = viewModel::refreshCaptcha,
+                        )
                         else -> ChatScreen(state, viewModel)
                     }
                 }

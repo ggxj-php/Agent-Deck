@@ -54,6 +54,20 @@ data class HistoryPage(
     val context: ContextUsage,
 )
 
+/** 已上传的附件（服务端只回 id/名字/大小，内容按 id 引用）。 */
+data class UploadedFile(
+    val id: String,
+    val name: String,
+    val size: Long = 0,
+)
+
+/** 图形验证码（注册要填），image 是 data URL，可以直接交给 Coil 显示。 */
+data class Captcha(
+    val id: String = "",
+    val image: String = "",
+    val ttl: Int = 300,
+)
+
 /** SSE 事件。字段名与后端 `ask_stream` 吐出来的 JSON 一一对应。 */
 sealed interface ChatEvent {
     data class Thinking(val text: String) : ChatEvent

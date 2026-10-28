@@ -1,6 +1,7 @@
 package icu.taffy.deck.ui
 
 import icu.taffy.deck.data.HistoryItem
+import icu.taffy.deck.data.UploadedFile
 
 /**
  * 把后端存的历史正文还原成内容块。
@@ -15,6 +16,9 @@ object HistoryParser {
     private val STICKER = Regex("""\[sticker:([A-Za-z_]+)(?::([^\]\s]+))?]""")
     private val IMAGE_MARK = Regex("""\[图片 #([0-9a-fA-F]{6,32})[^\]]*]""")
 
+    // [附件 #id uploads/xxx.pdf（报告.pdf，812KB）：用户上传的文件…]
+    private val FILE_MARK = Regex("""\[附件 #([0-9a-fA-F]+) uploads/[^\s（]+（([^，]+)，(\d+)KB）：[^\]]*]""")
+
     fun toMessages(items: List<HistoryItem>, stickerUrl: (String) -> String): List<UiMessage> {
         val out = ArrayList<UiMessage>()
         var seed = 0L
@@ -22,15 +26,25 @@ object HistoryParser {
             seed += 1
             when (item.role) {
                 "user" -> {
-                    val ids = IMAGE_MARK.findAll(item.text).map { it.groupValues[1] }.toList()
-                    val body = IMAGE_MARK.replace(item.text, "").trim()
-                    if (body.isEmpty() && ids.isEmpty()) continue
+                    val imageIds = IMAGE_MARK.findAll(item.text).map { it.groupValues[1] }.toList()
+                    val files = FILE_MARK.findAll(item.text).map { match ->
+                        UploadedFile(
+                            id = match.groupValues[1],
+                            name = match.groupValues[2],
+                            size = match.groupValues[3].toLongOrNull()?.times(1024) ?: 0L,
+                        )
+                    }.toList()
+                    var body = IMAGE_MARK.replace(item.text, "")
+                    body = FILE_MARK.replace(body, "")
+                    body = body.replace(Regex("""\n{3,}"""), "\n\n").trim()
+                    if (body.isEmpty() && imageIds.isEmpty() && files.isEmpty()) continue
                     out.add(
                         UiMessage(
                             id = seed,
                             role = Role.USER,
-                            blocks = listOf(Block.Text(body.ifEmpty { "（这张图）" })),
-                            images = ids.map { "/api/uploads/$it" },
+                            blocks = listOf(Block.Text(body.ifEmpty { "（这条消息只有附件）" })),
+                            images = imageIds.map { "/api/uploads/$it" },
+                            files = files,
                         )
                     )
                 }

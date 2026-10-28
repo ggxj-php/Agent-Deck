@@ -17,17 +17,21 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.conflate
 import java.io.ByteArrayInputStream
 
 /**
@@ -148,13 +152,31 @@ fun MarkdownWebView(
         update = { view -> webView = view },
     )
 
-    // 流式输出时每次增量都重渲太浪费：等 90ms，把这段时间的增量合并成一次
-    LaunchedEffect(markdown, pageReady, webView) {
+    // 流式输出时不能每来一帧就整块重渲染：
+    // conflate 丢掉中间值，collect 里顺序处理（不会像 collectLatest 那样被新值打断），
+    // 于是最多每 70ms 渲染一次，而且渲染的永远是最新内容。
+    val latestMarkdown = rememberUpdatedState(markdown)
+    LaunchedEffect(webView, pageReady) {
         val view = webView ?: return@LaunchedEffect
         if (!pageReady) return@LaunchedEffect
-        delay(90)
-        val encoded = Base64.encodeToString(markdown.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-        view.evaluateJavascript("window.deckUpdate && window.deckUpdate('$encoded');", null)
+        snapshotFlow { latestMarkdown.value }
+            .conflate()
+            .collect { text ->
+                delay(70)
+                val encoded = Base64.encodeToString(text.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                view.evaluateJavascript("window.deckUpdate && window.deckUpdate('$encoded');", null)
+            }
+    }
+
+    // 滑出屏幕就回收，别让几十个 WebView 各自占着渲染进程
+    DisposableEffect(webView) {
+        onDispose {
+            webView?.runCatching {
+                stopLoading()
+                loadUrl("about:blank")
+                destroy()
+            }
+        }
     }
 }
 

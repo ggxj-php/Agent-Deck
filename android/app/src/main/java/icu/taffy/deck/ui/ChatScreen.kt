@@ -1,8 +1,14 @@
 package icu.taffy.deck.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
@@ -39,6 +46,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -48,10 +57,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +71,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,6 +81,8 @@ import icu.taffy.deck.data.SessionSummary
 import icu.taffy.deck.ui.components.Composer
 import icu.taffy.deck.ui.components.MessageItem
 import icu.taffy.deck.ui.theme.LocalPalette
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -82,6 +96,7 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var pendingDelete by remember { mutableStateOf<SessionSummary?>(null) }
+    var showPasswordDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.toast) {
         state.toast?.let { message ->
@@ -112,6 +127,7 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                     },
                     onDeleteSession = { pendingDelete = it },
                     onLogout = viewModel::logout,
+                    onChangePassword = { showPasswordDialog = true },
                 )
             }
         },
@@ -140,7 +156,7 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                         busy = state.busy,
                         persona = state.persona,
                         palette = palette,
-                        onSend = { text, images -> viewModel.send(text, images) },
+                        onSend = { text, images, files -> viewModel.send(text, images, files) },
                         onStop = viewModel::stop,
                     )
                 }
@@ -166,6 +182,104 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
             },
         )
     }
+
+    if (showPasswordDialog) {
+        PasswordDialog(
+            palette = palette,
+            onDismiss = { showPasswordDialog = false },
+            onSubmit = { oldPassword, newPassword ->
+                viewModel.changePassword(oldPassword, newPassword)
+                showPasswordDialog = false
+            },
+        )
+    }
+}
+
+/** 改密码：旧密码 + 新密码 + 确认，和网页端「改密码」一致（至少 8 位）。 */
+@Composable
+private fun PasswordDialog(
+    palette: icu.taffy.deck.ui.theme.DeckPalette,
+    onDismiss: () -> Unit,
+    onSubmit: (String, String) -> Unit,
+) {
+    var oldPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var repeatPassword by remember { mutableStateOf("") }
+    var localError by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = palette.bubble,
+        title = { Text("修改密码") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = oldPassword,
+                    onValueChange = { oldPassword = it.take(128) },
+                    label = { Text("当前密码", fontSize = 12.5.sp) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = palette.accent,
+                        unfocusedBorderColor = palette.line,
+                        focusedLabelColor = palette.accent,
+                        cursorColor = palette.accent,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = newPassword,
+                    onValueChange = { newPassword = it.take(128) },
+                    label = { Text("新密码（至少 8 位）", fontSize = 12.5.sp) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = palette.accent,
+                        unfocusedBorderColor = palette.line,
+                        focusedLabelColor = palette.accent,
+                        cursorColor = palette.accent,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = repeatPassword,
+                    onValueChange = { repeatPassword = it.take(128) },
+                    label = { Text("再输一次新密码", fontSize = 12.5.sp) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = palette.accent,
+                        unfocusedBorderColor = palette.line,
+                        focusedLabelColor = palette.accent,
+                        cursorColor = palette.accent,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                localError?.let {
+                    Spacer(Modifier.height(6.dp))
+                    Text(it, fontSize = 11.5.sp, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    localError = when {
+                        oldPassword.isEmpty() -> "当前密码得填"
+                        newPassword.length < 8 -> "新密码至少 8 位"
+                        newPassword != repeatPassword -> "两次输入的新密码不一样"
+                        else -> null
+                    }
+                    if (localError == null) onSubmit(oldPassword, newPassword)
+                },
+            ) { Text("确认修改", color = palette.accent) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消", color = palette.inkSoft) }
+        },
+    )
 }
 
 /* ---------------- 顶栏 ---------------- */
@@ -359,19 +473,33 @@ private fun MessageList(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val growth = state.messages.lastOrNull()?.blocks?.sumOf { block ->
-        when (block) {
-            is Block.Text -> block.markdown.length
-            is Block.Thinking -> block.text.length
-            else -> 0
-        }
-    } ?: 0
+    val scope = rememberCoroutineScope()
+    val latestMessages by rememberUpdatedState(state.messages)
 
-    LaunchedEffect(state.messages.size, growth) {
-        if (state.messages.isEmpty()) return@LaunchedEffect
-        if (!listState.canScrollForward) {
-            listState.scrollToItem(state.messages.lastIndex)
-            listState.scrollBy(400_000f)
+    // 是否贴着底部：最后一条完整露出、且离底不超过 120px 才算「跟随中」
+    fun pinned(): Boolean {
+        val info = listState.layoutInfo
+        val last = info.visibleItemsInfo.lastOrNull() ?: return true
+        return last.index == info.totalItemsCount - 1 &&
+            (last.offset + last.size - info.viewportEndOffset) <= 120
+    }
+
+    val showJump by remember {
+        derivedStateOf {
+            latestMessages.isNotEmpty() && !pinned()
+        }
+    }
+
+    // 流式输出时不做每帧滚动：120ms 跟一次，且只在用户没往上翻的时候跟
+    LaunchedEffect(listState) {
+        while (isActive) {
+            delay(120)
+            val messages = latestMessages
+            if (messages.isEmpty()) continue
+            if (!listState.isScrollInProgress && pinned()) {
+                listState.scrollToItem(messages.lastIndex)
+                listState.scrollBy(500_000f)
+            }
         }
     }
 
@@ -391,6 +519,41 @@ private fun MessageList(
                 )
             }
             item { Spacer(Modifier.height(8.dp)) }
+        }
+
+        // 和网页端右下角那个「↓」一样：翻上去了就冒出来，点一下回到最新
+        AnimatedVisibility(
+            visible = showJump,
+            enter = fadeIn() + scaleIn(initialScale = 0.8f),
+            exit = fadeOut() + scaleOut(targetScale = 0.8f),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 14.dp, bottom = 18.dp),
+        ) {
+            Surface(
+                onClick = {
+                    scope.launch {
+                        val messages = latestMessages
+                        if (messages.isEmpty()) return@launch
+                        listState.animateScrollToItem(messages.lastIndex)
+                        listState.animateScrollBy(500_000f)
+                    }
+                },
+                shape = CircleShape,
+                color = palette.bubble,
+                shadowElevation = 8.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, palette.line),
+                modifier = Modifier.size(36.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = "回到底部",
+                        tint = palette.accent,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
         }
     }
 }
@@ -439,6 +602,7 @@ private fun DrawerContent(
     onOpenSession: (String) -> Unit,
     onDeleteSession: (SessionSummary) -> Unit,
     onLogout: () -> Unit,
+    onChangePassword: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -517,10 +681,12 @@ private fun DrawerContent(
         }
 
         Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 10.dp),
         ) {
+            DrawerFootButton("改密码", palette, onChangePassword, Modifier.weight(1f))
             DrawerFootButton("退出登录", palette, onLogout, Modifier.weight(1f))
         }
     }

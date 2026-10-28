@@ -12,6 +12,8 @@ import icu.taffy.deck.data.DeckApi
 import icu.taffy.deck.data.DeckException
 import icu.taffy.deck.data.Persona
 import icu.taffy.deck.data.SessionSummary
+import icu.taffy.deck.data.UploadedFile
+import icu.taffy.deck.ui.theme.LauncherIcon
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +48,7 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             val persona = runCatching { api.persona() }.getOrDefault(Persona())
             stickerLib = runCatching { api.stickers() }.getOrDefault(emptyMap())
             _state.update { it.copy(persona = persona) }
+            LauncherIcon.sync(DeckApp.instance, persona.theme)
 
             try {
                 val account = api.me()
@@ -92,23 +95,7 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             _state.update { it.copy(loggingIn = true, loginError = null) }
             try {
                 api.login(name.trim(), password)
-                val account = api.me()
-                val persona = runCatching { api.persona() }.getOrDefault(Persona())
-                val sessions = runCatching { api.sessions() }.getOrDefault(emptyList())
-                stickerLib = runCatching { api.stickers() }.getOrDefault(emptyMap())
-                api.syncWebViewCookie()
-                _state.update {
-                    it.copy(
-                        loggingIn = false,
-                        account = account,
-                        persona = persona,
-                        sessions = sessions,
-                        currentSessionId = null,
-                        messages = emptyList(),
-                        context = ContextUsage(),
-                    )
-                }
-                sessions.firstOrNull()?.let { openSession(it.id) }
+                afterAuth()
             } catch (error: DeckException) {
                 _state.update { it.copy(loggingIn = false, loginError = error.message) }
             } catch (error: Exception) {
@@ -119,12 +106,121 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
         }
     }
 
+    /** 切换登录 / 注册页签；切到注册就顺手拿一张验证码。 */
+    fun switchAuthMode(mode: AuthMode) {
+        _state.update { it.copy(authMode = mode, loginError = null) }
+        if (mode == AuthMode.REGISTER && _state.value.captcha == null) refreshCaptcha()
+    }
+
+    fun refreshCaptcha() {
+        viewModelScope.launch {
+            _state.update { it.copy(captchaLoading = true, loginError = null) }
+            try {
+                val captcha = api.captcha()
+                _state.update { it.copy(captcha = captcha, captchaLoading = false) }
+            } catch (error: Exception) {
+                _state.update {
+                    it.copy(
+                        captchaLoading = false,
+                        loginError = if (error is DeckException) error.message else "验证码加载失败",
+                    )
+                }
+            }
+        }
+    }
+
+    fun register(name: String, password: String, invite: String, answer: String) {
+        val user = name.trim()
+        if (user.length < 3 || user.length > 20) {
+            _state.update { it.copy(loginError = "用户名要 3~20 个字") }
+            return
+        }
+        if (password.length < 8) {
+            _state.update { it.copy(loginError = "密码至少 8 位") }
+            return
+        }
+        if (invite.isBlank()) {
+            _state.update { it.copy(loginError = "邀请码得填") }
+            return
+        }
+        if (answer.isBlank()) {
+            _state.update { it.copy(loginError = "验证码得填") }
+            return
+        }
+        val captchaId = _state.value.captcha?.id.orEmpty()
+        if (captchaId.isEmpty()) {
+            _state.update { it.copy(loginError = "验证码过期了，点图换一张") }
+            refreshCaptcha()
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(loggingIn = true, loginError = null) }
+            try {
+                api.register(user, password, invite.trim(), captchaId, answer.trim())
+                afterAuth()
+            } catch (error: DeckException) {
+                _state.update { it.copy(loggingIn = false, loginError = error.message) }
+                refreshCaptcha()
+            } catch (error: Exception) {
+                _state.update {
+                    it.copy(loggingIn = false, loginError = "注册失败：${error.message ?: "网络异常"}")
+                }
+                refreshCaptcha()
+            }
+        }
+    }
+
+    /** 登录或注册成功后的共同收尾：拉人设、会话、表情包，并把 cookie 同步给 WebView。 */
+    private suspend fun afterAuth() {
+        val account = api.me()
+        val persona = runCatching { api.persona() }.getOrDefault(Persona())
+        val sessions = runCatching { api.sessions() }.getOrDefault(emptyList())
+        stickerLib = runCatching { api.stickers() }.getOrDefault(emptyMap())
+        api.syncWebViewCookie()
+        LauncherIcon.sync(DeckApp.instance, persona.theme)
+        _state.update {
+            it.copy(
+                loggingIn = false,
+                account = account,
+                persona = persona,
+                sessions = sessions,
+                currentSessionId = null,
+                messages = emptyList(),
+                context = ContextUsage(),
+                captcha = null,
+                authMode = AuthMode.LOGIN,
+            )
+        }
+        sessions.firstOrNull()?.let { openSession(it.id) }
+    }
+
     fun logout() {
         viewModelScope.launch {
             api.logout()
             api.syncWebViewCookie()
             _state.update {
                 ChatUiState(booting = false, persona = it.persona)
+            }
+        }
+    }
+
+    fun changePassword(oldPassword: String, newPassword: String) {
+        if (oldPassword.isEmpty()) {
+            _state.update { it.copy(toast = "旧密码得填") }
+            return
+        }
+        if (newPassword.length < 8) {
+            _state.update { it.copy(toast = "新密码至少 8 位") }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                api.changePassword(oldPassword, newPassword)
+                _state.update { it.copy(toast = "密码改好了，下次用新密码登录") }
+            } catch (error: DeckException) {
+                _state.update { it.copy(toast = error.message) }
+            } catch (error: Exception) {
+                _state.update { it.copy(toast = "改密码失败：${error.message ?: "网络异常"}") }
             }
         }
     }
@@ -197,10 +293,15 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
 
     // ---------------- 发送 ----------------
 
-    fun send(text: String, images: List<String> = emptyList(), thinking: Boolean = true) {
+    fun send(
+        text: String,
+        images: List<String> = emptyList(),
+        files: List<UploadedFile> = emptyList(),
+        thinking: Boolean = true,
+    ) {
         if (_state.value.busy) return
         val message = text.trim()
-        if (message.isEmpty() && images.isEmpty()) return
+        if (message.isEmpty() && images.isEmpty() && files.isEmpty()) return
         val useThinking = thinking && _state.value.thinking
 
         sendJob = viewModelScope.launch {
@@ -215,6 +316,7 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                             role = Role.USER,
                             blocks = listOf(Block.Text(message)),
                             images = images,
+                            files = files,
                         ),
                         UiMessage(id = assistantId, role = Role.ASSISTANT, streaming = true),
                     ),
@@ -223,7 +325,13 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                 )
             }
             try {
-                api.streamChat(sessionId, message, images, useThinking) { event -> handle(event) }
+                api.streamChat(
+                    sessionId = sessionId,
+                    message = message,
+                    images = images,
+                    thinking = useThinking,
+                    files = files.map { it.id },
+                ) { event -> handle(event) }
             } catch (error: Exception) {
                 val reason: String = when (error) {
                     is DeckException -> error.message ?: "请求失败"

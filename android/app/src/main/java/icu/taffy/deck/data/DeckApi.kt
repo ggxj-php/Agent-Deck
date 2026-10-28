@@ -63,12 +63,63 @@ class DeckApi(context: android.content.Context) {
         return parseAccount(obj.optJSONObject("user"))
     }
 
+    /** 注册用图形验证码：后端返回 {id, image(data URL), ttl}。 */
+    suspend fun captcha(): Captcha {
+        val obj = JSONObject(call("GET", "/api/auth/captcha", null))
+        return Captcha(
+            id = obj.optString("id"),
+            image = obj.optString("image"),
+            ttl = obj.optInt("ttl", 300),
+        )
+    }
+
+    /** 邀请制注册：用户名 + 密码 + 邀请码 + 图形验证码，成功即登录（后端会下发 cookie）。 */
+    suspend fun register(
+        name: String,
+        password: String,
+        invite: String,
+        captchaId: String,
+        captchaAnswer: String,
+    ): Account {
+        val body = JSONObject()
+            .put("name", name)
+            .put("password", password)
+            .put("invite", invite)
+            .put("captcha_id", captchaId)
+            .put("captcha", captchaAnswer)
+            .toString()
+        val text = call("POST", "/api/auth/register", body)
+        return parseAccount(JSONObject(text).optJSONObject("user"))
+    }
+
     suspend fun logout() {
         runCatching { call("POST", "/api/auth/logout", "{}") }
         cookieJar.clear()
     }
 
+    /** 改密码：要先验旧密码，成功后会重新回到登录页。 */
+    suspend fun changePassword(oldPassword: String, newPassword: String) {
+        val body = JSONObject()
+            .put("old_password", oldPassword)
+            .put("new_password", newPassword)
+            .toString()
+        call("POST", "/api/auth/password", body)
+    }
+
     // ---------------- 人设 / 会话 ----------------
+
+    /** 上传附件：base64 data URL，服务端限 20MB / 最多 6 个 / 只收常见文档与源码扩展名。 */
+    suspend fun uploadFile(name: String, dataUrl: String): UploadedFile {
+        val body = JSONObject().put("name", name).put("data_url", dataUrl).toString()
+        val text = call("POST", "/api/uploads/file", body)
+        val file = JSONObject(text).optJSONObject("file")
+            ?: throw DeckException(500, "上传失败：服务端没有返回文件信息")
+        return UploadedFile(
+            id = file.optString("id"),
+            name = file.optString("name", name),
+            size = file.optLong("size"),
+        )
+    }
 
     suspend fun persona(): Persona {
         val obj = JSONObject(call("GET", "/api/persona", null))
@@ -168,6 +219,7 @@ class DeckApi(context: android.content.Context) {
         message: String,
         images: List<String> = emptyList(),
         thinking: Boolean = true,
+        files: List<String> = emptyList(),
         onEvent: (ChatEvent) -> Unit,
     ) = withContext(Dispatchers.IO) {
         val payload = JSONObject()
@@ -178,6 +230,11 @@ class DeckApi(context: android.content.Context) {
             val array = JSONArray()
             images.forEach { array.put(it) }
             payload.put("images", array)
+        }
+        if (files.isNotEmpty()) {
+            val array = JSONArray()
+            files.forEach { id -> array.put(JSONObject().put("id", id)) }
+            payload.put("files", array)
         }
 
         val request = Request.Builder()
