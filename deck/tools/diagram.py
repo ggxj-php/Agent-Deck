@@ -1273,14 +1273,19 @@ def _dot_state(data):
                          f'style="filled", fillcolor="#ffffff", color="#1f2023", '
                          f'label=""];')
             continue
-        rows = [f'<tr><td><b>{_esc(st["name"])}</b></td></tr>']
-        # 中间：状态变量名和值（可以是字符串或列表，一行一个）
+        # 状态框固定三层（课本图 3-8）：上=状态名，中=状态变量名和值，下=活动表。
+        # 中间层、下面层是可选内容，没有内容也保留空行，保证所有状态框长得一致。
         variable_lines = _state_lines(st["variables"])
-        for line in variable_lines:
-            rows.append(f'<tr><td>{_esc(line)}</td></tr>')
-        # 下面：活动表，语法「事件名(参数表)/动作表达式」，entry / exit / do 是常用事件名
-        for line in _state_lines(st["activities"]):
-            rows.append(f'<tr><td>{_esc(line)}</td></tr>')
+        activity_lines = _state_lines(st["activities"])
+        rows = [f'<tr><td><b>{_esc(st["name"])}</b></td></tr>']
+        if variable_lines:
+            rows.extend(f'<tr><td>{_esc(line)}</td></tr>' for line in variable_lines)
+        else:
+            rows.append('<tr><td> </td></tr>')
+        if activity_lines:
+            rows.extend(f'<tr><td>{_esc(line)}</td></tr>' for line in activity_lines)
+        else:
+            rows.append('<tr><td> </td></tr>')
         # 所有状态用同一种框：圆角矩形 + 黑边；有变量/活动表就分栏
         label = ('<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" '
                  'bgcolor="#ffffff">' + "".join(rows) + "</table>>")
