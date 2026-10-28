@@ -1,5 +1,7 @@
 package com.agentdeck.app.ui
 
+import androidx.compose.runtime.Immutable
+
 import com.agentdeck.app.data.Account
 import com.agentdeck.app.data.Captcha
 import com.agentdeck.app.data.ContextUsage
@@ -9,6 +11,7 @@ import com.agentdeck.app.data.UpdateInfo
 import com.agentdeck.app.data.UploadedFile
 
 /** 一条助手消息里的内容块，顺序就是流式输出的顺序。 */
+@Immutable
 sealed interface Block {
     data class Text(val markdown: String) : Block
 
@@ -35,6 +38,7 @@ enum class Role { USER, ASSISTANT }
 /** 登录页的两个页签。 */
 enum class AuthMode { LOGIN, REGISTER }
 
+@Immutable
 data class UiMessage(
     val id: Long,
     val role: Role,

@@ -12,9 +12,12 @@ val localProperties = Properties().apply {
     val file = rootProject.file("local.properties")
     if (file.exists()) file.inputStream().use { load(it) }
 }
-val deckBaseUrl: String = (localProperties.getProperty("deck.baseUrl") ?: "https://example.com")
-    .trim()
-    .trimEnd('/')
+// 优先级：环境变量 DECK_BASE_URL > local.properties 的 deck.baseUrl > 占位地址
+val deckBaseUrl: String = (
+    System.getenv("DECK_BASE_URL")?.takeIf { it.isNotBlank() }
+        ?: localProperties.getProperty("deck.baseUrl")
+        ?: "https://example.com"
+    ).trim().trimEnd('/')
 
 android {
     namespace = "com.agentdeck.app"

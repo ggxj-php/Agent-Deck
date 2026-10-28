@@ -40,7 +40,6 @@ class MainActivity : ComponentActivity() {
                             onRegister = viewModel::register,
                             onSwitchMode = viewModel::switchAuthMode,
                             onRefreshCaptcha = viewModel::refreshCaptcha,
-                            onChangeServer = viewModel::changeServer,
                         )
                         else -> ChatScreen(state, viewModel)
                     }

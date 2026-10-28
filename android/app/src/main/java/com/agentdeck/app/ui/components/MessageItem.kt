@@ -97,8 +97,12 @@ private fun UserMessage(
         ) {
             message.images.forEach { raw ->
                 val url = resolveUrl(baseUrl, raw)
+                val context = LocalContext.current
+                val request = remember(url) {
+                    ImageRequest.Builder(context).data(url).size(1200, 1200).build()
+                }
                 AsyncImage(
-                    model = url,
+                    model = request,
                     contentDescription = "发送的图片",
                     contentScale = ContentScale.FillWidth,
                     modifier = Modifier
@@ -240,8 +244,12 @@ private fun StickerImage(url: String, onPreview: (String) -> Unit) {
     // 加载失败就整块收起来，别留一块空白占着版面
     var failed by remember(url) { mutableStateOf(false) }
     if (failed) return
+    val context = LocalContext.current
+    val request = remember(url) {
+        ImageRequest.Builder(context).data(url).size(360, 360).build()
+    }
     AsyncImage(
-        model = url,
+        model = request,
         contentDescription = "表情包",
         contentScale = ContentScale.Fit,
         onError = { failed = true },

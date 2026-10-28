@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 默认（未取到身份卡时）的粉色图标底色 -->
     <color name="ic_launcher_background">#FFFFB7D5</color>
-    <color name="ic_launcher_bg_pink">#FFFFB2D9</color>
-    <color name="ic_launcher_bg_red">#FFFFB2B2</color>
-    <color name="ic_launcher_bg_orange">#FFFFD9B2</color>
-    <color name="ic_launcher_bg_yellow">#FFFFF5B2</color>
-    <color name="ic_launcher_bg_green">#FFB2FFD2</color>
-    <color name="ic_launcher_bg_cyan">#FFB2F2FF</color>
-    <color name="ic_launcher_bg_blue">#FFB2BDFF</color>
-    <color name="ic_launcher_bg_purple">#FFDFB2FF</color>
+    <color name="ic_launcher_bg_pink">#FFFF73B9</color>
+    <color name="ic_launcher_bg_red">#FFFF7373</color>
+    <color name="ic_launcher_bg_orange">#FFFFB973</color>
+    <color name="ic_launcher_bg_yellow">#FFFFEC73</color>
+    <color name="ic_launcher_bg_green">#FF73FFAD</color>
+    <color name="ic_launcher_bg_cyan">#FF73E8FF</color>
+    <color name="ic_launcher_bg_blue">#FF7385FF</color>
+    <color name="ic_launcher_bg_purple">#FFC573FF</color>
 </resources>

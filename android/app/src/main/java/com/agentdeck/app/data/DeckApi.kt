@@ -31,7 +31,7 @@ class DeckApi(context: android.content.Context) {
     private val appContext = context.applicationContext
 
     /** 后端地址可以随时改（登录页里填），所以每次现读，不缓存。 */
-    val baseUrl: String get() = ServerStore.current(appContext)
+    val baseUrl: String get() = BuildConfig.BASE_URL.trimEnd('/')
 
     val cookieJar = PersistentCookieJar(SecureStore(appContext))
 

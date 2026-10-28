@@ -67,15 +67,12 @@ fun LoginScreen(
     onRegister: (String, String, String, String) -> Unit,
     onSwitchMode: (AuthMode) -> Unit,
     onRefreshCaptcha: () -> Unit,
-    onChangeServer: (String) -> Unit,
 ) {
     val palette = LocalPalette.current
     var name by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var invite by rememberSaveable { mutableStateOf("") }
     var answer by rememberSaveable { mutableStateOf("") }
-    var showServerDialog by remember { mutableStateOf(false) }
-    var serverInput by remember { mutableStateOf("") }
 
     val register = state.authMode == AuthMode.REGISTER
     val loading = state.loggingIn
@@ -255,71 +252,13 @@ fun LoginScreen(
 
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = if (register) "邀请码找已经在用的人要" else "邀请制 · 账号由管理员发放",
+                    text = if (register) "邀请码可以找已注册的朋友要" else "邀请制 · 找已经在用的朋友要邀请码",
                     fontSize = 10.5.sp,
                     color = palette.inkSoft.copy(alpha = 0.8f),
                     textAlign = TextAlign.Center,
                 )
-
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "服务器：" + state.serverUrl.removePrefix("https://"),
-                        fontSize = 10.5.sp,
-                        color = palette.inkSoft.copy(alpha = 0.75f),
-                    )
-                    TextButton(
-                        onClick = {
-                            serverInput = state.serverUrl
-                            showServerDialog = true
-                        },
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp),
-                    ) {
-                        Text("修改", fontSize = 10.5.sp, color = palette.accent)
-                    }
-                }
             }
         }
-    }
-
-    if (showServerDialog) {
-        AlertDialog(
-            onDismissRequest = { showServerDialog = false },
-            containerColor = Color.White,
-            title = { Text("服务器地址", fontSize = 17.sp, color = palette.ink) },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = serverInput,
-                        onValueChange = { serverInput = it.trim() },
-                        singleLine = true,
-                        placeholder = { Text("https://your-server.example", fontSize = 12.sp) },
-                        colors = fieldColors(palette),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "只支持 https。留空则恢复默认地址；换服务器会退出当前登录。",
-                        fontSize = 11.sp,
-                        color = palette.inkSoft,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onChangeServer(serverInput)
-                        showServerDialog = false
-                    },
-                ) { Text("保存", color = palette.accent) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showServerDialog = false }) {
-                    Text("取消", color = palette.inkSoft)
-                }
-            },
-        )
     }
 }
 

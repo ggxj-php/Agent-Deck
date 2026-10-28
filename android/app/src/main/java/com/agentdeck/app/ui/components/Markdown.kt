@@ -1,4 +1,12 @@
 package com.agentdeck.app.ui.components
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.withStyle
+
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -68,6 +76,7 @@ sealed interface MdBlock {
 }
 
 private val STICKER = Regex("""\[sticker:([A-Za-z_]+)(?::([^\]\s]+))?]""")
+private val FENCE = Regex("""^\s*(`{3,}|~{3,})\s*([A-Za-z0-9+#._-]*)\s*$""")
 private val IMAGE_LINE = Regex("""^!\[([^\]]*)]\(([^)\s]+)\)$""")
 private val DOWNLOAD_LINE = Regex("""^\[([^\]]*)]\((/d/[^)\s]+)\)$""")
 private val HEADING = Regex("""^(#{1,6})\s+(.*)$""")
@@ -78,7 +87,8 @@ private val TABLE_DIVIDER = Regex("""^\s*\|?[\s:|-]+\|[\s:|-]*$""")
 
 fun parseMarkdown(source: String): List<MdBlock> {
     val blocks = mutableListOf<MdBlock>()
-    val lines = source.split("\n")
+    // 统一换行：模型偶尔吐 CRLF 或单独的 CR，留着会多出空行和看不见的字符
+    val lines = source.replace("\r\n", "\n").replace('\r', '\n').split("\n")
     var index = 0
 
     fun flushParagraph(buffer: MutableList<String>) {
@@ -112,18 +122,24 @@ fun parseMarkdown(source: String): List<MdBlock> {
         val line = lines[index]
         val trimmed = line.trim()
 
-        // 代码块
-        if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+        // 代码块：围栏必须「整行都是同一个符号」且结束围栏不低于开始长度。
+        // 之前只判断 startsWith("~~~")，ASCII 画里的 ~~~~~ 会被当成结束围栏，
+        // 后面的内容就被错误地拖进/拖出代码块（波浪线跑到表情包上面、结尾整段变黑）。
+        val fence = FENCE.find(line)
+        if (fence != null) {
             flushParagraph(paragraph)
-            val fence = trimmed.take(3)
-            val lang = trimmed.removePrefix(fence).trim()
+            val marker = fence.groupValues[1]
+            val lang = fence.groupValues[2].trim()
+            val fenceChar = marker[0]
+            val minLength = marker.length
+            val closing = Regex("""^\s*""" + Regex.escape(fenceChar.toString()) + "{$minLength,}\\s*$")
             val code = StringBuilder()
             index++
-            while (index < lines.size && !lines[index].trim().startsWith(fence)) {
+            while (index < lines.size && !closing.matches(lines[index])) {
                 code.append(lines[index]).append('\n')
                 index++
             }
-            index++ // 跳过结束围栏
+            if (index < lines.size) index++ // 跳过结束围栏
             blocks += MdBlock.Code(lang, code.toString().trimEnd('\n'))
             continue
         }
@@ -326,36 +342,7 @@ private fun MdBlockView(
             }
         }
 
-        is MdBlock.Code -> {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 5.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFF23252F)),
-            ) {
-                if (block.lang.isNotBlank()) {
-                    Text(
-                        text = block.lang,
-                        fontSize = 10.sp,
-                        color = Color(0xFF9AA0B5),
-                        modifier = Modifier.padding(start = 10.dp, top = 7.dp),
-                    )
-                }
-                SelectionContainer {
-                    Text(
-                        text = block.code,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
-                        lineHeight = 17.sp,
-                        color = Color(0xFFE6E6EE),
-                        modifier = Modifier
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                    )
-                }
-            }
-        }
+        is MdBlock.Code -> CodeBlock(block.lang, block.code)
 
         is MdBlock.Quote -> {
             val text = remember(block.text, palette.accent) { inline(block.text, palette) }
@@ -438,8 +425,148 @@ private fun MdBlockView(
 }
 
 @Composable
-private fun TableRow(
-    cells: List<String>,
+private fun CodeBlock(lang: String, code: String) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(1500)
+            copied = false
+        }
+    }
+    val highlighted = remember(code, lang) { highlightCode(code, lang) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF23252F)),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 10.dp, end = 4.dp, top = 3.dp),
+        ) {
+            Text(
+                text = lang.ifBlank { "text" },
+                fontSize = 10.sp,
+                color = Color(0xFF9AA0B5),
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(code))
+                    copied = true
+                },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+            ) {
+                Text(
+                    text = if (copied) "已复制" else "复制",
+                    fontSize = 11.sp,
+                    color = if (copied) Color(0xFF7FD18B) else Color(0xFF9AA0B5),
+                )
+            }
+        }
+        Text(
+            text = highlighted,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+            color = Color(0xFFE6E6EE),
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        )
+    }
+}
+
+/* ---------------- 代码高亮（轻量、按语言给关键字） ---------------- */
+
+private val KEYWORDS_KOTLIN = setOf(
+    "fun", "val", "var", "if", "else", "when", "for", "while", "return", "class",
+    "object", "interface", "import", "package", "null", "true", "false", "try",
+    "catch", "finally", "throw", "in", "is", "as", "override", "private", "public",
+    "protected", "suspend", "data", "sealed", "companion", "init", "this", "super",
+)
+private val KEYWORDS_JAVA = setOf(
+    "public", "private", "protected", "class", "interface", "void", "int", "long",
+    "double", "float", "boolean", "char", "String", "if", "else", "for", "while",
+    "return", "new", "static", "final", "try", "catch", "finally", "throw", "import",
+    "package", "null", "true", "false", "extends", "implements", "this", "super",
+)
+private val KEYWORDS_PYTHON = setOf(
+    "def", "class", "import", "from", "return", "if", "elif", "else", "for", "while",
+    "in", "not", "and", "or", "None", "True", "False", "try", "except", "finally",
+    "with", "as", "lambda", "yield", "global", "pass", "raise", "break", "continue",
+)
+private val KEYWORDS_JS = setOf(
+    "function", "const", "let", "var", "if", "else", "for", "while", "return", "class",
+    "new", "import", "export", "from", "async", "await", "try", "catch", "throw",
+    "null", "undefined", "true", "false", "typeof", "instanceof", "this",
+)
+private val KEYWORDS_C = setOf(
+    "int", "char", "float", "double", "void", "if", "else", "for", "while", "return",
+    "struct", "class", "public", "private", "const", "static", "include", "define",
+    "namespace", "using", "new", "delete", "true", "false", "nullptr", "unsigned",
+)
+private val KEYWORDS_SHELL = setOf(
+    "if", "then", "else", "fi", "for", "while", "do", "done", "case", "esac",
+    "function", "echo", "exit", "export", "local", "return", "sudo", "cd", "rm",
+)
+private val KEYWORDS_SQL = setOf(
+    "select", "from", "where", "insert", "into", "values", "update", "set", "delete",
+    "join", "left", "right", "inner", "on", "group", "by", "order", "having", "limit",
+    "create", "table", "alter", "drop", "and", "or", "not", "null", "as", "distinct",
+)
+private val KEYWORDS_COMMON = KEYWORDS_KOTLIN + KEYWORDS_PYTHON + KEYWORDS_JS
+
+private val HASH_COMMENT_LANGS = setOf(
+    "py", "python", "sh", "bash", "shell", "zsh", "rb", "ruby", "yaml", "yml", "toml", "makefile",
+)
+
+private fun highlightCode(code: String, lang: String): AnnotatedString {
+    val key = lang.lowercase()
+    val keywords = when (key) {
+        "kt", "kts", "kotlin" -> KEYWORDS_KOTLIN
+        "java" -> KEYWORDS_JAVA
+        "py", "python" -> KEYWORDS_PYTHON
+        "js", "javascript", "ts", "typescript", "jsx", "tsx" -> KEYWORDS_JS
+        "c", "h", "cpp", "c++", "cc", "hpp" -> KEYWORDS_C
+        "sh", "bash", "shell", "zsh", "ps1", "powershell" -> KEYWORDS_SHELL
+        "sql" -> KEYWORDS_SQL
+        "json", "xml", "html", "css", "text", "" -> emptySet()
+        else -> KEYWORDS_COMMON
+    }
+    val commentPart = if (key in HASH_COMMENT_LANGS) "#[^\\n]*" else "(?://[^\\n]*|#[^\\n]*|/\\*[\\s\\S]*?\\*/)"
+    val keywordPart = if (keywords.isEmpty()) "" else "|\\b(?:" + keywords.joinToString("|") + ")\\b"
+    val token = Regex(
+        "(/\\*[\\s\\S]*?\\*/|$commentPart)" +
+            "|(\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*')" +
+            "|(\\b\\d+(?:\\.\\d+)?\\b)" +
+            keywordPart,
+    )
+
+    return buildAnnotatedString {
+        var last = 0
+        for (match in token.findAll(code)) {
+            if (match.range.first > last) append(code.substring(last, match.range.first))
+            val color = when {
+                match.groups[1] != null -> Color(0xFF7C8B99)
+                match.groups[2] != null -> Color(0xFFA8D08D)
+                match.groups[3] != null -> Color(0xFFE8B37A)
+                else -> Color(0xFFC792EA)
+            }
+            withStyle(SpanStyle(color = color)) { append(match.value) }
+            last = match.range.last + 1
+        }
+        if (last < code.length) append(code.substring(last))
+    }
+}
+
+@Composable
+private fun TableRow(    cells: List<String>,
     columns: Int,
     palette: DeckPalette,
     header: Boolean,

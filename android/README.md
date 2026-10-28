@@ -22,6 +22,7 @@
 - 「回到底部」悬浮按钮：往上翻历史时出现，点一下回到最新
 - 图片全屏查看：双指缩放、拖动、双击放大（用户图片 / 表情包 / AI 产物都支持）
 - 数学公式：JLaTeXMath 原生排版（分式、上下标、根号），失败时退回 Unicode 文本
+- 代码块：按语言高亮关键字/字符串/注释，右上角「复制」一键复制
 - 版本检查：问当前服务器的 `/static/app-version.json`，有新版弹窗提示
 - 主题：顶栏渐变、气泡、按钮、背景全部由身份卡的 `theme` 派生；换卡即换肤
 - **桌面图标也跟着身份卡变**：manifest 里挂了 8 个按色相区分的 activity-alias，
@@ -29,14 +30,17 @@
 
 ## 配置服务器
 
-后端地址**不在代码里**，两种方式任选：
+后端地址**不在代码里**，构建时注入，优先级：
 
-1. **构建时注入**（推荐自用）：在本机 `android/local.properties`（已被 gitignore）里写
-   ```properties
-   deck.baseUrl=https://your-server.example
-   ```
-   没写就用占位地址 `https://example.com`。
-2. **运行时改**：登录页底部「服务器：… 修改」，填自己的地址即可（只接受 https）。
+1. 环境变量 `DECK_BASE_URL`
+2. `android/local.properties` 里的 `deck.baseUrl`（这个文件已被 gitignore）
+3. 都没配就用占位地址 `https://example.com`
+
+```bash
+DECK_BASE_URL=https://your-server.example ./gradlew :app:assembleRelease
+```
+
+App 内不提供改服务器的入口，避免把具体部署信息带进界面。
 
 地址只支持 `https://`，配套的 `res/xml/network_security_config.xml` 也禁用了明文流量。
 

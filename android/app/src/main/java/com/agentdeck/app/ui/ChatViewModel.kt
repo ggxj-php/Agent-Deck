@@ -12,7 +12,6 @@ import com.agentdeck.app.data.ContextUsage
 import com.agentdeck.app.data.DeckApi
 import com.agentdeck.app.data.DeckException
 import com.agentdeck.app.data.Persona
-import com.agentdeck.app.data.ServerStore
 import com.agentdeck.app.data.SessionSummary
 import com.agentdeck.app.data.UpdateChecker
 import com.agentdeck.app.data.UploadedFile
@@ -208,19 +207,6 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             _state.update {
                 ChatUiState(booting = false, persona = it.persona, serverUrl = api.baseUrl)
             }
-        }
-    }
-
-    /**
-     * 换服务器：清掉登录态重新走一遍启动流程（不同服务器账号体系不通用）。
-     * 传空串表示恢复成构建时注入的默认地址。
-     */
-    fun changeServer(url: String) {
-        viewModelScope.launch {
-            ServerStore.override(DeckApp.instance, url)
-            api.logout()
-            _state.value = ChatUiState(booting = true, serverUrl = api.baseUrl)
-            boot()
         }
     }
 
