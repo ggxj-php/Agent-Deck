@@ -12,8 +12,8 @@ android {
         applicationId = "icu.taffy.deck"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         // 后端地址：只认 HTTPS，换服务器改这里
         buildConfigField("String", "BASE_URL", "\"https://example.com\"")

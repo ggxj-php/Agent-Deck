@@ -5,6 +5,7 @@ import icu.taffy.deck.data.Captcha
 import icu.taffy.deck.data.ContextUsage
 import icu.taffy.deck.data.Persona
 import icu.taffy.deck.data.SessionSummary
+import icu.taffy.deck.data.UpdateInfo
 import icu.taffy.deck.data.UploadedFile
 
 /** 一条助手消息里的内容块，顺序就是流式输出的顺序。 */
@@ -56,6 +57,7 @@ data class ChatUiState(
     val authMode: AuthMode = AuthMode.LOGIN,
     val captcha: Captcha? = null,
     val captchaLoading: Boolean = false,
+    val update: UpdateInfo? = null,
     val loggingIn: Boolean = false,
     val loginError: String? = null,
     val toast: String? = null,

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import icu.taffy.deck.BuildConfig
 import icu.taffy.deck.DeckApp
 import icu.taffy.deck.data.ChatEvent
 import icu.taffy.deck.data.ContextUsage
@@ -12,6 +13,7 @@ import icu.taffy.deck.data.DeckApi
 import icu.taffy.deck.data.DeckException
 import icu.taffy.deck.data.Persona
 import icu.taffy.deck.data.SessionSummary
+import icu.taffy.deck.data.UpdateChecker
 import icu.taffy.deck.data.UploadedFile
 import icu.taffy.deck.ui.theme.LauncherIcon
 import kotlinx.coroutines.Job
@@ -63,6 +65,7 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                     )
                 }
                 sessions.firstOrNull()?.let { openSession(it.id) }
+                checkForUpdate()
             } catch (error: DeckException) {
                 _state.update {
                     it.copy(
@@ -192,6 +195,7 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             )
         }
         sessions.firstOrNull()?.let { openSession(it.id) }
+        checkForUpdate()
     }
 
     fun logout() {
@@ -204,8 +208,24 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
         }
     }
 
-    fun changePassword(oldPassword: String, newPassword: String) {
-        if (oldPassword.isEmpty()) {
+    // ---------------- 版本检查 ----------------
+
+    fun checkForUpdate(manual: Boolean = false) {
+        viewModelScope.launch {
+            val info = runCatching { UpdateChecker.check() }.getOrNull()
+            if (info != null) {
+                _state.update { it.copy(update = info) }
+            } else if (manual) {
+                _state.update { it.copy(toast = "已经是最新版本 v${BuildConfig.VERSION_NAME}") }
+            }
+        }
+    }
+
+    fun dismissUpdate() {
+        _state.update { it.copy(update = null) }
+    }
+
+    fun changePassword(oldPassword: String, newPassword: String) {        if (oldPassword.isEmpty()) {
             _state.update { it.copy(toast = "旧密码得填") }
             return
         }

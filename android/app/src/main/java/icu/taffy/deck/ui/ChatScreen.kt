@@ -79,6 +79,7 @@ import coil.compose.AsyncImage
 import icu.taffy.deck.BuildConfig
 import icu.taffy.deck.data.SessionSummary
 import icu.taffy.deck.ui.components.Composer
+import icu.taffy.deck.ui.components.DownloadCenterScreen
 import icu.taffy.deck.ui.components.MessageItem
 import icu.taffy.deck.ui.components.ZoomableImageDialog
 import icu.taffy.deck.ui.theme.LocalPalette
@@ -99,6 +100,12 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
     var pendingDelete by remember { mutableStateOf<SessionSummary?>(null) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var previewUrl by remember { mutableStateOf<String?>(null) }
+    var showDownloads by remember { mutableStateOf(false) }
+
+    if (showDownloads) {
+        DownloadCenterScreen(palette) { showDownloads = false }
+        return
+    }
 
     LaunchedEffect(state.toast) {
         state.toast?.let { message ->
@@ -130,6 +137,8 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                     onDeleteSession = { pendingDelete = it },
                     onLogout = viewModel::logout,
                     onChangePassword = { showPasswordDialog = true },
+                    onOpenDownloads = { showDownloads = true },
+                    onCheckUpdate = { viewModel.checkForUpdate(manual = true) },
                 )
             }
         },
@@ -199,6 +208,55 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
     previewUrl?.let { url ->
         ZoomableImageDialog(model = url, description = null) { previewUrl = null }
     }
+
+    state.update?.let { info ->
+        UpdateDialog(info, palette, onDismiss = viewModel::dismissUpdate)
+    }
+}
+
+@Composable
+private fun UpdateDialog(
+    info: icu.taffy.deck.data.UpdateInfo,
+    palette: icu.taffy.deck.ui.theme.DeckPalette,
+    onDismiss: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = palette.bubble,
+        title = { Text("发现新版本 v${info.versionName}") },
+        text = {
+            Column {
+                Text(
+                    text = info.notes.ifBlank { "修复了一些问题，建议更新。" },
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    color = palette.ink,
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "更新包默认从 Gitee 下载",
+                    fontSize = 11.sp,
+                    color = palette.inkSoft,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val intent = android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse(info.url.ifBlank { icu.taffy.deck.data.UpdateChecker.GITEE_RELEASES }),
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    runCatching { context.startActivity(intent) }
+                    onDismiss()
+                },
+            ) { Text("去 Gitee 更新", color = palette.accent) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("稍后", color = palette.inkSoft) }
+        },
+    )
 }
 
 /** 改密码：旧密码 + 新密码 + 确认，和网页端「改密码」一致（至少 8 位）。 */
@@ -618,6 +676,8 @@ private fun DrawerContent(
     onDeleteSession: (SessionSummary) -> Unit,
     onLogout: () -> Unit,
     onChangePassword: () -> Unit,
+    onOpenDownloads: () -> Unit,
+    onCheckUpdate: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -701,9 +761,27 @@ private fun DrawerContent(
                 .fillMaxWidth()
                 .padding(top = 10.dp),
         ) {
+            DrawerFootButton("下载管理", palette, onOpenDownloads, Modifier.weight(1f))
+            DrawerFootButton("检查更新", palette, onCheckUpdate, Modifier.weight(1f))
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+        ) {
             DrawerFootButton("改密码", palette, onChangePassword, Modifier.weight(1f))
             DrawerFootButton("退出登录", palette, onLogout, Modifier.weight(1f))
         }
+        Text(
+            text = "Agent Deck v${BuildConfig.VERSION_NAME}",
+            fontSize = 10.sp,
+            color = palette.inkSoft.copy(alpha = 0.7f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
     }
 }
 

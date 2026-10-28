@@ -86,8 +86,9 @@ object HistoryParser {
         for (match in STICKER.findAll(segment)) {
             plain.append(segment, cursor, match.range.first)
             cursor = match.range.last + 1
-            val text = plain.toString()
-            if (text.isNotBlank()) blocks.add(Block.Text(text))
+            // 贴纸标记前后常带着换行，直接塞进 Text 会渲染成空段落（看起来一大片空白）
+            val text = plain.toString().trim('\n', ' ', '\t')
+            if (text.isNotEmpty()) blocks.add(Block.Text(text))
             plain = StringBuilder()
             // 历史里偶尔只有心情没有文件名（[sticker:laugh]），按心情从表情库随机挑一张；
             // 挑不到就干脆不显示，绝不能插一个空块占地方。
@@ -95,6 +96,7 @@ object HistoryParser {
             if (url.isNotBlank()) blocks.add(Block.Sticker(url))
         }
         plain.append(segment.substring(cursor))
-        if (plain.isNotBlank()) blocks.add(Block.Text(plain.toString()))
+        val tail = plain.toString().trim('\n', ' ', '\t')
+        if (tail.isNotEmpty()) blocks.add(Block.Text(tail))
     }
 }
