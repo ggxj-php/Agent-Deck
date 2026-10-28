@@ -1168,25 +1168,21 @@ def _dot_er(data):
         count = len(attrs)
         if not count:
             continue
-        radius = (1.15 + 0.09 * count) * PT
         for aidx, attr in enumerate(attrs):
             if isinstance(attr, dict):
                 aname = str(attr.get("name") or attr.get("label") or "")
                 pk = bool(attr.get("pk") or attr.get("primary"))
-                fk = bool(attr.get("fk") or attr.get("foreign"))
             else:
-                aname, pk, fk = str(attr), False, False
+                aname, pk = str(attr), False
             if not aname:
                 continue
-            mark = " PK" if pk else (" FK" if fk else "")
-            angle = -math.pi / 2 + (2 * math.pi * aidx / count)
-            ax = ex + radius * math.cos(angle)
-            ay = ey - radius * math.sin(angle) * 0.78
+            # 课本画法：主键属性加下划线，不写 PK/FK 这种英文缩写
             nid = f"a{i}_{aidx}"
-            lines.append(f'  {nid} [shape=ellipse, fixedsize=true, width=0.95, height=0.42, '
-                         f'pos="{ax:.3f},{ay:.3f}!", pin=true, style="filled", fillcolor="#ffffff", '
+            label = (f'<<u>{_esc(aname)}</u>>' if pk else f'"{_dot_label(aname)}"')
+            lines.append(f'  {nid} [shape=ellipse, width=0.95, height=0.42, '
+                         f'style="filled", fillcolor="#ffffff", '
                          f'color="#9aa0ae", fontcolor="#3d404a", fontsize=12, '
-                         f'label="{_dot_label(aname + mark)}"];')
+                         f'label={label}];')
             lines.append(f'  e{i} -- {nid} [arrowhead=none, color="#9aa0ae"];')
     lines.append("}")
     # neato 固定坐标渲染在大图上会画出毛边/虚线伪影，这里改让 dot 自己排：
