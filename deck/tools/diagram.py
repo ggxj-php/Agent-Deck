@@ -958,28 +958,34 @@ def _dot_graph_plain(data):
 
 
 def _dot_dataflow(data):
+    """DFD（按教材 / DeMarco 约定）：
+    外部实体 = 长方形，加工 = 椭圆形，数据存储 = 半开长方形（右侧开口）。
+    数据流用带箭头的线，箭头旁是流名。
+    """
     nodes = _norm_nodes(data.get("nodes"))
     edges = _norm_edges(data.get("edges"))
     if not nodes:
         return ""
-    # 注意：splines=ortho 会把连线绕成很远的大折线，边上的标签就跟着飘到奇怪位置，
-    # 看起来像「字全错位」。用 polyline 走短路径，标签自然贴着线。
     lines = [_dot_graph(rankdir="LR", splines="polyline", nodesep=0.6, ranksep=0.95)]
     for n in nodes:
         k = _dfd_kind(n)
-        attrs = {"label": _dot_label(n["label"])}
         if k == "entity":
-            attrs.update({"shape": "box", "style": "rounded,filled",
-                          "fillcolor": "#dbe9ff", "color": "#3c73c4",
-                          "fontcolor": "#1d4076"})
+            attrs = {"shape": "box", "style": "filled",
+                     "fillcolor": "#dbe9ff", "color": "#3c73c4",
+                     "fontcolor": "#1d4076", "label": _dot_label(n["label"])}
         elif k == "store":
-            attrs.update({"shape": "folder", "style": "filled",
-                          "fillcolor": "#eceef2", "color": "#a0a4b0",
-                          "fontcolor": "#3d404a"})
+            # 半开长方形：HTML label 的 cell sides 只画上/下/左三条边，右边留开口。
+            # 注意 HTML label 不能加引号（_dot_attr 会包 "..."，会把 table 标签写坏），
+            # 所以这条直接手写。
+            label = ('<<table border="0" cellborder="0" cellspacing="0" cellpadding="8">'
+                     f'<tr><td sides="LTB" bgcolor="#eef1f6" color="#8a90a0">'
+                     f'{_esc(n["label"])}</td></tr></table>>')
+            lines.append(f'  "n_{_dot_label(n["id"])}" [shape=none, margin=0, label={label}];')
+            continue
         else:
-            attrs.update({"shape": "box", "style": "rounded,filled",
-                          "fillcolor": "#d8f3e0", "color": "#3f9a63",
-                          "fontcolor": "#1d5a36"})
+            attrs = {"shape": "ellipse", "style": "filled",
+                     "fillcolor": "#d8f3e0", "color": "#3f9a63",
+                     "fontcolor": "#1d5a36", "label": _dot_label(n["label"])}
         lines.append(f'  "n_{_dot_label(n["id"])}" [{_dot_attr(attrs)}];')
     for a, b, label in edges:
         attrs = {"label": _dot_label(label)} if label else {}
@@ -989,51 +995,58 @@ def _dot_dataflow(data):
 
 
 def _dot_er(data):
+    """ER 图（经典 Chen 画法，对应课本 / 黑板那套）：
+    实体 = 长方形，关系 = 菱形，属性 = 椭圆形；属性用细线连到实体，
+    关系用线连到实体，边上标 1:1 / 1:N / N:M 的基数。
+    """
     entities = data.get("entities") or data.get("tables") or []
     relations = data.get("relations") or data.get("links") or []
     if not entities:
         return ""
-    lines = [_dot_graph(rankdir="LR", splines="spline", nodesep=0.6, ranksep=0.9)]
+    lines = [_dot_graph(rankdir="LR", splines="polyline", nodesep=0.5, ranksep=0.9)]
     names = []
-    for ent in entities:
+    for ei, ent in enumerate(entities):
         if isinstance(ent, dict):
             name = str(ent.get("name") or ent.get("label") or "")
             attrs_list = ent.get("attributes") or ent.get("fields") or []
         else:
             name, attrs_list = str(ent), []
         names.append(name)
-        rows = ""
-        for attr in attrs_list[:12]:
+        nid = f"e{ei}"
+        lines.append(f'  {nid} [shape=box, style="filled", fillcolor="#dbe9ff", '
+                     f'color="#3c73c4", fontcolor="#1d4076", label="{_dot_label(name)}"];')
+        for ai, attr in enumerate(attrs_list[:10]):
             if isinstance(attr, dict):
                 aname = str(attr.get("name") or attr.get("label") or "")
-                mark = "🔑 " if (attr.get("pk") or attr.get("primary")) else \
-                       ("FK " if (attr.get("fk") or attr.get("foreign")) else "")
+                pk = bool(attr.get("pk") or attr.get("primary"))
+                fk = bool(attr.get("fk") or attr.get("foreign"))
             else:
-                aname, mark = str(attr), ""
-            rows += f'<tr><td align="left" balign="left">{_esc(mark + aname)}</td></tr>'
-        if not rows:
-            rows = '<tr><td align="left">（暂无属性）</td></tr>'
-        label = (f'<<table border="0" cellborder="1" cellspacing="0" cellpadding="6" '
-                 f'bgcolor="white"><tr><td bgcolor="#dbe9ff"><b>{_esc(name)}</b></td></tr>'
-                 f'{rows}</table>>')
-        lines.append(f'  e{len(names) - 1} [shape=none, margin=0, label={label}];')
+                aname, pk, fk = str(attr), False, False
+            mark = "PK " if pk else ("FK " if fk else "")
+            aid = f"a{ei}_{ai}"
+            lines.append(f'  {aid} [shape=ellipse, style="filled", fillcolor="#ffffff", '
+                         f'color="#9aa0ae", fontcolor="#3d404a", fontsize=12, '
+                         f'label="{_dot_label(mark + aname)}"];')
+            lines.append(f'  {nid} -> {aid} [arrowhead=none, color="#9aa0ae"];')
     idx = {name: f"e{i}" for i, name in enumerate(names)}
-    for rel in relations:
+    for ri, rel in enumerate(relations):
         if not isinstance(rel, dict):
             continue
         a, b = str(rel.get("from")), str(rel.get("to"))
         if a not in idx or b not in idx:
             continue
-        attrs = {}
-        if rel.get("label"):
-            attrs["label"] = _dot_label(rel.get("label"))
+        rid = f"r{ri}"
+        rlabel = str(rel.get("label") or rel.get("name") or "")
+        lines.append(f'  {rid} [shape=diamond, style="filled", fillcolor="#ffefc9", '
+                     f'color="#c39327", fontcolor="#6b4d08", label="{_dot_label(rlabel)}"];')
         card = str(rel.get("cardinality") or "").strip()
+        tail = head = ""
         if ":" in card:
             tail, head = [x.strip() for x in card.split(":", 1)]
-            attrs["taillabel"] = tail
-            attrs["headlabel"] = head
-            attrs["labeldistance"] = "1.7"
-        lines.append(f'  {idx[a]} -> {idx[b]} [{_dot_attr(attrs)}];')
+        lines.append(f'  {idx[a]} -> {rid} [arrowhead=none, taillabel="{tail}", '
+                     f'labeldistance="2", fontcolor="#6b4d08"];')
+        lines.append(f'  {idx[b]} -> {rid} [arrowhead=none, taillabel="{head}", '
+                     f'labeldistance="2", fontcolor="#6b4d08"];')
     lines.append("}")
     return "\n".join(lines)
 
@@ -1208,7 +1221,8 @@ SPECS = [
                 "  sequence: {actors:[\"客户端\",\"服务端\"], messages:[{from,to,text,dashed?}]}\n"
                 "  chart: {kind:bar|line|pie, labels:[...], values:[...]}\n"
                 "  timeline: {items:[{time,text}]}\n"
-                "  er: {entities:[{name, attributes:[{name, pk?, fk?}]}], "
+                "  er: （经典 Chen 画法：实体=矩形、关系=菱形、属性=椭圆）"
+                "{entities:[{name, attributes:[{name, pk?, fk?}]}], "
                 "relations:[{from,to,label?,cardinality?}]}（ER 图，cardinality 写 1:1 / 1:N / N:M）\n"
                 "一个图最多 60 个节点、40 字以内的标签，节点太多就拆成两张图。"
                 "title 写一句图名（比如「红黑树插入后结构」）。"
