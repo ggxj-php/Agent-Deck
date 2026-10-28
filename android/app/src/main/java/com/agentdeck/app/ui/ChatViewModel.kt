@@ -408,7 +408,8 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
     }
 
     private fun finishTurn(sessionId: String) {
-        // 这一轮结束了，排队的表情包全部放出来
+        // 这一轮结束了：先把攒着的正文落盘，再放掉排队的表情包
+        flushContent()
         flushStickers(force = true)
         updateLastAssistant { it.copy(streaming = false) }
         _state.update { it.copy(busy = false) }
@@ -421,6 +422,36 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             }
         }
         viewModelScope.launch { /* 让最后一条正文的 WebView 有机会完成渲染 */ }
+    }
+
+    /** 流式正文先攒 60ms 再合并成一次更新，别让每个 token 都触发一次整段重排。 */
+    private val pendingContent = StringBuilder()
+    private var contentJob: kotlinx.coroutines.Job? = null
+
+    private fun appendContentChunk(text: String) {
+        pendingContent.append(text)
+        if (contentJob?.isActive == true) return
+        contentJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(60)
+            flushContent()
+        }
+    }
+
+    private fun flushContent() {
+        if (pendingContent.isEmpty()) return
+        val text = pendingContent.toString()
+        pendingContent.setLength(0)
+        updateLastAssistant { msg ->
+            val blocks = settleThinking(msg.blocks).toMutableList()
+            val last = blocks.lastOrNull()
+            if (last is Block.Text) {
+                blocks[blocks.size - 1] = last.copy(markdown = last.markdown + text)
+            } else {
+                blocks.add(Block.Text(text))
+            }
+            msg.copy(blocks = blocks)
+        }
+        flushStickers()
     }
 
     /**
@@ -489,6 +520,9 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
         // 和网页端 handleEvent() 一样：除 sticker 外，任何事件都先撤掉「思考中」占位；
         // 表情包不算，因为模型常先甩一张图再去跑十几秒的工具。
         if (event !is ChatEvent.Sticker) clearWaiting()
+        // 正文是攒着批量刷的（和网页端 RENDER_MIN_MS 一个意思），
+        // 其它事件到来前先落盘，避免工具卡片/表情包插到文字前面
+        if (event !is ChatEvent.Content) flushContent()
 
         when (event) {
             is ChatEvent.Thinking -> updateLastAssistant { msg ->
@@ -503,17 +537,7 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             }
 
             is ChatEvent.Content -> {
-                updateLastAssistant { msg ->
-                    val blocks = settleThinking(msg.blocks).toMutableList()
-                    val last = blocks.lastOrNull()
-                    if (last is Block.Text) {
-                        blocks[blocks.size - 1] = last.copy(markdown = last.markdown + event.text)
-                    } else {
-                        blocks.add(Block.Text(event.text))
-                    }
-                    msg.copy(blocks = blocks)
-                }
-                flushStickers()
+                appendContentChunk(event.text)
             }
 
             is ChatEvent.ToolPending -> setWaiting("正在准备 ${event.name}…")

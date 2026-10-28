@@ -54,12 +54,15 @@ object HistoryParser {
                     // 代码块范围先算出来：代码里的 [sticker:...] / [[artifact:...]] 只是示例文本，
                     // 不能当成真标记拆出去（否则会把代码块劈成两半，正文也会被带进代码块）
                     val codeRanges = codeRanges(item.text)
+                    // 历史里的表情包标记经常卡在句子中间，先挪到最近的句末/换行，
+                    // 和网页端 snapStickersToBoundaries 一个规则（代码块里的标记不动）
+                    val rawText = if (codeRanges.isEmpty()) snapStickersToBoundaries(item.text) else item.text
                     var cursor = 0
-                    for (match in ARTIFACT.findAll(item.text)) {
+                    for (match in ARTIFACT.findAll(rawText)) {
                         if (codeRanges.any { match.range.first in it }) continue
                         appendAssistantSegment(
                             blocks,
-                            item.text.substring(cursor, match.range.first),
+                            rawText.substring(cursor, match.range.first),
                             stickerUrl,
                             codeRanges,
                             cursor,
@@ -69,7 +72,7 @@ object HistoryParser {
                     }
                     appendAssistantSegment(
                         blocks,
-                        item.text.substring(cursor),
+                        rawText.substring(cursor),
                         stickerUrl,
                         codeRanges,
                         cursor,
@@ -119,6 +122,42 @@ object HistoryParser {
         val tail = plain.toString().trim('\n', ' ', '\t')
         if (tail.isNotEmpty()) blocks.add(Block.Text(tail))
     }
+
+
+/**
+ * 把表情包标记挪到最近的句末标点/换行之后：块级表情包插在句子中间会把一句话劈开。
+ * 规则和网页端 snapStickersToBoundaries 一致，找不到边界的挪到这段最后。
+ */
+internal fun snapStickersToBoundaries(text: String): String {
+    val marks = STICKER.findAll(text).toList()
+    if (marks.isEmpty()) return text
+    val out = StringBuilder()
+    val trailing = StringBuilder()
+    var cursor = 0
+    for (mark in marks) {
+        if (mark.range.first < cursor) continue
+        out.append(text, cursor, mark.range.first)
+        var cut = -1
+        var i = mark.range.last + 1
+        while (i < text.length) {
+            val ch = text[i]
+            if (ch == '\n' || "。！？!?…；;".contains(ch)) {
+                cut = i + 1
+                break
+            }
+            i++
+        }
+        if (cut == -1) {
+            trailing.append(mark.value)
+            cursor = mark.range.last + 1
+        } else {
+            out.append(text, mark.range.last + 1, cut).append(mark.value)
+            cursor = cut
+        }
+    }
+    out.append(text.substring(cursor)).append(trailing)
+    return out.toString()
+}
 
     /** 找出 markdown 代码块（``` / ~~~）在整段文本里的字符范围。 */
     private fun codeRanges(text: String): List<IntRange> {

@@ -1,4 +1,6 @@
 package com.agentdeck.app.ui.components
+import androidx.compose.ui.graphics.asImageBitmap
+
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -164,14 +166,29 @@ fun Composer(
                                     )
                                 }
                             } else {
-                                AsyncImage(
-                                    model = image,
-                                    contentDescription = "待发送的图片",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(64.dp)
-                                        .clip(RoundedCornerShape(14.dp)),
-                                )
+                                // 选中的图是 data URI，Coil 解不了，先自己解码成 Bitmap 再画
+                                val localBitmap = remember(image) {
+                                    image?.let { decodeDataUri(it) }
+                                }
+                                if (localBitmap != null) {
+                                    androidx.compose.foundation.Image(
+                                        bitmap = localBitmap.asImageBitmap(),
+                                        contentDescription = "待发送的图片",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(64.dp)
+                                            .clip(RoundedCornerShape(14.dp)),
+                                    )
+                                } else {
+                                    AsyncImage(
+                                        model = image,
+                                        contentDescription = "待发送的图片",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(64.dp)
+                                            .clip(RoundedCornerShape(14.dp)),
+                                    )
+                                }
                             }
                         }
                         Spacer(Modifier.width(10.dp))
