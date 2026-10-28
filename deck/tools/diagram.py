@@ -1270,22 +1270,16 @@ def _dot_state(data):
             continue
         if st["name"] in final_ids or kind in ("final", "end", "终态", "终了"):
             lines.append(f'  {nid} [shape=doublecircle, width=0.3, height=0.3, '
-                         f'style="filled", fillcolor="#ffffff", color="#1f2023", '
+                         f'style="filled", fillcolor="#ffe066", color="#1f2023", '
                          f'label=""];')
             continue
-        # 状态框固定三层（课本图 3-8）：上=状态名，中=状态变量名和值，下=活动表。
-        # 中间层、下面层是可选内容，没有内容也保留空行，保证所有状态框长得一致。
+        # 状态框按课本/课件标准画法：上=状态名（必有），中=状态变量，下=活动表。
+        # 中间层和下层是可选内容，有就画、没有就不画（课件里「新建」就只有名字一层）。
         variable_lines = _state_lines(st["variables"])
         activity_lines = _state_lines(st["activities"])
         rows = [f'<tr><td><b>{_esc(st["name"])}</b></td></tr>']
-        if variable_lines:
-            rows.extend(f'<tr><td>{_esc(line)}</td></tr>' for line in variable_lines)
-        else:
-            rows.append('<tr><td> </td></tr>')
-        if activity_lines:
-            rows.extend(f'<tr><td>{_esc(line)}</td></tr>' for line in activity_lines)
-        else:
-            rows.append('<tr><td> </td></tr>')
+        rows.extend(f'<tr><td>{_esc(line)}</td></tr>' for line in variable_lines)
+        rows.extend(f'<tr><td>{_esc(line)}</td></tr>' for line in activity_lines)
         # 所有状态用同一种框：圆角矩形 + 黑边；有变量/活动表就分栏
         label = ('<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" '
                  'bgcolor="#ffffff">' + "".join(rows) + "</table>>")

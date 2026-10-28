@@ -326,8 +326,8 @@ CORE_PROMPT = r"""【共享规矩 · 所有身份卡都适用】
      states: [{name, variables?, activities?}],
      transitions: [{from, to, event}]}
     符号会按课本自动画：初始状态=实心圆点+指向起始状态的箭头、终态=同心圆、
-    中间状态=圆角矩形，**固定上中下三层**：上层状态名、中层状态变量（如 timer=0）、
-    下层活动表（如 do/timer++）；中下层没内容也要留空行，保证所有状态框一致，
+    中间状态=圆角矩形，按课件标准分栏：第一层状态名（必有）、第二层状态变量
+    （如 timer=0）、第三层活动表（如 do/增加timer）；后两层有内容才画，没有就不画，
     箭头上的文字是事件表达式。
     - 活动表按「事件名(参数表)/动作表达式」写，常用事件名 entry / exit / do，
       例：activities: [{"event": "do", "action": "timer++"}] 或 ["entry/置timer=0", "do/响铃"]
