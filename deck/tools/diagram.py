@@ -841,6 +841,55 @@ _DOT_BIN = shutil.which("dot")
 _DOT_LOCK = threading.Lock()
 
 
+def _inject_open_rects(svg, dot_src, prefix="_store_"):
+    """在数据存储的文字外补一个「右侧开口的长方形」。
+
+    graphviz 2.43 不支持 HTML label 的 sides（试过只画三边，结果还是整框），
+    所以先把存储节点画成纯文字，再拿 dot -Tplain 的坐标自己补线：
+    画上、下、左三条边，右边留开口——就是课本里数据存储那个符号。
+    """
+    if not svg or not _DOT_BIN:
+        return svg
+    try:
+        with _DOT_LOCK:
+            plain = subprocess.run([_DOT_BIN, "-Tplain"], input=dot_src.encode("utf-8"),
+                                   capture_output=True, timeout=8)
+        if plain.returncode != 0:
+            return svg
+    except Exception:                        # noqa: BLE001
+        return svg
+    lines = plain.stdout.decode("utf-8", "ignore").splitlines()
+    height = 0.0
+    boxes = []
+    for line in lines:
+        parts = line.split(" ")
+        if parts[0] == "graph" and len(parts) >= 4:
+            try:
+                height = float(parts[3])
+            except ValueError:
+                continue
+        elif parts[0] == "node" and len(parts) >= 6 and parts[1].startswith(prefix):
+            try:
+                x, y, w, h = (float(v) for v in parts[2:6])
+            except ValueError:
+                continue
+            boxes.append((x, y, w, h))
+    if not boxes:
+        return svg
+    parts_svg = []
+    for x, y, w, h in boxes:
+        cx, cy = x * 72.0, (height - y) * 72.0
+        bw, bh = w * 72.0 + 26.0, h * 72.0 + 20.0
+        left, top, bottom = cx - bw / 2, cy - bh / 2, cy + bh / 2
+        right = cx + bw / 2
+        parts_svg.append(
+            f'<g class="dfd-store"><path d="M{left:.1f},{top:.1f} H{right:.1f} '
+            f'M{left:.1f},{top:.1f} V{bottom:.1f} M{left:.1f},{bottom:.1f} H{right:.1f}" '
+            'fill="none" stroke="#4b5563" stroke-width="1.8"/></g>'
+        )
+    return svg.replace("</svg>", "".join(parts_svg) + "</svg>", 1)
+
+
 def _dot_svg(dot_src, timeout=8, engine="dot"):
     """把 DOT 交给 graphviz 生成响应式 SVG（失败返回空串，调用方退回内置布局）。
 
@@ -958,47 +1007,48 @@ def _dot_graph_plain(data):
         attrs = {"label": _dot_label(n["label"]),
                  "shape": "ellipse" if n.get("kind") == "circle" else "box"}
         attrs.update(_dot_colors(n.get("color")))
-        lines.append(f'  "n_{_dot_label(n["id"])}" [{_dot_attr(attrs)}];')
+        lines.append(f'  {name_of[n["id"]]} [{_dot_attr(attrs)}];')
     for a, b, label in edges:
         attrs = {"label": _dot_label(label)} if label else {}
-        lines.append(f'  "n_{_dot_label(a)}" -> "n_{_dot_label(b)}" [{_dot_attr(attrs)}];')
+        lines.append(f'  {name_of.get(a, "n_" + _dot_label(a))} -> '
+                     f'{name_of.get(b, "n_" + _dot_label(b))} [{_dot_attr(attrs)}];')
     lines.append("}")
     return "\n".join(lines)
 
 
 def _dot_dataflow(data):
-    """DFD（按教材 / DeMarco 约定）：
-    外部实体 = 长方形，加工 = 椭圆形，数据存储 = 半开长方形（右侧开口）。
-    数据流用带箭头的线，箭头旁是流名。
+    """DFD（教材画法）：外部实体=长方形，加工=椭圆形，数据存储=半开长方形。
+
+    数据存储的框不交给 graphviz（2.43 的 HTML label sides 不生效），
+    这里只画文字节点，渲染后由 _inject_open_rects 补「右侧开口」的矩形。
     """
     nodes = _norm_nodes(data.get("nodes"))
     edges = _norm_edges(data.get("edges"))
     if not nodes:
         return ""
     lines = [_dot_graph(rankdir="LR", splines="polyline", nodesep=0.6, ranksep=0.95)]
+    name_of = {}
     for n in nodes:
         k = _dfd_kind(n)
+        name_of[n["id"]] = (f"_store_{_dot_label(n['id'])}" if k == "store"
+                            else f"n_{_dot_label(n['id'])}")
         if k == "entity":
-            attrs = {"shape": "box", "style": "filled",
-                     "fillcolor": "#dbe9ff", "color": "#3c73c4",
-                     "fontcolor": "#1d4076", "label": _dot_label(n["label"])}
+            attrs = {"shape": "box", "style": "filled", "fillcolor": "#dbe9ff",
+                     "color": "#3c73c4", "fontcolor": "#1d4076",
+                     "label": _dot_label(n["label"])}
         elif k == "store":
-            # 半开长方形：HTML label 的 cell sides 只画上/下/左三条边，右边留开口。
-            # 注意 HTML label 不能加引号（_dot_attr 会包 "..."，会把 table 标签写坏），
-            # 所以这条直接手写。
-            label = ('<<table border="0" cellborder="0" cellspacing="0" cellpadding="8">'
-                     f'<tr><td sides="LTB" bgcolor="#eef1f6" color="#8a90a0">'
-                     f'{_esc(n["label"])}</td></tr></table>>')
-            lines.append(f'  "n_{_dot_label(n["id"])}" [shape=none, margin=0, label={label}];')
-            continue
+            attrs = {"shape": "none", "margin": "0.30,0.20", "fontsize": 13,
+                     "fontcolor": "#33333d", "label": _dot_label(n["label"])}
         else:
-            attrs = {"shape": "ellipse", "style": "filled",
-                     "fillcolor": "#d8f3e0", "color": "#3f9a63",
-                     "fontcolor": "#1d5a36", "label": _dot_label(n["label"])}
-        lines.append(f'  "n_{_dot_label(n["id"])}" [{_dot_attr(attrs)}];')
+            attrs = {"shape": "ellipse", "style": "filled", "fillcolor": "#d8f3e0",
+                     "color": "#3f9a63", "fontcolor": "#1d5a36",
+                     "label": _dot_label(n["label"])}
+        lines.append(f'  {name_of[n["id"]]} [{_dot_attr(attrs)}];')
     for a, b, label in edges:
         attrs = {"label": _dot_label(label)} if label else {}
-        lines.append(f'  "n_{_dot_label(a)}" -> "n_{_dot_label(b)}" [{_dot_attr(attrs)}];')
+        na = name_of.get(a, f'n_{_dot_label(a)}')
+        nb = name_of.get(b, f'n_{_dot_label(b)}')
+        lines.append(f'  {na} -> {nb} [{_dot_attr(attrs)}];')
     lines.append("}")
     return "\n".join(lines)
 
@@ -1269,6 +1319,8 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
             dot_src = builder(data)
             if dot_src:
                 svg = _dot_svg(dot_src)
+                if svg and key == "dataflow":
+                    svg = _inject_open_rects(svg, dot_src)
         except Exception:                # noqa: BLE001
             svg = ""
     if not svg:
