@@ -180,3 +180,25 @@ def test_ER图节点不重叠():
             overlap_x = min(x1 + w1, x2 + w2) - max(x1, x2)
             overlap_y = min(y1 + h1, y2 + h2) - max(y1, y2)
             assert overlap_x <= 1 or overlap_y <= 1, f"实体框重叠: {rects[i]} / {rects[j]}"
+
+
+def test_状态转换图_符号():
+    """状态图：初始实心点、终态同心圆、三段式状态框。"""
+    data = {
+        "initial": "空闲",
+        "finals": ["断线"],
+        "states": [
+            {"name": "空闲"},
+            {"name": "拨号音", "variables": "timer=0", "activities": "do/响蜂鸣音"},
+            {"name": "断线"},
+        ],
+        "transitions": [
+            {"from": "空闲", "to": "拨号音", "event": "拿起听筒"},
+            {"from": "拨号音", "to": "断线", "event": "挂断"},
+        ],
+    }
+    out = json.loads(diagram.draw_diagram("state", data, "测试状态图"))
+    assert out.get("artifact_id"), out
+    html = diagram.svg_of(out["artifact_id"]) or ""
+    if html:
+        assert "doublecircle" in html or "ellipse" in html

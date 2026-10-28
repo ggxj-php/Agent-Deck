@@ -1195,6 +1195,93 @@ def _dot_er(data):
     return "\n".join(out)
 
 
+def _dot_state(data):
+    """状态转换图（课本画法）：
+    - 初始状态：实心小圆点，引出一条箭头指向第一个状态；
+    - 终态：同心圆（graphviz 的 doublecircle）；
+    - 中间状态：圆角矩形，按「状态名 / 状态变量 / 活动表」分三栏（后两栏可省略）；
+    - 箭头上的文字是事件表达式。
+    """
+    raw_states = data.get("states") or data.get("nodes") or []
+    if not raw_states:
+        return ""
+    states = []
+    for item in raw_states:
+        if isinstance(item, dict):
+            name = str(item.get("name") or item.get("label") or "").strip()
+            if not name:
+                continue
+            states.append({
+                "name": name,
+                "variables": item.get("variables") or item.get("vars") or item.get("value") or "",
+                "activities": item.get("activities") or item.get("do") or item.get("action") or "",
+                "kind": str(item.get("kind") or "").lower(),
+            })
+        else:
+            name = str(item).strip()
+            if name:
+                states.append({"name": name, "variables": "", "activities": "", "kind": ""})
+    if not states:
+        return ""
+    finals = data.get("finals") or data.get("final") or data.get("final_states") or []
+    if isinstance(finals, str):
+        finals = [finals]
+    final_ids = {str(f) for f in finals}
+    initial = str(data.get("initial") or "").strip()
+    if not initial:
+        initial = states[0]["name"]
+
+    lines = [_dot_graph(rankdir="TB", splines="polyline", nodesep=0.55, ranksep=0.75)]
+    ids = {}
+    for i, st in enumerate(states):
+        nid = f"s{i}"
+        ids[st["name"]] = nid
+        kind = st["kind"]
+        if kind in ("initial", "start", "初始", "起点") or st["name"] in ("初始", "初态", "起点"):
+            lines.append(f'  {nid} [shape=point, width=0.18, height=0.18, fixedsize=true, '
+                         f'style="filled", fillcolor="#1f2023", color="#1f2023", label=""];')
+            continue
+        if st["name"] in final_ids or kind in ("final", "end", "终态", "终了"):
+            lines.append(f'  {nid} [shape=doublecircle, width=0.3, height=0.3, '
+                         f'style="filled", fillcolor="#ffffff", color="#1f2023", '
+                         f'label=""];')
+            continue
+        rows = [f'<tr><td><b>{_esc(st["name"])}</b></td></tr>']
+        if st["variables"]:
+            rows.append(f'<tr><td>{_esc(st["variables"])}</td></tr>')
+        if st["activities"]:
+            rows.append(f'<tr><td>{_esc(st["activities"])}</td></tr>')
+        if len(rows) > 1:
+            label = ('<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" '
+                     'bgcolor="#ffffff">' + "".join(rows) + "</table>>")
+            lines.append(f'  {nid} [shape=box, style="rounded", fillcolor="#ffffff", '
+                         f'color="#1f2023", label={label}];')
+        else:
+            lines.append(f'  {nid} [shape=box, style="rounded,filled", fillcolor="#eef4ff", '
+                         f'color="#3c73c4", fontcolor="#1d4076", '
+                         f'label="{_dot_label(st["name"])}"];')
+    # 初始事件箭头
+    if initial in ids:
+        lines.append('  __start__ [shape=point, width=0.18, height=0.18, fixedsize=true, '
+                     'style="filled", fillcolor="#1f2023", color="#1f2023", label=""];')
+        lines.append(f'  __start__ -> {ids[initial]} [label="初始事件"];')
+    for tr in data.get("transitions") or data.get("edges") or []:
+        if isinstance(tr, dict):
+            a = str(tr.get("from") or tr.get("source") or "")
+            b = str(tr.get("to") or tr.get("target") or "")
+            ev = tr.get("event") or tr.get("label") or ""
+        else:
+            seq = list(tr) if isinstance(tr, (list, tuple)) else []
+            if len(seq) < 2:
+                continue
+            a, b = str(seq[0]), str(seq[1])
+            ev = seq[2] if len(seq) > 2 else ""
+        if a in ids and b in ids:
+            lines.append(f'  {ids[a]} -> {ids[b]} [label="{_dot_label(ev)}"];')
+    lines.append("}")
+    return "\n".join(lines)
+
+
 def _dot_arch(data):
     layers = data.get("layers") or []
     if not layers:
@@ -1235,6 +1322,7 @@ GRAPHVIZ_BUILDERS = {
     "dataflow": _dot_dataflow,
     "er": _dot_er,
     "arch": _dot_arch,
+    "state": _dot_state,
 }
 
 
@@ -1251,6 +1339,7 @@ DRAWERS = {
     "chart": draw_chart,
     "timeline": draw_timeline,
     "er": draw_er,
+    "state": draw_flow,
     "erd": draw_er,
 }
 
@@ -1264,6 +1353,8 @@ KIND_ALIAS = {
     "图表": "chart", "chart": "chart", "柱状图": "chart", "折线图": "chart", "饼图": "chart",
     "时间线": "timeline", "timeline": "timeline",
     "er图": "er", "er": "er", "erd": "er", "实体关系图": "er", "ER图": "er",
+    "状态图": "state", "状态转换图": "state", "状态机": "state", "state": "state",
+    "statechart": "state", "stm": "state", "fsm": "state",
 }
 
 
@@ -1285,7 +1376,7 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
         return json.dumps({
             "error": f"不认识的图类型「{kind}」。可选：tree（树）/ flow（流程图）/ graph（关系图）/ "
                      f"dataflow（数据流图）/ arch（架构图）/ sequence（时序图）/ chart（图表）/ "
-                     f"timeline（时间线）/ er（ER 图）。要自由创意排版就用 render_html。"
+                     f"timeline（时间线）/ er（ER 图）/ state（状态转换图）。要自由创意排版就用 render_html。"
         }, ensure_ascii=False)
     if isinstance(data, str):
         try:
@@ -1379,7 +1470,7 @@ SPECS = [
                     "type": {
                         "type": "string",
                         "description": "图类型：tree / flow / graph / dataflow / arch / "
-                                       "sequence / chart / timeline / er",
+                                       "sequence / chart / timeline / er / state（状态转换图）",
                     },
                     "title": {"type": "string", "description": "图名，可选"},
                     "data": {
