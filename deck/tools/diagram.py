@@ -903,7 +903,7 @@ def _fix_hr_lines(svg):
     return pattern.sub(repl, svg)
 
 
-def _dot_svg(dot_src, timeout=8, engine="dot"):
+def _dot_svg(dot_src, timeout=15, engine="dot"):
     """把 DOT 交给 graphviz 生成响应式 SVG（失败返回空串，调用方退回内置布局）。
 
     engine 默认 dot；ER 图的属性布点要用 neato 才会按指定坐标画。
@@ -921,12 +921,17 @@ def _dot_svg(dot_src, timeout=8, engine="dot"):
             proc = subprocess.run([binary, "-Tsvg", *args], input=dot_src.encode("utf-8"),
                                   capture_output=True, timeout=timeout)
         if proc.returncode != 0:
+            err = proc.stderr.decode("utf-8", "ignore")[:300]
+            print(f"[diagram] graphviz 报错（rc={proc.returncode}）：{err}", flush=True)
             return ""
         svg = proc.stdout.decode("utf-8", "ignore")
-    except Exception:                        # noqa: BLE001
+    except Exception as exc:                 # noqa: BLE001
+        _LAST_DOT_ERROR = f"{type(exc).__name__}: {exc}"
+        print(f"[diagram] graphviz 失败：{_LAST_DOT_ERROR}", flush=True)
         return ""
     start = svg.find("<svg")
     if start < 0:
+        print("[diagram] graphviz 输出里没有 <svg>", flush=True)
         return ""
     svg = svg[start:]
     head_end = svg.find(">")
@@ -1499,10 +1504,25 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
                     svg = _fix_hr_lines(svg)
                 if svg and key == "dataflow":
                     svg = _inject_open_rects(svg, dot_src)
-        except Exception:                # noqa: BLE001
+            if not svg:
+                # 偶发失败（比如 dot 恰好超时）再给一次机会，别直接退回旧画法
+                print(f"[diagram] {key} 第一次渲染失败，重试一次", flush=True)
+                svg = _dot_svg(dot_src, timeout=20)
+                if svg and key == "state":
+                    svg = _fix_hr_lines(svg)
+                if svg and key == "dataflow":
+                    svg = _inject_open_rects(svg, dot_src)
+        except Exception as exc:         # noqa: BLE001
+            print(f"[diagram] {key} 构建 DOT 失败：{type(exc).__name__}: {exc}", flush=True)
             svg = ""
+    if not svg and key in ("er", "state", "dataflow"):
+        # 这几类退回旧画法会画成完全不同的样式（比如 ER 变成表格），不如直接报错让模型重画
+        return json.dumps({
+            "error": "graphviz 渲染失败（可能超时），请重新调用一次 draw_diagram；"
+                     "如果连续失败，把数据精简一点再试。",
+        }, ensure_ascii=False)
     if not svg:
-        # 没装 graphviz（或它出错）时退回内置简易布局，功能不丢
+        # 其它类型退回内置简易布局，功能不丢
         try:
             svg = drawer(data, "")      # 图名由卡片标题显示，SVG 里不再重复画
         except ValueError as exc:
