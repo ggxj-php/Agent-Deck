@@ -1286,11 +1286,17 @@ def _dot_state(data):
                  'bgcolor="#ffffff">' + "".join(rows) + "</table>>")
         lines.append(f'  {nid} [shape=box, style="rounded", fillcolor="#ffffff", '
                      f'color="#1f2023", label={label}];')
-    # 初始事件箭头
+    # 初始箭头：标签用题目里真实的触发事件（initial_event），没有就不标；
+    # 「初始事件」只是课本符号图里的说明文字，不是图内容
     if initial in ids:
+        start_label = str(data.get("initial_event") or data.get("start_event")
+                          or data.get("initial_action") or "").strip()
         lines.append('  __start__ [shape=point, width=0.18, height=0.18, fixedsize=true, '
                      'style="filled", fillcolor="#1f2023", color="#1f2023", label=""];')
-        lines.append(f'  __start__ -> {ids[initial]} [label="初始事件"];')
+        if start_label:
+            lines.append(f'  __start__ -> {ids[initial]} [label="{_dot_label(start_label)}"];')
+        else:
+            lines.append(f'  __start__ -> {ids[initial]} [label=""];')
     for tr in data.get("transitions") or data.get("edges") or []:
         if isinstance(tr, dict):
             a = str(tr.get("from") or tr.get("source") or "")
