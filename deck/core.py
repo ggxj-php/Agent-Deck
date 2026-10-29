@@ -8,11 +8,13 @@ import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from . import context, settings, uploads
+from . import context, ratelimit, settings, uploads
 from . import usage as usage_mod
 from .config import (
     CONTEXT_OVERFLOW_RETRIES,
     EXIT_WORDS,
+    LLM_TPM_BUDGET,
+    LLM_TPM_MAX_WAIT,
     MAX_ROUNDS,
     RESUME_INSTRUCTION,
     RESUME_WORDS,
@@ -483,8 +485,17 @@ class DeckAgent:
                 round_usage = {}
                 while True:
                   try:
+                    sent_messages = _sendable(_trim_history(_rehydrate(self.messages)))
+                    # 上游有「每分钟 token 配额」：发之前先排队，别把额度一次打爆
+                    prompt_estimate = context.estimate(sent_messages)
+                    wait_hint = ratelimit.plan(prompt_estimate, budget=LLM_TPM_BUDGET)
+                    if wait_hint >= 3:
+                        yield {"type": "notice",
+                               "text": f"模型每分钟额度用得快满了，等 {wait_hint:.0f} 秒再继续…"}
+                    ratelimit.acquire(prompt_estimate, budget=LLM_TPM_BUDGET,
+                                      max_wait=LLM_TPM_MAX_WAIT)
                     for kind, payload in stream_chat(
-                        _sendable(_trim_history(_rehydrate(self.messages))),
+                        sent_messages,
                         active_specs(extra=("ask_user",) if self.interactive else ()), model,
                         api_key=api_key, base_url=base_url, thinking=think,
                     ):
@@ -531,7 +542,10 @@ class DeckAgent:
                         print("[leak-guard] 拦下一段疑似系统提示原文", file=sys.stderr)
                     # 记一笔真实用量（provider 没给 usage 就用估算，DSH 的 token meter 也是估的）
                     try:
-                        sent = _sendable(_trim_history(_rehydrate(self.messages)))
+                        sent = sent_messages
+                        used_prompt = (round_usage.get("prompt_tokens")
+                                       or context.estimate(sent))
+                        ratelimit.record(used_prompt)
                         usage_mod.record(
                             prompt_tokens=round_usage.get("prompt_tokens") or context.estimate(sent),
                             completion_tokens=(round_usage.get("completion_tokens")

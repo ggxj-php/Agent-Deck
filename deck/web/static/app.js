@@ -2024,6 +2024,10 @@ function handleEvent(turn, event) {
     case 'await_user':
       showAskCard(turn, event);
       break;
+    case 'notice':
+      // 限流排队之类的提示：给个气泡，顺手刷新前端空闲计时
+      noticeBubble(turn, event.text || '');
+      break;
     case 'cut':
       noticeBubble(turn, t('cutNotice', { reason: event.reason || '网络中断' }), true);
       break;
