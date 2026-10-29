@@ -183,6 +183,25 @@ CONTEXT_LIMIT = int(os.environ.get("CONTEXT_LIMIT", "1000000") or 1000000)
 # 满了那一轮直接发不出去。想压得更早（更省 token、但更早丢细节）就往下调。
 CONTEXT_COMPRESS_AT = float(os.environ.get("CONTEXT_COMPRESS_AT", "0.8") or 0.8)
 
+# ---- 上下文预算（照 DSH 的做法：窗口 × 0.8 与「窗口 − 输出预留 − 头寸」取小）----
+# 头寸是给「下一轮请求 + 工具定义 + 模型输出」留的余量；DSH 默认也是 65536。
+CONTEXT_HEADROOM_TOKENS = int(os.environ.get("CONTEXT_HEADROOM_TOKENS", "65536") or 65536)
+# 压缩后保留最近多少比例的「窗口−输出预留」原文（DSH 默认 0.16）
+CONTEXT_RETAIN_RATIO = float(os.environ.get("CONTEXT_RETAIN_RATIO", "0.16") or 0.16)
+
+# ---- 工具结果修剪（照 DSH 的 tool-result-pruner：超长结果只留头+尾）----
+TOOL_RESULT_PRUNE_AT = int(os.environ.get("TOOL_RESULT_PRUNE_AT", "8192") or 8192)
+TOOL_RESULT_PRUNE_HEAD = int(os.environ.get("TOOL_RESULT_PRUNE_HEAD", "4096") or 4096)
+TOOL_RESULT_PRUNE_TAIL = int(os.environ.get("TOOL_RESULT_PRUNE_TAIL", "1024") or 1024)
+
+# ---- 接口重试（照 DSH 的 dsh-llm-retry：只重试限流/5xx/超时/传输）----
+LLM_MAX_RETRIES = int(os.environ.get("LLM_MAX_RETRIES", "5") or 5)
+LLM_RETRY_BASE_MS = int(os.environ.get("LLM_RETRY_BASE_MS", "500") or 500)
+LLM_RETRY_MAX_MS = int(os.environ.get("LLM_RETRY_MAX_MS", "10000") or 10000)
+LLM_RETRY_JITTER = float(os.environ.get("LLM_RETRY_JITTER", "0.1") or 0.1)
+# 上下文溢出后，最多再压缩重试几次（DSH 默认 1）
+CONTEXT_OVERFLOW_RETRIES = int(os.environ.get("CONTEXT_OVERFLOW_RETRIES", "1") or 1)
+
 # 压缩时至少保留最近这么多条消息的原文。工具调用和它的结果不能被拆开，
 # 所以实际断点会往后找一条安全的用户消息对齐（见 context._cut_index）。
 CONTEXT_KEEP_RECENT = int(os.environ.get("CONTEXT_KEEP_RECENT", "12") or 12)
@@ -359,25 +378,6 @@ CORE_PROMPT = r"""【共享规矩 · 所有身份卡都适用】
     - 先写，写完后**必须调用 count_text** 统计一遍，别靠感觉估；
     - 看返回值里的「字数（中文习惯）」这一项：不够就补充内容、超了就删减，再统计一次；
     - 回复里顺带说一句实际字数（例如「这篇 812 字」），用户会觉得靠谱。
-
-35. 【技能包（Agent Skills）】服务器上可以装「技能包」，里面是某个专门任务的完整工作流
-    （比如 PPT 生成）。用户要做这类任务时：
-    - 先 `list_skills` 看有没有对应技能；有就先 `load_skill` 把它的 SKILL.md 读进来，
-      **严格按里面写的步骤走**（需要细节时用 `read_skill_file` 读它引用的文档，
-      别一次性把所有文档都读进来）；
-    - 技能带的脚本在 workspace 里（`skills/<技能名>/...`），用 `run_code` 跑，
-      路径写相对 workspace 的路径；生成的成品放 workspace 下，
-      最后用 `make_download_link` 把下载链接发给用户；
-    - 技能里的说明可能很长，按需分段读；不要跳过它的完整性校验步骤。
-36. 【需要用户拍板就用 ask_user】遇到这些情况别替用户乱猜，调
-    `ask_user(question, options)` 弹一个选择框：模板/风格/配色、页数/篇幅、
-    是否覆盖已有文件、两个互斥方案的取舍。用户点完会自动继续，不用你再问一遍。
-    **必须用 ask_user，不要用 render_html 画“决策卡/选择页”**——HTML 卡片在聊天里
-    是个 iframe，用户点了没有任何回调，等于点了没反应（真踩过）。选项最多 6 个，
-    需要用户自由填写就把 allow_custom 设为 true。
-    只要工具列表里有 ask_user，就**不许用文字列一串选项让用户回复编号**——那是退化，
-    用户还得打字。只有当前客户端确实不支持（工具列表里没有 ask_user）时才用文字列。
-    能从上下文合理推断的小事别滥用（比如默认用中文、默认 16:9）。
 
 """
 

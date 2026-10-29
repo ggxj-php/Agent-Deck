@@ -18,7 +18,12 @@ import re
 import threading
 
 from . import llm, settings
-from .config import CONTEXT_COMPRESS_AT, CONTEXT_KEEP_RECENT
+from .config import (
+    CONTEXT_COMPRESS_AT,
+    CONTEXT_HEADROOM_TOKENS,
+    CONTEXT_RETAIN_RATIO,
+    MAX_TOKENS,
+)
 
 # 摘要请求本身最多吐多少 token。摘要不该长，给太多了反而把成本顶上去。
 SUMMARY_MAX_TOKENS = 1024
@@ -86,19 +91,53 @@ def estimate(messages):
     return sum(_message_tokens(item) for item in messages)
 
 
-def usage(messages, limit, compress_at=CONTEXT_COMPRESS_AT):
+def compaction_policy(window=None, output_reserve=None):
+    """算「什么时候压、压完留多少原文」（照 DSH dsh-compaction-basic 的公式）。
+
+    trigger = floor(min(W × 0.8, W − 输出预留 − 65536))
+    retain  = (W − 输出预留) × 0.16
+
+    留 64k 头寸是 DSH 的默认值：下一轮请求、工具定义、模型输出都要占地方，
+    贴着窗口上限发请求必输。W 是模型真实窗口（后台「上下文窗口」配），不是拍脑袋的数。
+    """
+    window = int(window or settings.context_limit() or 0)
+    output_reserve = int(MAX_TOKENS if output_reserve is None else output_reserve)
+    trigger = min(int(window * CONTEXT_COMPRESS_AT),
+                  window - output_reserve - CONTEXT_HEADROOM_TOKENS)
+    trigger = max(1024, trigger)
+    retain = max(512, int(max(0, window - output_reserve) * CONTEXT_RETAIN_RATIO))
+    return {"window": window, "output_reserve": output_reserve,
+            "trigger": trigger, "retain_tokens": retain}
+
+
+def _keep_recent_for(messages, retain_tokens):
+    """按「保留多少个 token 的最近原文」反推保留几条消息（至少 2 条）。"""
+    kept = 0
+    count = 0
+    for message in reversed(messages[1:]):
+        kept += _message_tokens(message)
+        count += 1
+        if kept >= retain_tokens:
+            break
+    return max(2, min(count, max(2, len(messages) - 2)))
+
+
+def usage(messages, limit, compress_at=None):
     """给前端看的用量：用了多少、占窗口百分之多少、到了几成就自动压。
 
     读不到的时候（还没接过话）tokens 是 0，前端照常显示 0%。
     """
     tokens = estimate(messages)
     limit = max(1, int(limit or 0))
+    policy = compaction_policy(limit)
+    trigger = int(compress_at if compress_at is not None else policy["trigger"])
     percent = round(tokens * 100.0 / limit, 1)
     return {
         "tokens": tokens,
         "limit": limit,
         "percent": min(percent, 100.0),
-        "compress_at": compress_at,
+        "compress_at": trigger,
+        "compress_percent": round(min(trigger * 100.0 / limit, 100.0), 1),
         "messages": len(messages),
     }
 
@@ -174,8 +213,11 @@ def _summarize(text):
     return (reply or "").strip()
 
 
-def compress_if_needed(messages, limit=None, keep_recent=CONTEXT_KEEP_RECENT):
-    """用到窗口的 CONTEXT_COMPRESS_AT 就把旧历史压成摘要，返回压缩信息；没压返回 None。
+def compress_if_needed(messages, limit=None, keep_recent=None, force=False):
+    """到压缩线就把旧历史压成摘要，返回压缩信息；没压返回 None。
+
+    force=True 用于「模型说上下文溢出了」之后的兜底压缩：这时不管到没到阈值，
+    只要还能压就压，然后把请求重试一次。
 
     直接改 messages（就地替换成压缩后的列表），因为会话历史是 DeckAgent 实例持有的。
     摘要那一步失败就原样留着不动，返回 None，让这一轮照常发出去。
@@ -183,8 +225,11 @@ def compress_if_needed(messages, limit=None, keep_recent=CONTEXT_KEEP_RECENT):
     limit = int(limit or settings.context_limit() or 0)
     if limit <= 0 or len(messages) < 3:
         return None
+    policy = compaction_policy(limit)
+    if keep_recent is None:
+        keep_recent = _keep_recent_for(messages, policy["retain_tokens"])
     tokens = estimate(messages)
-    if tokens < limit * CONTEXT_COMPRESS_AT:
+    if not force and tokens < policy["trigger"]:
         return None
 
     cut = _cut_index(messages, keep_recent)
@@ -200,7 +245,7 @@ def compress_if_needed(messages, limit=None, keep_recent=CONTEXT_KEEP_RECENT):
 
     with _compress_lock:
         # 拿锁的时候可能已经有人压过了，再量一次，别重复压
-        if estimate(messages) < limit * CONTEXT_COMPRESS_AT:
+        if not force and estimate(messages) < policy["trigger"]:
             return None
         try:
             summary = _summarize(source)
@@ -223,4 +268,6 @@ def compress_if_needed(messages, limit=None, keep_recent=CONTEXT_KEEP_RECENT):
         "kept": len(tail),
         "before_tokens": tokens,
         "after_tokens": after,
+        "trigger": policy["trigger"],
+        "forced": bool(force),
     }

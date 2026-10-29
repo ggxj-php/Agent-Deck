@@ -1,10 +1,21 @@
 """模型接入层：只负责发请求，不掺业务逻辑。"""
+import random
 import threading
+import time
 
-from openai import APIConnectionError, APITimeoutError, OpenAI
+from openai import OpenAI
 
 from . import settings
-from .config import MAX_TOKENS, THINKING_PARAM
+from . import usage as usage_mod
+from .config import (
+    LLM_MAX_RETRIES,
+    LLM_RETRY_BASE_MS,
+    LLM_RETRY_JITTER,
+    LLM_RETRY_MAX_MS,
+    MAX_TOKENS,
+    THINKING_PARAM,
+)
+from .llm_errors import INVALID, RETRYABLE, LLMError, QuotaExceeded, classify
 
 _clients = {}
 _clients_lock = threading.Lock()
@@ -87,45 +98,35 @@ def complete(messages: list, model: str = "", api_key: str = "", base_url: str =
     return (reply.choices[0].message.content or "").strip()
 
 
-def stream_chat(messages: list, tools: list, model: str = "",
-                api_key: str = "", base_url: str = "", thinking: bool = True):
-    """流式发一次请求，边收边吐增量。
+def _backoff_seconds(attempt, retry_after=0.0):
+    """退避：有 Retry-After 就听服务端的，否则 500ms 起步指数退避 + 10% 抖动。"""
+    if retry_after and retry_after > 0:
+        return min(float(retry_after), LLM_RETRY_MAX_MS / 1000.0)
+    delay = min(LLM_RETRY_BASE_MS / 1000.0 * (2 ** attempt), LLM_RETRY_MAX_MS / 1000.0)
+    return delay * (1 + random.uniform(-LLM_RETRY_JITTER, LLM_RETRY_JITTER))
 
-    依次产出 ("thinking", 片段) / ("content", 片段)，最后产出
-    ("message", 拼好的 assistant 消息)，那条消息可以直接塞回 messages。
 
-    model / api_key / base_url 留空就用后台配的聊天那套；带图的轮次由 core
-    把图片那套的三个值传进来。
+def _log_retry(code, attempt, delay, detail=""):
+    print(f"[llm] {code} 第 {attempt + 1} 次重试，等 {delay:.1f}s"
+          f"{(' | ' + str(detail)[:160]) if detail else ''}", flush=True)
 
-    thinking=False 时带上「关思考」参数：网页上的开关走这里。开了就不带参数，
-    行为跟以前完全一样。
-    """
-    model = (model or "").strip() or settings.chat_model()
-    settings.remember_model(model)
-    key = (api_key or "").strip() or settings.chat_key()
-    base = (base_url or "").strip() or settings.chat_base_url()
-    if not key:
-        raise RuntimeError(_NO_KEY)
 
-    extra = _think_extra(thinking)
-    kwargs = {"extra_body": extra} if extra else {}
+def _record_usage(usage_obj, model):
+    """把 provider 返回的 usage 记到用量统计里（拿不到就算了）。"""
+    if not usage_obj:
+        return
     try:
-        stream = _client(key, base).chat.completions.create(
+        usage_mod.record(
+            prompt_tokens=getattr(usage_obj, "prompt_tokens", 0) or 0,
+            completion_tokens=getattr(usage_obj, "completion_tokens", 0) or 0,
             model=model,
-            messages=messages,
-            tools=tools,
-            max_tokens=MAX_TOKENS,
-            stream=True,
-            **kwargs,
         )
-    except Exception as exc:      # noqa: BLE001
-        if extra:
-            raise RuntimeError(
-                f"{exc}（可能是这个接口不认 {THINKING_PARAM} 参数，"
-                "把网页上的「思考」开关打开再试一次）"
-            ) from exc
-        raise
+    except Exception:                     # noqa: BLE001
+        pass
 
+
+def _consume_stream(stream, model):
+    """把一次流的增量翻译成事件；顺带把 usage 记下来。"""
     text_parts = []
     calls = {}  # index -> {"id", "name", "arguments"}，流式下 tool_call 是分片下发的
     pending_sent = set()   # 已经发过「正在准备工具」事件的下标
@@ -137,11 +138,12 @@ def stream_chat(messages: list, tools: list, model: str = "",
             chunk = next(iterator)
         except StopIteration:
             break
-        except (APITimeoutError, APIConnectionError) as exc:
-            raise RuntimeError(
-                "模型接口超时/断开了（45 秒没收到新数据）。再发一次试试；"
-                "如果反复出现，多半是上游服务在抽风，等几分钟。"
-            ) from exc
+        usage_obj = getattr(chunk, "usage", None)
+        if usage_obj is not None:
+            yield "usage", {
+                "prompt_tokens": getattr(usage_obj, "prompt_tokens", 0) or 0,
+                "completion_tokens": getattr(usage_obj, "completion_tokens", 0) or 0,
+            }
         if not chunk.choices:
             continue
         choice = chunk.choices[0]
@@ -187,13 +189,72 @@ def stream_chat(messages: list, tools: list, model: str = "",
         ]
     if not message["content"] and not message.get("tool_calls"):
         # 一个字都没吐出来。stream 正常结束的情况下，多半是思考把 max_tokens 吃光了；
-        # 要是 finish 也不是 length，那就是流被中途掐断的（网络/代理），报个清楚的错，
-        # 让 core 去处理——绝不能把 content 为 None 的消息塞进历史，那会让会话之后永远 400。
+        # 要是 finish 也不是 length，那就是流被中途掐断的（网络/代理），报个清楚的错。
         if finish == "length":
-            raise RuntimeError(
-                "模型光思考没吐正文就结束了（输出被 max_tokens 截断，可以在 config.py 里调大 MAX_TOKENS）"
+            raise LLMError(
+                "EMPTY_RESPONSE",
+                "模型光思考没吐正文就结束了（输出被 max_tokens 截断，可以在 config.py 里调大 MAX_TOKENS）",
             )
-        raise RuntimeError(f"模型没返回任何内容（finish_reason={finish}）")
+        raise LLMError("EMPTY_RESPONSE", f"模型没返回任何内容（finish_reason={finish}）")
 
     yield "finish", finish
     yield "message", message
+
+
+def stream_chat(messages: list, tools: list, model: str = "",
+                api_key: str = "", base_url: str = "", thinking: bool = True):
+    """流式发一次请求，边收边吐增量；出错按分类决定「重试 / 放弃 / 让上层压缩」。
+
+    依次产出 ("thinking", 片段) / ("content", 片段) / ("tool_pending", 名字)，
+    最后产出 ("finish", reason) 和 ("message", 拼好的 assistant 消息)。
+
+    重试规则（照 DSH dsh-llm-retry）：
+      - 只重试 RATE_LIMIT / SERVER / TIMEOUT / TRANSPORT / EMPTY_RESPONSE
+      - 指数退避 500ms→10s，10% 抖动，尊重服务端 Retry-After，最多 5 次
+      - 已经开始往外吐内容的不重试（重试会把半截话重复一遍）
+      - QUOTA（额度没了）不重试，直接把话说明白
+      - CONTEXT_OVERFLOW 抛给 core，让它压缩历史后重试一次
+    """
+    model = (model or "").strip() or settings.chat_model()
+    settings.remember_model(model)
+    key = (api_key or "").strip() or settings.chat_key()
+    base = (base_url or "").strip() or settings.chat_base_url()
+    if not key:
+        raise RuntimeError(_NO_KEY)
+
+    extra = _think_extra(thinking)
+    kwargs = {"extra_body": extra} if extra else {}
+    attempt = 0
+    dropped_extra = False
+    while True:
+        emitted = False
+        try:
+            stream = _client(key, base).chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=tools,
+                max_tokens=MAX_TOKENS,
+                stream=True,
+                stream_options={"include_usage": True},
+                **kwargs,
+            )
+            for event in _consume_stream(stream, model):
+                emitted = True
+                yield event
+            return
+        except Exception as exc:                  # noqa: BLE001
+            if isinstance(exc, QuotaExceeded):
+                usage_mod.record(ok=False)
+            err = classify(exc)
+            # 有些代理不认 extra_body：参数不合法就把它去掉再试一次（只试一次）
+            if (err.code == INVALID and extra and not dropped_extra and not emitted):
+                dropped_extra = True
+                kwargs = {}
+                continue
+            if err.code in RETRYABLE and not emitted and attempt < LLM_MAX_RETRIES:
+                delay = _backoff_seconds(attempt, err.retry_after)
+                _log_retry(err.code, attempt, delay, err.detail)
+                attempt += 1
+                time.sleep(delay)
+                continue
+            raise err

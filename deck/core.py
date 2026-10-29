@@ -9,8 +9,20 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import context, settings, uploads
-from .config import EXIT_WORDS, MAX_ROUNDS, RESUME_INSTRUCTION, RESUME_WORDS, STICKER_LIMIT
+from . import usage as usage_mod
+from .config import (
+    CONTEXT_OVERFLOW_RETRIES,
+    EXIT_WORDS,
+    MAX_ROUNDS,
+    RESUME_INSTRUCTION,
+    RESUME_WORDS,
+    STICKER_LIMIT,
+    TOOL_RESULT_PRUNE_AT,
+    TOOL_RESULT_PRUNE_HEAD,
+    TOOL_RESULT_PRUNE_TAIL,
+)
 from .llm import stream_chat
+from .llm_errors import ContextOverflow, LLMError
 from .tools import active_specs, execute
 from .tools import diagram as diagram_tool
 from .tools import download as download_tool
@@ -26,6 +38,23 @@ from .tools.sticker import MOODS, pick_sticker
 # 搜索类工具在一轮提问里最多调几次（提示词管不住模型，这里硬拦）
 SEARCH_TOOLS = ("web_search", "search_knowledge")
 TURN_SEARCH_LIMIT = 2
+
+
+def _prune_tool_result(result):
+    """工具结果太长就只留头+尾，中间的说明「省略了多少」。
+
+    照 DSH 的 tool-result-pruner 做的：只进上下文的这一份被修剪，
+    前端 tool_end 卡片里展示的仍是完整结果；原文还在服务器/文件里，
+    模型需要细节可以重新读或重跑，不必让每轮请求都背着几万字。
+    """
+    text = result if isinstance(result, str) else str(result or "")
+    if len(text) <= TOOL_RESULT_PRUNE_AT:
+        return text
+    head = text[:TOOL_RESULT_PRUNE_HEAD]
+    tail = text[-TOOL_RESULT_PRUNE_TAIL:]
+    skipped = len(text) - len(head) - len(tail)
+    return (f"{head}\n\n…（中间省略 {skipped} 字符，防止上下文被撑爆；"
+            f"需要细节就重新读文件或重跑一遍）…\n\n{tail}")
 
 
 def _query_bag(arguments):
@@ -450,7 +479,10 @@ class DeckAgent:
                 # 每轮都新起一个：工具轮之间各自 flush
                 guard = _LeakGuard(settings.system_prompt())
                 picked = []          # 这一轮发出去的表情包（心情, 文件名）
-                try:
+                overflow_retried = 0
+                round_usage = {}
+                while True:
+                  try:
                     for kind, payload in stream_chat(
                         _sendable(_trim_history(_rehydrate(self.messages))),
                         active_specs(extra=("ask_user",) if self.interactive else ()), model,
@@ -464,6 +496,8 @@ class DeckAgent:
                             yield {"type": "thinking", "text": payload}
                         elif kind == "tool_pending":
                             yield {"type": "tool_pending", "name": payload}
+                        elif kind == "usage":
+                            round_usage = payload
                         else:
                             chunks.append(payload)
                             # 正文里可能夹着 [sticker:mood]，边收边切开
@@ -495,12 +529,41 @@ class DeckAgent:
                         yield {"type": "content", "text": tail}
                     if guard.hit:
                         print("[leak-guard] 拦下一段疑似系统提示原文", file=sys.stderr)
-                except Exception as exc:
+                    # 记一笔真实用量（provider 没给 usage 就用估算，DSH 的 token meter 也是估的）
+                    try:
+                        sent = _sendable(_trim_history(_rehydrate(self.messages)))
+                        usage_mod.record(
+                            prompt_tokens=round_usage.get("prompt_tokens") or context.estimate(sent),
+                            completion_tokens=(round_usage.get("completion_tokens")
+                                               or (context.estimate([message]) if message else 0)),
+                            model=model,
+                        )
+                    except Exception:                 # noqa: BLE001
+                        pass
+                    break              # 这一轮流完了，跳出重试循环
+                  except ContextOverflow:
+                    # 模型说上下文超了：压缩旧历史后重试一次（照 DSH 的 overflow recovery）
                     last_round = "".join(chunks)
+                    if overflow_retried >= CONTEXT_OVERFLOW_RETRIES:
+                        yield {"type": "error",
+                               "message": "上下文还是太大了，压缩后也放不下。开个新会话吧，"
+                                          "或者让它先把要用的资料整理成文件再继续。"}
+                        return
+                    overflow_retried += 1
+                    squeezed = context.compress_if_needed(self.messages, force=True)
+                    if squeezed and squeezed.get("ok"):
+                        yield {"type": "compressed", **squeezed}
+                    else:
+                        yield {"type": "error",
+                               "message": "上下文超过模型窗口了，而且这段历史压不动"
+                                          "（可能是一整块没法拆的内容）。开个新会话再试。"}
+                        return
+                    continue          # 压完了，重新发一次请求
+                  except Exception as exc:
+                    last_round = "".join(chunks)
+                    detail = exc.message if isinstance(exc, LLMError) else str(exc)
                     yield {"type": "error",
-                           "message": f"模型请求失败：{exc}"
-                                      "（网络/接口抖了一下。别从头重做，直接从断点继续；"
-                                      "点下面的按钮或发「继续」就行）"}
+                           "message": f"模型请求失败：{detail}"}
                     return
                 last_round = "".join(chunks)
                 stickers_sent = splitter.used
@@ -675,7 +738,7 @@ class DeckAgent:
                     self.messages.append({
                         "role": "tool",
                         "tool_call_id": call.get("id"),
-                        "content": result,
+                        "content": _prune_tool_result(result),
                     })
 
                 # ask_user：工具已经执行过（回执是「已弹给用户」），这里把选择框事件发出去，

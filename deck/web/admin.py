@@ -29,6 +29,7 @@ from .. import (
     skills,
     store,
     tools,
+    usage,
 )
 from ..config import CONTEXT_COMPRESS_AT, EMBED_DIM
 from ..kb import stats as kb_stats
@@ -611,6 +612,13 @@ def _user_row(row):
     item["last_ip"] = item.get("last_ip") or ""
     item["ip_location"] = geoip.lookup(item["last_ip"])
     return item
+
+
+@router.get("/api/admin/usage")
+def api_usage(request: Request):
+    """模型用量（照 DSH token-meter 的思路：每轮记真实/估算 tokens，看看是不是撞限流）。"""
+    _require(request)
+    return usage.stats(window_minutes=10)
 
 
 @router.get("/api/admin/skills")

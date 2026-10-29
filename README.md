@@ -958,6 +958,23 @@ description: 一句话说明这个技能干什么、什么时候用
 → make_download_link 给出下载链接
 ```
 
+## 上下文与限流治理（照 DSH 的做法）
+
+参考 DeepSeek Harness 的 `dsh-compaction-basic` / `dsh-compaction-tool-result-pruner` /
+`dsh-llm-retry` 移植：
+
+- **上下文预算**：压缩触发点 = `min(窗口 × 0.8, 窗口 − 输出预留 − 65536)`，
+  压完保留「窗口−输出预留」的 16% 原文。窗口在后台「上下文窗口」里配。
+- **工具结果修剪**：超过 8192 字符的工具结果只留头 4096 + 尾 1024，
+  中间标「省略了多少」；完整结果仍给前端卡片看，原文还在服务器上，模型需要可重读。
+- **接口错误分类**：AUTH / QUOTA / RATE_LIMIT / CONTEXT_OVERFLOW / INVALID / SERVER /
+  TIMEOUT / TRANSPORT。**额度不够（QUOTA）不重试**，直接说明白；限流/5xx/超时才重试。
+- **重试**：指数退避 500ms→10s、10% 抖动、尊重 `Retry-After`，最多 5 次；
+  已经开始吐字的不重试（避免半截话重复）。
+- **上下文溢出**：抛 `CONTEXT_OVERFLOW` → 强制压缩历史 → 重试 1 次。
+- **用量观测**：每轮记录 `[usage] prompt=… completion=…` 日志；
+  后台 `GET /api/admin/usage` 看最近 10 分钟 / 今天 / 累计的 tokens 和请求数。
+
 ## 生成文件自动清理
 
 技能/代码生成出来的成品（`.pptx` `.ppt` `.pdf` `.docx` `.xlsx`）和 `workspace/projects/`
