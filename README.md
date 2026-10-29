@@ -874,6 +874,88 @@ def say_hi(name: str) -> str:
 
 注册表按约定工作：**schema 里的 `name` 要和函数名一致**，它会自动把函数挂到 `TOOL_MAP` 上。
 
+## 技能包（Agent Skills）
+
+支持安装 Claude Code 风格的技能包：一个目录里放 `SKILL.md`（YAML frontmatter 写
+name / description，正文写工作流）+ 脚本 + 模板，模型就能按需加载并按里面的步骤干活。
+
+### 安装
+
+把技能目录放到下面任一个位置（都不进 git，只在服务器上）：
+
+```
+<项目>/skills/<技能名>/           # 管理员手工装
+<项目>/workspace/skills/<技能名>/ # 从网上下载、或运行时装的
+```
+
+目录里必须有 `SKILL.md`，例如：
+
+```markdown
+---
+name: my-skill
+description: 一句话说明这个技能干什么、什么时候用
+---
+
+# My Skill
+（这里是给模型看的详细工作流）
+```
+
+放好后不用重启：模型的 `list_skills` 会扫到它。
+
+### 模型怎么用
+
+1. `list_skills` 看有哪些技能（名字 + 描述）
+2. `load_skill(name)` 把 SKILL.md 读进上下文
+3. 按里面的步骤用 `run_code` / 其它工具干活；需要细节时
+   `read_skill_file(name, path)` 读引用的文档
+4. 成品放 workspace，用 `make_download_link` 发给用户
+
+技能脚本用 `run_code` 跑，路径相对 `workspace/`（也就是 `skills/<名字>/scripts/xxx.py`）。
+`run_code` 的沙盒仍然生效：只能读写 workspace、不能联网、不能起子进程——
+需要编译/转码的技能要在服务器上提前装好依赖，或改成纯 Python。
+
+### 需要用户拍板时：ask_user
+
+技能工作流里常有「选模板 / 选风格 / 选页数」这种决策点。模型可以调
+`ask_user(question, options)`，网页端会弹一个选择卡，用户点完自动继续。
+
+这是**能力协商**的：只有声明了 `X-Client-Capabilities: interactive` 的客户端才会
+拿到 `ask_user` 工具；老版 App、第三方客户端拿不到，模型会改成在正文里直接问，
+用户打字回复即可（功能不丢，只是多点一步）。
+
+### 后台管理
+
+打开 `/admin` → 左边「技能 → 技能包」：
+
+- 看已装的技能（说明、大小、来源、启用状态）
+- **启用 / 停用** 单个技能（停用后模型看不到它，文件不删）
+- **从仓库安装**：填 `https://github.com/owner/repo`，可选子目录（如
+  `skills/ppt-master`），后台会用 `git clone --depth 1 --sparse` 拉下来
+- **删除**：只删 `workspace/skills/` 里装的，手工放在 `skills/` 的删不了
+- 「工具开关 → 技能包」整组也能一键关掉
+
+安装逻辑只接受 `https://github.com/...` / `https://gitee.com/...`，子目录做了路径校验，
+拉取在临时目录里做、失败不会弄脏已有技能。
+
+### 沙盒说明
+
+技能脚本通过 `run_code` 执行，沙盒仍然生效：
+
+- 只能读写 `workspace/`（技能装在 `workspace/skills/`，所以能读）
+- **不能联网**（`urllib`/`socket` 的真实连接会在审计钩子里被拦）
+- **不能起子进程**（`subprocess` 被禁用）——需要外部命令的技能会失败，
+  要用的依赖请提前用 `pip install` 装进 venv
+
+### 附带的示例
+
+服务器上装了 `ppt-master`（MIT）时，模型可以：
+
+```
+用户：把这份文档做成 10 页 PPT
+→ list_skills → load_skill("ppt-master") → 按它的流程生成 pptx
+→ make_download_link 给出下载链接
+```
+
 ## 已知限制
 
 - **C/C++ 编译器很老**：本机用 `CXX` 指的 TDM-GCC 4.9.2（2014 年），只支持到 **C++11**。`std::filesystem`、结构化绑定、`auto` 简写这些 C++14/17 的东西编译不过，所以工具描述里专门提醒了模型别用。换个新一点的 MinGW 把 `CXX` 指过去就能解决。

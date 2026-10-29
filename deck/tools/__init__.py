@@ -5,6 +5,7 @@
 import json
 
 from . import (
+    ask,
     asm86,
     asm_sim,
     basics,
@@ -21,13 +22,14 @@ from . import (
     render,
     runner,
     search,
+    skillbox,
     sticker,
     text,
     textstat,
 )
 
 _MODULES = (basics, kb, search, files, docs, download, forensics, runner, sticker, render, diagram,
-            asm_sim, asm86, mcu, logic, numconv, calc, text, textstat)
+            asm_sim, asm86, mcu, logic, numconv, calc, text, textstat, skillbox, ask)
 
 # 这些工具把「外部内容」带进上下文：网页正文、搜索结果、知识库片段、
 # 文件/文档里的文字、图片里读出来的字、二进制里挖出来的串、甚至文件名。
@@ -62,7 +64,7 @@ TOOL_GROUPS = {
         "label": "基础",
         "desc": "时间、文件读写删、发表情包",
         "tools": ("get_time", "list_files", "read_file", "write_file", "delete_file",
-                  "send_sticker"),
+                  "send_sticker", "ask_user"),
     },
     "web": {
         "label": "联网",
@@ -99,6 +101,11 @@ TOOL_GROUPS = {
         "label": "计算 / 进制",
         "desc": "高精度计算、进制 / 补码 / 位运算",
         "tools": ("number_convert", "sci_calc"),
+    },
+    "skills": {
+        "label": "技能包",
+        "desc": "加载服务器上装的 Agent Skills（例如 PPT 生成）",
+        "tools": ("list_skills", "load_skill", "list_skill_files", "read_skill_file"),
     },
     "text": {
         "label": "文本处理",
@@ -140,10 +147,25 @@ def is_enabled(name):
     return group_of(name) in enabled_groups()
 
 
-def active_specs():
-    """给模型看的工具清单（按后台开关过滤）。"""
+# 只有客户端声明支持交互时才下发的工具（放 extra 里才出现）
+INTERACTIVE_ONLY = frozenset({"ask_user"})
+
+
+def active_specs(extra=()):
+    """给模型看的工具清单（按后台开关过滤）。
+
+    extra: 额外要放进来的工具名（比如只有支持交互的客户端才给 ask_user）。
+    """
     groups = enabled_groups()
-    specs = [spec for spec in TOOLS if group_of(spec["function"]["name"]) in groups]
+    specs = [spec for spec in TOOLS
+             if group_of(spec["function"]["name"]) in groups
+             and spec["function"]["name"] not in INTERACTIVE_ONLY]
+    if extra:
+        want = set(extra)
+        have = {spec["function"]["name"] for spec in specs}
+        specs.extend(spec for spec in TOOLS
+                     if spec["function"]["name"] in want
+                     and spec["function"]["name"] not in have)
     # 注意：即使开了服务端内置搜索，也**不能**把 web_search / open_url 摘掉。
     # 平台是按查询自己决定搜不搜的，有些问题它压根不注入结果；这时候模型要是连
     # 工具都没有，就只能干瞪眼说「没搜到」（线上真踩过）。留着当兜底，提示词里

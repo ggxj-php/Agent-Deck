@@ -35,8 +35,8 @@ def test_正常计算和写文件能跑(tmp_path):
     "import subprocess\nsubprocess.run(['echo', 'x'])",
     "import os\nos.system('echo x')",
     "import ctypes",
-    "import urllib.request",
-    "import http.client",
+    "import urllib.request\nurllib.request.urlopen('http://example.com', timeout=2)",
+    "import http.client\nhttp.client.HTTPConnection('example.com').request('GET', '/')",
 ])
 def test_联网和起进程被拦(tmp_path, code):
     result = run_guarded(tmp_path, code)

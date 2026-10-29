@@ -294,6 +294,7 @@ function showView(name) {
 }
 
 const VIEW_HOOKS = {
+  skills: loadSkills,
   'core-prompt': loadCorePrompt,
   config: loadConfig,
   tools: loadTools,
@@ -2424,3 +2425,109 @@ document.getElementById('persona-icon-btn').addEventListener('click', () => {
 });
 document.getElementById('persona-avatar-file').addEventListener('change', () => uploadPersonaAsset('avatar'));
 document.getElementById('persona-icon-file').addEventListener('change', () => uploadPersonaAsset('icon'));
+
+/* ---------------- 技能包 ---------------- */
+function skillMsg(text, ok) {
+  const el = document.getElementById('skill-msg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.hidden = !text;
+  el.style.color = ok ? '' : '#c0392b';
+}
+
+async function loadSkills() {
+  const rows = document.getElementById('skill-rows');
+  if (!rows) return;
+  try {
+    const data = await api('/api/admin/skills');
+    rows.innerHTML = '';
+    const list = data.skills || [];
+    if (!list.length) {
+      rows.innerHTML = '<tr><td colspan="6" class="hint">还没有安装技能。上面填仓库地址安装，或手工放到 workspace/skills/ 下。</td></tr>';
+      return;
+    }
+    list.forEach((sk) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><b>${escapeHtml(sk.name)}</b></td>
+        <td style="max-width:420px">${escapeHtml(sk.description || '')}</td>
+        <td>${sk.size_mb} MB</td>
+        <td><code>${escapeHtml(sk.repo || sk.source || '')}</code></td>
+        <td>${sk.enabled
+          ? '<span class="user-badge">已启用</span>'
+          : '<span class="user-badge banned">已停用</span>'}</td>`;
+      const ops = document.createElement('td');
+      ops.className = 'user-ops';
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'link-ish';
+      toggle.textContent = sk.enabled ? '停用' : '启用';
+      toggle.addEventListener('click', () => toggleSkill(sk));
+      ops.appendChild(toggle);
+      if (sk.source === 'workspace') {
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'link-ish';
+        del.textContent = '删除';
+        del.addEventListener('click', () => removeSkill(sk));
+        ops.appendChild(del);
+      }
+      tr.appendChild(ops);
+      rows.appendChild(tr);
+    });
+  } catch (err) {
+    skillMsg((err && err.message) || '技能列表拉不到', false);
+  }
+}
+
+async function toggleSkill(sk) {
+  try {
+    await api('/api/admin/skills/toggle', { name: sk.name, enabled: !sk.enabled });
+    await loadSkills();
+  } catch (err) {
+    skillMsg((err && err.message) || '切换失败', false);
+  }
+}
+
+async function removeSkill(sk) {
+  if (!window.confirm(`确定删除技能「${sk.name}」？文件会被删掉。`)) return;
+  try {
+    await api('/api/admin/skills/uninstall', { name: sk.name });
+    skillMsg(`已删除 ${sk.name}`, true);
+    await loadSkills();
+  } catch (err) {
+    skillMsg((err && err.message) || '删除失败', false);
+  }
+}
+
+async function installSkill() {
+  const repoEl = document.getElementById('skill-repo');
+  const subEl = document.getElementById('skill-subdir');
+  const btn = document.getElementById('skill-install');
+  const repo = (repoEl && repoEl.value || '').trim();
+  const subdir = (subEl && subEl.value || '').trim();
+  if (!repo) { skillMsg('先填仓库地址，比如 https://github.com/hugohe3/ppt-master', false); return; }
+  btn.disabled = true;
+  skillMsg('正在从仓库拉取安装，大仓库可能要一两分钟…', true);
+  try {
+    const data = await api('/api/admin/skills/install', { url: repo, subdir });
+    skillMsg(`装好了：${(data.installed || []).join('、') || '（无）'}`, true);
+    if (repoEl) repoEl.value = '';
+    if (subEl) subEl.value = '';
+    await loadSkills();
+  } catch (err) {
+    skillMsg((err && err.message) || '安装失败', false);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('skill-install');
+  if (btn) btn.addEventListener('click', installSkill);
+  document.querySelectorAll('.view[data-view="skills"]').forEach((view) => {
+    view.addEventListener('click', (ev) => {
+      if (ev.target && ev.target.id === 'skill-install') return;
+    });
+  });
+});

@@ -17,7 +17,19 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
-from .. import auth, capabilities, config_report, db, geoip, llm, persona, settings, store, tools
+from .. import (
+    auth,
+    capabilities,
+    config_report,
+    db,
+    geoip,
+    llm,
+    persona,
+    settings,
+    skills,
+    store,
+    tools,
+)
 from ..config import CONTEXT_COMPRESS_AT, EMBED_DIM
 from ..kb import stats as kb_stats
 from . import blacklist, sysinfo, traffic, update
@@ -599,6 +611,63 @@ def _user_row(row):
     item["last_ip"] = item.get("last_ip") or ""
     item["ip_location"] = geoip.lookup(item["last_ip"])
     return item
+
+
+@router.get("/api/admin/skills")
+def list_skills(request: Request):
+    """技能包列表：装了什么、开没开、多大、从哪装的。"""
+    _require(request)
+    return {"skills": skills.describe(), "dir": skills.SKILL_DIRS[-1]}
+
+
+class SkillToggle(BaseModel):
+    name: str = ""
+    enabled: bool = True
+
+
+@router.post("/api/admin/skills/toggle")
+def toggle_skill(req: SkillToggle, request: Request):
+    """启用/停用某个技能（只影响模型能不能用，不删文件）。"""
+    _require(request)
+    try:
+        enabled = skills.set_enabled(req.name, req.enabled)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "name": req.name, "enabled": enabled}
+
+
+class SkillInstall(BaseModel):
+    url: str = ""
+    subdir: str = ""
+
+
+@router.post("/api/admin/skills/install")
+def install_skill(req: SkillInstall, request: Request):
+    """从 GitHub/Gitee 安装技能（可只取仓库里的某个子目录）。"""
+    _require(request)
+    try:
+        names = skills.install_from_git(req.url, req.subdir)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:                 # noqa: BLE001
+        raise HTTPException(status_code=500,
+                            detail=f"安装失败：{type(exc).__name__}: {exc}") from exc
+    return {"ok": True, "installed": names}
+
+
+class SkillUninstall(BaseModel):
+    name: str = ""
+
+
+@router.post("/api/admin/skills/uninstall")
+def uninstall_skill(req: SkillUninstall, request: Request):
+    """删除装在 workspace/skills 里的技能。"""
+    _require(request)
+    try:
+        name = skills.uninstall(req.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "name": name}
 
 
 @router.get("/api/admin/users")

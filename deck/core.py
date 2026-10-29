@@ -335,7 +335,7 @@ def _sendable(messages):
 class DeckAgent:
     """一个助手会话。对话历史存在实例里，所以同一个实例能记住上下文。"""
 
-    def __init__(self, messages=None, cut_off=False, owner=None):
+    def __init__(self, messages=None, cut_off=False, owner=None, interactive=False):
         """messages 是这条会话已经存下来的历史（不含 system 那条）。
 
         网页版现在**不再把 agent 常驻内存**：每轮请求从 SQLite 读出历史、灌进来跑完、
@@ -352,6 +352,9 @@ class DeckAgent:
         self.cut_off = bool(cut_off)
         # 用户 id：上传图片按人隔离用
         self.owner = owner
+        # 客户端支不支持「弹选择框」：支持才把 ask_user 给模型，
+        # 不支持的（老版 App / 第三方客户端）就别让它弹，改让模型直接在正文里问。
+        self.interactive = bool(interactive)
 
     def context_usage(self):
         """当前上下文用量，网页版拿它显示「上下文 xx%」。"""
@@ -449,7 +452,8 @@ class DeckAgent:
                 picked = []          # 这一轮发出去的表情包（心情, 文件名）
                 try:
                     for kind, payload in stream_chat(
-                        _sendable(_trim_history(_rehydrate(self.messages))), active_specs(), model,
+                        _sendable(_trim_history(_rehydrate(self.messages))),
+                        active_specs(extra=("ask_user",) if self.interactive else ()), model,
                         api_key=api_key, base_url=base_url, thinking=think,
                     ):
                         if kind == "message":
@@ -673,6 +677,25 @@ class DeckAgent:
                         "tool_call_id": call.get("id"),
                         "content": result,
                     })
+
+                # ask_user：工具已经执行过（回执是「已弹给用户」），这里把选择框事件发出去，
+                # 然后**结束这一轮**。用户点完选项，前端会发一条「我选择：xxx」的新消息，
+                # 模型看到后接着干——不需要在服务端保存半截状态。
+                ask_plan = next((p for p in plans if p["name"] == "ask_user"), None)
+                if ask_plan is not None:
+                    try:
+                        payload = json.loads(ask_plan.get("arguments") or "{}")
+                    except Exception:                 # noqa: BLE001
+                        payload = {}
+                    question = str(payload.get("question") or "要我怎么做？").strip()
+                    options = [str(o).strip() for o in (payload.get("options") or [])
+                               if str(o).strip()][:6]
+                    yield {"type": "await_user",
+                           "question": question,
+                           "options": options,
+                           "allow_custom": bool(payload.get("allow_custom", True))}
+                    yield {"type": "done", "context": self.context_usage(), "awaiting": True}
+                    return
 
                 # 收尾：正文写完了、工具只调了表情包 → 这一轮到此为止，
                 # 不再给模型「接着说」的机会，这是治刷屏的关键一步。

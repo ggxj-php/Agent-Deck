@@ -121,6 +121,18 @@
         </div>
       </section>
 
+      <section class="nav-group" data-group="技能">
+        <button type="button" class="nav-head">
+          <span class="nav-text">技能</span>
+          <i class="caret" aria-hidden="true"></i>
+        </button>
+        <div class="nav-items">
+          <button type="button" class="nav-item" data-view="skills" title="技能包">
+            <span class="nav-text">技能包</span>
+          </button>
+        </div>
+      </section>
+
       <section class="nav-group" data-group="系统">
         <button type="button" class="nav-head">
           <span class="nav-text">系统</span>
@@ -166,6 +178,32 @@
                 </tr>
               </thead>
               <tbody id="user-rows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 技能包 ---------- -->
+      <section class="view" data-view="skills" hidden>
+        <div class="card">
+          <h2>技能包（Agent Skills）</h2>
+          <p class="hint">
+            技能包是某个专门任务的完整工作流：一个目录里有 <code>SKILL.md</code>（工作流说明）
+            加上脚本、模板。装好后模型会用 <code>list_skills</code> 发现它，需要时自己加载。
+            这里的开关只影响模型能不能用，不会删除文件。
+          </p>
+          <div class="user-create-row">
+            <input id="skill-repo" placeholder="https://github.com/owner/repo" style="flex:2">
+            <input id="skill-subdir" placeholder="子目录（可选，如 skills/ppt-master）" style="flex:1">
+            <button type="button" id="skill-install">从仓库安装</button>
+          </div>
+          <p class="hint" id="skill-msg" hidden></p>
+          <div class="table-wrap">
+            <table class="user-table">
+              <thead>
+                <tr><th>技能</th><th>说明</th><th>大小</th><th>来源</th><th>状态</th><th>操作</th></tr>
+              </thead>
+              <tbody id="skill-rows"></tbody>
             </table>
           </div>
         </div>

@@ -1495,7 +1495,7 @@ async function ensureSession(force) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const resp = await fetch('/api/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Client-Capabilities': 'interactive' },
       body: '{}',
     });
     if (resp.ok) {
@@ -2021,6 +2021,9 @@ function handleEvent(turn, event) {
     case 'artifact':
       addArtifact(turn, event);
       break;
+    case 'await_user':
+      showAskCard(turn, event);
+      break;
     case 'cut':
       noticeBubble(turn, t('cutNotice', { reason: event.reason || '网络中断' }), true);
       break;
@@ -2040,6 +2043,67 @@ function handleEvent(turn, event) {
     default:
       break;
   }
+}
+
+/* ---------- ask_user：服务端让用户拍板时弹的选择卡 ---------- */
+function showAskCard(turn, event) {
+  const box = el('div', 'ask-card');
+  const q = el('div', 'ask-question');
+  q.textContent = event.question || '要我怎么做？';
+  box.appendChild(q);
+
+  const opts = el('div', 'ask-options');
+  const buttons = [];
+  (event.options || []).forEach((text) => {
+    const btn = el('button', 'ask-option');
+    btn.type = 'button';
+    btn.textContent = text;
+    btn.addEventListener('click', () => submit(text));
+    buttons.push(btn);
+    opts.appendChild(btn);
+  });
+  box.appendChild(opts);
+
+  let input = null;
+  if (event.allow_custom) {
+    const row = el('div', 'ask-custom');
+    input = el('input', 'ask-input');
+    input.type = 'text';
+    input.placeholder = '也可以自己输入…';
+    const ok = el('button', 'ask-option ask-send');
+    ok.type = 'button';
+    ok.textContent = '确定';
+    ok.addEventListener('click', () => {
+      const v = (input.value || '').trim();
+      if (v) submit(v);
+    });
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        const v = (input.value || '').trim();
+        if (v) submit(v);
+      }
+    });
+    row.append(input, ok);
+    box.appendChild(row);
+  }
+
+  let sent = false;
+  function submit(text) {
+    if (sent) return;
+    sent = true;
+    buttons.forEach((b) => { b.disabled = true; });
+    if (input) input.disabled = true;
+    box.classList.add('asked');
+    const picked = el('div', 'ask-picked');
+    picked.textContent = `已选择：${text}`;
+    box.appendChild(picked);
+    send(`我选择：${text}`);
+  }
+
+  if (turn.el) turn.el.appendChild(box);
+  else messagesEl.appendChild(box);
+  box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 /* ---------------- 回到前台重连 ----------------

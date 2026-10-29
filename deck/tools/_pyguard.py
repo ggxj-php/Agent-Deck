@@ -32,10 +32,13 @@ READ_EVENTS = frozenset(("os.listdir", "os.scandir", "os.chdir"))
 # 不许导入的模块：这些能绕开路径检查直接碰系统
 # 注意只禁 urllib.request / http.client，不要禁整个 urllib——
 # urllib.parse 是纯字符串解析，pathlib（连带 zipfile / docx）都依赖它，一刀切会全炸。
+# 只禁「真的能碰系统」的模块。注意 **不要** 禁 socket / urllib.request / http.client：
+# 标准库自己会 import 它们（比如 xml.sax.saxutils → urllib.request、python-pptx 的依赖链），
+# 一禁整个库都 import 不了。联网照样拦得住——下面 FORBIDDEN 里的审计事件
+# （socket.* / urllib.* / http.client.*）是在真正发起连接时才触发的。
 BLOCKED_MODULES = frozenset((
-    "ctypes", "_ctypes", "_winapi", "msvcrt", "subprocess", "socket",
-    "winreg", "multiprocessing", "urllib.request", "urllib.error",
-    "http.client", "ftplib", "smtplib", "telnetlib",
+    "ctypes", "_ctypes", "_winapi", "msvcrt", "subprocess",
+    "winreg", "multiprocessing", "ftplib", "smtplib", "telnetlib",
 ))
 
 

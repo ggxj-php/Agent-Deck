@@ -23,7 +23,11 @@ def test_每个工具都归了组且只归一组():
 
 
 def test_默认全开():
-    assert len(tools.active_specs()) == len(tools.TOOLS)
+    """默认把非交互类工具全给模型；ask_user 要客户端声明支持交互才给。"""
+    names = {s["function"]["name"] for s in tools.active_specs()}
+    assert names == {s["function"]["name"] for s in tools.TOOLS} - tools.INTERACTIVE_ONLY
+    names2 = {s["function"]["name"] for s in tools.active_specs(extra=("ask_user",))}
+    assert "ask_user" in names2
 
 
 def test_关掉一组之后模型看不到也不让调():

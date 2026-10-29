@@ -42,3 +42,7 @@ crashes/
 deck/web/static/app/
 deck/web/static/download.html
 deck/web/static/app-version.json
+
+# 技能包（只在服务器安装，不进仓库）
+/skills/
+/workspace/skills/

@@ -108,7 +108,7 @@ def _session_lock(session_id):
 
 # 这些路径不需要登录：登录页、静态资源、后台（后台自己校验口令）、探活
 PUBLIC_PREFIXES = (
-    "/static/", "/admin", "/api/admin",
+    "/static/", "/admin", "/api/admin", "/download", "/api/app/latest",
     "/api/auth/login", "/api/auth/register", "/api/auth/captcha",
     "/api/ping", "/api/stickers", "/api/persona", "/favicon.ico",
 )
@@ -235,6 +235,44 @@ async def require_login(request, call_next):
 @app.get("/")
 def index(request: Request):
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+@app.get("/api/app/latest", include_in_schema=False)
+def latest_apk():
+    """返回 static/app/ 下版本号最大的 APK 信息（下载页自动指向最新版）。"""
+    import re as _re
+    folder = os.path.join(STATIC_DIR, "app")
+    best = None
+    if os.path.isdir(folder):
+        for name in os.listdir(folder):
+            if not name.lower().endswith(".apk"):
+                continue
+            m = _re.search(r"(\d+(?:\.\d+)*)", name)
+            if not m:
+                continue
+            parts = tuple(int(x) for x in m.group(1).split("."))
+            if best is None or parts > best[0]:
+                best = (parts, name)
+    if not best:
+        raise HTTPException(status_code=404, detail="还没有上传 APK")
+    parts, name = best
+    path = os.path.join(folder, name)
+    size = os.path.getsize(path)
+    return {
+        "filename": name,
+        "version": ".".join(str(x) for x in parts),
+        "url": f"/static/app/{name}",
+        "size_mb": round(size / 1024 / 1024, 1),
+        "min_android": "8.0",
+        "updated_at": int(os.path.getmtime(path)),
+    }
+
+
+@app.get("/download", include_in_schema=False)
+def download_page():
+    """App 下载页（服务器本地页面，不进仓库）。"""
+    return FileResponse(os.path.join(STATIC_DIR, "download.html"),
+                        headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/login")
@@ -609,6 +647,9 @@ def chat(req: ChatRequest, request: Request):
     这里**不再有常驻的 agent**：每个请求现从库里读历史、建一个 DeckAgent、跑完写回去。
     """
     user = _user_of(request)
+    # 客户端能力协商：只有声明支持交互的客户端才启用「弹选择框」（ask_user），
+    # 老版 App / 第三方客户端继续走纯文本，行为不变。
+    interactive = "interactive" in (request.headers.get("x-client-capabilities") or "").lower()
     sess = store.get(user["id"], req.session_id)
     if not sess:
         raise HTTPException(status_code=404, detail="会话不存在喵（可能被删了，刷新一下）")
@@ -641,7 +682,8 @@ def chat(req: ChatRequest, request: Request):
         # 同一个会话串行处理，避免两条消息交叉写乱历史
         with lock:
             history = store.load_messages(req.session_id, for_model=True)
-            agent = DeckAgent(messages=history, cut_off=bool(sess["cut_off"]), owner=owner_id)
+            agent = DeckAgent(messages=history, cut_off=bool(sess["cut_off"]),
+                              owner=owner_id, interactive=interactive)
             is_first = not history
             artifacts = []
             try:
