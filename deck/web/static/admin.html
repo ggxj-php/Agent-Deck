@@ -180,6 +180,21 @@
               <tbody id="user-rows"></tbody>
             </table>
           </div>
+          <div class="pager" id="user-pager"></div>
+        </div>
+
+        <div class="card">
+          <h2>用户活跃度与行为分析 <span class="hint">（AI 生成，只读统计）</span></h2>
+          <p class="hint">
+            把用户规模、活跃、留存、消息量、最近会话主题汇总给模型，让它写一份运营视角的分析。
+            数据只读，不会改动任何账号；同一份结果缓存 10 分钟。
+          </p>
+          <div class="user-create-row">
+            <button type="button" id="user-analysis-run">生成分析</button>
+            <button type="button" id="user-analysis-refresh">强制重新分析</button>
+            <span class="hint" id="user-analysis-time"></span>
+          </div>
+          <pre class="analysis-box" id="user-analysis-box" hidden></pre>
         </div>
       </section>
 

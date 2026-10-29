@@ -1841,15 +1841,34 @@ function userOp(text, handler, disabled, danger) {
   return btn;
 }
 
-async function loadUsers() {
+let usersPage = 1;
+const USERS_PAGE_SIZE = 10;
+
+async function loadUsers(page) {
+  if (typeof page === 'number' && page > 0) usersPage = page;
   try {
-    const data = await api('/api/admin/users');
+    const data = await api(
+      `/api/admin/users?page=${usersPage}&size=${USERS_PAGE_SIZE}`);
     usersCache = data.users || [];
+    usersPage = data.page || 1;
     renderUsers(data.me);
+    renderUserPager(data);
     userMsg('');
   } catch (err) {
     userMsg(err && err.message ? err.message : '用户列表拉不到', false);
   }
+}
+
+function renderUserPager(data) {
+  const box = document.getElementById('user-pager');
+  if (!box) return;
+  const page = data.page || 1;
+  const pages = data.pages || 1;
+  const total = data.total || 0;
+  box.innerHTML = `
+    <button type="button" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>上一页</button>
+    <span class="pager-info">第 ${page} / ${pages} 页 · 共 ${total} 人</span>
+    <button type="button" data-page="${page + 1}" ${page >= pages ? 'disabled' : ''}>下一页</button>`;
 }
 
 function renderUsers(meId) {
@@ -1896,7 +1915,7 @@ function renderUsers(meId) {
 async function patchUser(user, body, okText) {
   try {
     await api(`/api/admin/users/${user.id}`, body, 'PATCH');
-    await loadUsers();
+    await loadUsers(usersPage);
     userMsg(okText || '改好了', true);
   } catch (err) {
     userMsg(err && err.message ? err.message : '改不了', false);
@@ -1972,7 +1991,7 @@ async function removeUser(user) {
   if (!window.confirm(`删掉用户「${user.name}」和他所有会话？删了就回不来了`)) return;
   try {
     await api(`/api/admin/users/${user.id}`, undefined, 'DELETE');
-    await loadUsers();
+    await loadUsers(usersPage);
     userMsg(`已经把「${user.name}」删掉了`, true);
   } catch (err) {
     userMsg(err && err.message ? err.message : '删不掉', false);
@@ -2000,7 +2019,7 @@ document.getElementById('user-create').addEventListener('click', async () => {
     passEl.value = '';
     noteEl.value = '';
     adminEl.checked = false;
-    await loadUsers();
+    await loadUsers(usersPage);
     userMsg(`「${name}」建好了`, true);
   } catch (err) {
     userMsg(err && err.message ? err.message : '建不了', false);
@@ -2530,4 +2549,57 @@ document.addEventListener('DOMContentLoaded', () => {
       if (ev.target && ev.target.id === 'skill-install') return;
     });
   });
+});
+
+/* ---------------- 用户活跃度与行为分析（AI） ---------------- */
+let analysisBusy = false;
+
+function analysisMsg(text, ok) {
+  const box = document.getElementById('user-analysis-time');
+  if (!box) return;
+  box.textContent = text || '';
+  box.style.color = ok === false ? '#c0392b' : '';
+}
+
+async function runUserAnalysis(force) {
+  if (analysisBusy) return;
+  analysisBusy = true;
+  const runBtn = document.getElementById('user-analysis-run');
+  const refreshBtn = document.getElementById('user-analysis-refresh');
+  const box = document.getElementById('user-analysis-box');
+  if (runBtn) runBtn.disabled = true;
+  if (refreshBtn) refreshBtn.disabled = true;
+  analysisMsg('正在汇总数据、等模型写分析…');
+  try {
+    // 必须带 body（哪怕空对象）才会走 POST，否则 api() 默认 GET → 405
+    const data = await api(`/api/admin/users/analysis${force ? '?refresh=1' : ''}`, {});
+    if (box) {
+      box.hidden = false;
+      box.textContent = data.text || '';
+    }
+    const at = data.generated_at ? fmtTime(data.generated_at) : '';
+    analysisMsg(`生成于 ${at}${data.cached ? '（缓存）' : ''}`, true);
+  } catch (err) {
+    analysisMsg((err && err.message) || '分析失败', false);
+  } finally {
+    analysisBusy = false;
+    if (runBtn) runBtn.disabled = false;
+    if (refreshBtn) refreshBtn.disabled = false;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const runBtn = document.getElementById('user-analysis-run');
+  const refreshBtn = document.getElementById('user-analysis-refresh');
+  const pager = document.getElementById('user-pager');
+  if (runBtn) runBtn.addEventListener('click', () => runUserAnalysis(false));
+  if (refreshBtn) refreshBtn.addEventListener('click', () => runUserAnalysis(true));
+  if (pager) {
+    pager.addEventListener('click', (ev) => {
+      const btn = ev.target.closest ? ev.target.closest('button[data-page]') : null;
+      if (!btn || btn.disabled) return;
+      const page = parseInt(btn.dataset.page, 10);
+      if (page > 0) loadUsers(page);
+    });
+  }
 });

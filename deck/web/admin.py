@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from .. import (
+    analytics,
     auth,
     capabilities,
     config_report,
@@ -25,13 +26,14 @@ from .. import (
     geoip,
     llm,
     persona,
+    ratelimit,
     settings,
     skills,
     store,
     tools,
     usage,
 )
-from ..config import CONTEXT_COMPRESS_AT, EMBED_DIM
+from ..config import CONTEXT_COMPRESS_AT, EMBED_DIM, LLM_TPM_BUDGET
 from ..kb import stats as kb_stats
 from . import blacklist, sysinfo, traffic, update
 
@@ -679,19 +681,61 @@ def uninstall_skill(req: SkillUninstall, request: Request):
 
 
 @router.get("/api/admin/users")
-def list_users(request: Request):
-    """用户列表：权限、封号状态、邀请码、注册时间、最后登录、会话数。"""
+def list_users(request: Request, page: int = 1, size: int = 10):
+    """用户列表（分页）：权限、封号状态、邀请码、注册时间、最后登录、会话数。"""
     me = _require(request)
     with db.cursor() as conn:
+        total = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+        page, size, pages, offset = analytics.page_bounds(total, page, size)
         rows = conn.execute(
             "SELECT id, name, invite_code, invited_by, created_at, is_admin, disabled, "
             "       ban_until, note, last_login, last_active, "
             "       (SELECT ip FROM auth_tokens t WHERE t.user_id = users.id "
             "        ORDER BY t.created_at DESC LIMIT 1) AS last_ip "
-            "FROM users ORDER BY id"
+            "FROM users ORDER BY COALESCE(last_active, 0) DESC, id "
+            "LIMIT ? OFFSET ?", (size, offset)
         ).fetchall()
     return {"users": [_user_row(row) for row in rows], "me": me["id"],
-            "total": len(rows)}
+            "total": int(total), "page": page, "size": size, "pages": pages}
+
+
+# 「AI 分析」缓存：10 分钟内重复点直接给上次结果，省钱也省等待
+_ANALYSIS_CACHE = {"at": 0.0, "text": "", "stats": None}
+_ANALYSIS_TTL = 600
+
+
+@router.post("/api/admin/users/analysis")
+def analyze_users(request: Request, refresh: bool = False):
+    """用户活跃度与行为分析（AI 写报告，只读统计）。"""
+    _require(request)
+    now = time.time()
+    if (not refresh and _ANALYSIS_CACHE["text"]
+            and now - _ANALYSIS_CACHE["at"] < _ANALYSIS_TTL):
+        return {"ok": True, "text": _ANALYSIS_CACHE["text"],
+                "generated_at": _ANALYSIS_CACHE["at"], "cached": True,
+                "totals": (_ANALYSIS_CACHE["stats"] or {}).get("totals", {})}
+
+    stats = analytics.collect_user_activity()
+    messages = analytics.build_analysis_prompt(stats)
+    estimate = sum(len(str(m.get("content") or "")) // 2 for m in messages)
+    ratelimit.acquire(estimate, budget=LLM_TPM_BUDGET, max_wait=20)
+    try:
+        reply = llm.complete(
+            messages,
+            model=settings.chat_model(),
+            api_key=settings.chat_key(),
+            base_url=settings.chat_base_url(),
+            max_tokens=2000,
+        )
+    except Exception as exc:                     # noqa: BLE001
+        detail = getattr(exc, "message", None) or str(exc)
+        raise HTTPException(status_code=502, detail=f"分析失败：{detail}") from exc
+    text = (reply or "").strip()
+    if not text:
+        raise HTTPException(status_code=502, detail="分析失败：模型没返回内容")
+    _ANALYSIS_CACHE.update({"at": now, "text": text, "stats": stats})
+    return {"ok": True, "text": text, "generated_at": now, "cached": False,
+            "totals": stats["totals"]}
 
 
 class UserCreate(BaseModel):
