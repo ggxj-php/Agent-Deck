@@ -2553,6 +2553,73 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /* ---------------- 用户活跃度与行为分析（AI） ---------------- */
 let analysisBusy = false;
+let analysisText = '';
+
+/* 极简 Markdown 渲染（只处理分析报告用得到的：标题/表格/列表/加粗/行内代码）。
+   先整体转义，再按行拼 HTML，避免模型输出里的 `<` 之类搞坏页面。 */
+function renderMarkdown(md) {
+  const esc = (t) => escapeHtml(t);
+  const inline = (t) => esc(t)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  let i = 0;
+  let list = null;
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed) { closeList(); i += 1; continue; }
+    // 表格：| a | b |  +  |---|---|
+    if (trimmed.includes('|') && i + 1 < lines.length
+        && /^\|?[\s:|-]+\|?$/.test(lines[i + 1].trim())
+        && lines[i + 1].includes('-')) {
+      closeList();
+      const cells = (row) => row.trim().replace(/^\|/, '').replace(/\|$/, '')
+        .split('|').map((c) => c.trim());
+      const header = cells(trimmed);
+      i += 2;
+      let html = '<table><thead><tr>';
+      header.forEach((c) => { html += `<th>${inline(c)}</th>`; });
+      html += '</tr></thead><tbody>';
+      while (i < lines.length && lines[i].trim().includes('|')) {
+        const row = cells(lines[i].trim());
+        html += '<tr>';
+        header.forEach((_h, idx) => { html += `<td>${inline(row[idx] || '')}</td>`; });
+        html += '</tr>';
+        i += 1;
+      }
+      out.push(html + '</tbody></table>');
+      continue;
+    }
+    const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      closeList();
+      const level = Math.min(5, heading[1].length + 2);   // # -> h3
+      out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+      i += 1;
+      continue;
+    }
+    if (/^[-*]\s+/.test(trimmed)) {
+      if (list !== 'ul') { closeList(); out.push('<ul>'); list = 'ul'; }
+      out.push(`<li>${inline(trimmed.replace(/^[-*]\s+/, ''))}</li>`);
+      i += 1;
+      continue;
+    }
+    if (/^\d+[.)]\s+/.test(trimmed)) {
+      if (list !== 'ol') { closeList(); out.push('<ol>'); list = 'ol'; }
+      out.push(`<li>${inline(trimmed.replace(/^\d+[.)]\s+/, ''))}</li>`);
+      i += 1;
+      continue;
+    }
+    closeList();
+    out.push(`<p>${inline(trimmed)}</p>`);
+    i += 1;
+  }
+  closeList();
+  return out.join('');
+}
 
 function analysisMsg(text, ok) {
   const box = document.getElementById('user-analysis-time');
@@ -2575,8 +2642,11 @@ async function runUserAnalysis(force) {
     const data = await api(`/api/admin/users/analysis${force ? '?refresh=1' : ''}`, {});
     if (box) {
       box.hidden = false;
-      box.textContent = data.text || '';
+      box.innerHTML = renderMarkdown(data.text || '');
+      analysisText = data.text || '';
     }
+    const dl = document.getElementById('user-analysis-download');
+    if (dl) dl.disabled = !data.text;
     const at = data.generated_at ? fmtTime(data.generated_at) : '';
     analysisMsg(`生成于 ${at}${data.cached ? '（缓存）' : ''}`, true);
   } catch (err) {
@@ -2594,6 +2664,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const pager = document.getElementById('user-pager');
   if (runBtn) runBtn.addEventListener('click', () => runUserAnalysis(false));
   if (refreshBtn) refreshBtn.addEventListener('click', () => runUserAnalysis(true));
+  const dl = document.getElementById('user-analysis-download');
+  if (dl) {
+    dl.addEventListener('click', () => {
+      if (!analysisText) return;
+      const blob = new Blob([analysisText], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `用户行为分析_${new Date().toISOString().slice(0, 10)}.md`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    });
+  }
   if (pager) {
     pager.addEventListener('click', (ev) => {
       const btn = ev.target.closest ? ev.target.closest('button[data-page]') : null;

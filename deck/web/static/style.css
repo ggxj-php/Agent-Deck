@@ -2928,19 +2928,45 @@ a.side-download {
 }
 a.side-download:hover { filter: brightness(.97); }
 
-/* 后台「用户行为分析」结果 */
-.analysis-box {
+/* 后台「用户行为分析」结果（Markdown 渲染） */
+.analysis-md {
   margin: 12px 0 0;
   padding: 14px 16px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #fbfaf7;
   color: var(--ink);
-  font: inherit;
   font-size: 13px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 460px;
+  line-height: 1.75;
+  max-height: 72vh;
   overflow: auto;
+  word-break: break-word;
 }
+.analysis-md h3, .analysis-md h4, .analysis-md h5 {
+  margin: 14px 0 6px;
+  font-size: 14.5px;
+  line-height: 1.4;
+}
+.analysis-md h3 { font-size: 16px; }
+.analysis-md p { margin: 6px 0; }
+.analysis-md ul, .analysis-md ol { margin: 6px 0; padding-left: 20px; }
+.analysis-md li { margin: 2px 0; }
+.analysis-md code {
+  background: #f0edf7;
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-size: 12px;
+}
+.analysis-md table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12.5px;
+}
+.analysis-md th, .analysis-md td {
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.analysis-md th { background: #f4f1fb; font-weight: 600; }

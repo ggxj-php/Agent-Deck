@@ -725,7 +725,9 @@ def analyze_users(request: Request, refresh: bool = False):
             model=settings.chat_model(),
             api_key=settings.chat_key(),
             base_url=settings.chat_base_url(),
-            max_tokens=2000,
+            # 关思考 + 给足输出预算：思考会把 max_tokens 吃光导致正文为空（踩过）
+            max_tokens=8000,
+            thinking=False,
         )
     except Exception as exc:                     # noqa: BLE001
         detail = getattr(exc, "message", None) or str(exc)
