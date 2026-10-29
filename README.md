@@ -958,6 +958,14 @@ description: 一句话说明这个技能干什么、什么时候用
 → make_download_link 给出下载链接
 ```
 
+## 生成文件自动清理
+
+技能/代码生成出来的成品（`.pptx` `.ppt` `.pdf` `.docx` `.xlsx`）和 `workspace/projects/`
+下的项目目录，**默认保留 12 小时**，后台每 5 分钟扫一次，过期自动删（`GENERATED_TTL_HOURS`
+可改）。上传的附件仍是 20 分钟 TTL，两套互不影响。
+
+清理只动 `workspace/` 里的生成物，不碰 `skills/`、`uploads/` 和代码文件。
+
 ## 已知限制
 
 - **C/C++ 编译器很老**：本机用 `CXX` 指的 TDM-GCC 4.9.2（2014 年），只支持到 **C++11**。`std::filesystem`、结构化绑定、`auto` 简写这些 C++14/17 的东西编译不过，所以工具描述里专门提醒了模型别用。换个新一点的 MinGW 把 `CXX` 指过去就能解决。

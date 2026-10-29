@@ -26,9 +26,9 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import auth, captcha, context, db, settings, store, uploads
+from .. import auth, captcha, cleanup, context, db, settings, store, uploads
 from .. import persona as persona_mod
-from ..config import CONTEXT_COMPRESS_AT
+from ..config import CONTEXT_COMPRESS_AT, GENERATED_TTL_HOURS
 from ..core import DeckAgent
 from ..kb import warmup
 from ..tools import download as download_tool
@@ -161,15 +161,18 @@ def _start_upload_sweeper(interval=300):
             try:
                 removed = uploads.sweep()
                 gone = download_tool.sweep()
-                if removed or gone:
-                    print(f"[uploads] 清理了 {removed} 张过期图片、{gone} 条过期下载链接",
+                files, dirs, freed = cleanup.sweep()
+                if removed or gone or files or dirs:
+                    print(f"[清理] 过期图片 {removed} 张、下载链接 {gone} 条、"
+                          f"生成文件 {files} 个、项目目录 {dirs} 个（释放 {freed // 1024} KB）",
                           flush=True)
             except Exception as exc:         # noqa: BLE001
                 print(f"[uploads] 清理失败：{exc}", flush=True)
             time.sleep(interval)
 
     threading.Thread(target=loop, daemon=True).start()
-    print(f"[uploads] 后台清理已启动：TTL {uploads.TTL_SECONDS // 60} 分钟，每 {interval // 60} 分钟扫一次",
+    print(f"[清理] 后台清理已启动：附件 TTL {uploads.TTL_SECONDS // 60} 分钟、"
+          f"生成物 TTL {GENERATED_TTL_HOURS:g} 小时，每 {interval // 60} 分钟扫一次",
           flush=True)
 
 

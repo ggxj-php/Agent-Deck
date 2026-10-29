@@ -42,6 +42,9 @@ SITE_API = os.environ.get("TAFFY_SITE_API", "").strip().lower() or "api.example.
 # 代价是单次请求的成本上限变高，但比付了钱拿回一个空回复划算。
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "32768") or 0)
 
+# 生成的成品（PPT/PDF 等）保留多少小时；后台每 10 分钟扫一次，过期就删
+GENERATED_TTL_HOURS = float(os.environ.get("GENERATED_TTL_HOURS", "12") or 12)
+
 # 「关思考」要发给接口的那个参数名。百炼 / DashScope 系的中转认 enable_thinking，
 # 网页上那个「思考」开关就靠它生效。换成不认这个参数的接口（有些官方 API 会对
 # 未知参数直接 400）时，在 .env 里写一行 THINKING_PARAM= （留空）就能关掉这个行为，
@@ -372,6 +375,8 @@ CORE_PROMPT = r"""【共享规矩 · 所有身份卡都适用】
     **必须用 ask_user，不要用 render_html 画“决策卡/选择页”**——HTML 卡片在聊天里
     是个 iframe，用户点了没有任何回调，等于点了没反应（真踩过）。选项最多 6 个，
     需要用户自由填写就把 allow_custom 设为 true。
+    只要工具列表里有 ask_user，就**不许用文字列一串选项让用户回复编号**——那是退化，
+    用户还得打字。只有当前客户端确实不支持（工具列表里没有 ask_user）时才用文字列。
     能从上下文合理推断的小事别滥用（比如默认用中文、默认 16:9）。
 
 """
