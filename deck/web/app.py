@@ -652,7 +652,12 @@ def chat(req: ChatRequest, request: Request):
     user = _user_of(request)
     # 客户端能力协商：只有声明支持交互的客户端才启用「弹选择框」（ask_user），
     # 老版 App / 第三方客户端继续走纯文本，行为不变。
-    interactive = "interactive" in (request.headers.get("x-client-capabilities") or "").lower()
+    ua = (request.headers.get("user-agent") or "")
+    cap = (request.headers.get("x-client-capabilities") or "").lower()
+    # 现代浏览器都支持选择卡：除了显式声明，浏览器 UA 也直接放行，
+    # 免得老缓存页面（没带新请求头）用不了 ask_user。
+    interactive = ("interactive" in cap
+                   or ("mozilla" in ua.lower() and "agentdeck-android" not in ua.lower()))
     sess = store.get(user["id"], req.session_id)
     if not sess:
         raise HTTPException(status_code=404, detail="会话不存在喵（可能被删了，刷新一下）")
