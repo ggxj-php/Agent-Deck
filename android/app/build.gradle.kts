@@ -27,8 +27,8 @@ android {
         applicationId = "com.agentdeck.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.10"
+        versionCode = 12
+        versionName = "1.11"
 
         // 自己部署：改 local.properties 的 deck.baseUrl，或在登录页填服务器地址
         buildConfigField("String", "BASE_URL", "\"$deckBaseUrl\"")
@@ -99,5 +99,7 @@ dependencies {
     implementation(libs.jlatexmath)
 
     testImplementation("junit:junit:4.13.2")
+    // 单元测试里用真实 org.json（android.jar 里的是 stub）
+    testImplementation("org.json:json:20240303")
     debugImplementation(libs.androidx.ui.tooling)
 }

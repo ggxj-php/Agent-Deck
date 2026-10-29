@@ -1,4 +1,8 @@
 package com.agentdeck.app.ui.components
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+
 import androidx.compose.ui.graphics.asImageBitmap
 
 import androidx.compose.animation.core.animateFloatAsState
@@ -84,10 +88,11 @@ fun MessageItem(
     palette: DeckPalette,
     avatarUrl: String,
     onPreview: (String) -> Unit = {},
+    onAskPick: (Long, Int, String) -> Unit = { _, _, _ -> },
 ) {
     when (message.role) {
         Role.USER -> UserMessage(message, baseUrl, palette, onPreview)
-        Role.ASSISTANT -> AssistantMessage(message, baseUrl, palette, avatarUrl, onPreview)
+        Role.ASSISTANT -> AssistantMessage(message, baseUrl, palette, avatarUrl, onPreview, onAskPick)
     }
 }
 
@@ -209,6 +214,7 @@ private fun AssistantMessage(
     palette: DeckPalette,
     avatarUrl: String,
     onPreview: (String) -> Unit,
+    onAskPick: (Long, Int, String) -> Unit,
 ) {
     val bubbleShape = RoundedCornerShape(
         topStart = 5.dp,
@@ -241,7 +247,7 @@ private fun AssistantMessage(
                 .border(1.dp, palette.line, bubbleShape)
                 .padding(horizontal = 13.dp, vertical = 10.dp),
         ) {
-            for (block in message.blocks) {
+            message.blocks.forEachIndexed { index, block ->
                 when (block) {
                     is Block.Text -> {
                         androidx.compose.foundation.text.selection.SelectionContainer {
@@ -269,6 +275,12 @@ private fun AssistantMessage(
                     is Block.Notice -> NoticeRow(block.text, block.isError, palette)
 
                     is Block.Artifact -> ArtifactBlock(block, baseUrl, palette, onPreview)
+
+                    is Block.Ask -> AskCard(
+                        block = block,
+                        palette = palette,
+                        onPick = { option -> onAskPick(message.id, index, option) },
+                    )
                 }
             }
             if (message.waiting) {
@@ -635,5 +647,92 @@ private fun LoadingBubble(palette: DeckPalette, since: Long, label: String) {
             fontSize = 12.5.sp,
             color = palette.inkSoft,
         )
+    }
+}
+
+
+/**
+ * ask_user 选择卡：模型要用户拍板时用。
+ * 和网页端 showAskCard 一致——点选项/自己输入后，发一条「我选择：X」继续。
+ */
+@Composable
+private fun AskCard(
+    block: Block.Ask,
+    palette: DeckPalette,
+    onPick: (String) -> Unit,
+) {
+    var custom by remember(block.question) { mutableStateOf("") }
+    val answered = block.chosen != null
+
+    Surface(
+        color = palette.softFill,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, palette.line),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = block.question,
+                fontSize = 13.5.sp,
+                color = palette.ink,
+                fontWeight = FontWeight.SemiBold,
+                lineHeight = 20.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+
+            block.options.forEach { option ->
+                val picked = answered && block.chosen == option
+                Surface(
+                    onClick = { if (!answered) onPick(option) },
+                    enabled = !answered,
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (picked) palette.activeFill else palette.bubble,
+                    border = BorderStroke(1.dp, if (picked) palette.accent else palette.line),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 3.dp),
+                ) {
+                    Text(
+                        text = option,
+                        fontSize = 13.sp,
+                        color = palette.accent,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                    )
+                }
+            }
+
+            if (block.allowCustom && !answered) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = custom,
+                        onValueChange = { custom = it },
+                        singleLine = true,
+                        placeholder = { Text("也可以自己输入…", fontSize = 12.sp, color = palette.inkSoft) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        enabled = custom.isNotBlank(),
+                        onClick = { onPick(custom.trim()) },
+                    ) {
+                        Text("确定", color = palette.accent, fontSize = 13.sp)
+                    }
+                }
+            }
+
+            if (answered) {
+                Text(
+                    text = "已选择：${block.chosen}",
+                    fontSize = 11.5.sp,
+                    color = palette.accent,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
     }
 }

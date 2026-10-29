@@ -31,6 +31,17 @@ sealed interface Block {
 
     /** 助手画出来的图/卡片，点开用浏览器看。 */
     data class Artifact(val id: String, val title: String) : Block
+
+    /**
+     * ask_user 选择卡：模型要用户拍板时弹出来。
+     * 点选项后照常发一条「我选择：X」，服务端接着跑下一轮。
+     */
+    data class Ask(
+        val question: String,
+        val options: List<String>,
+        val allowCustom: Boolean = true,
+        val chosen: String? = null,
+    ) : Block
 }
 
 enum class Role { USER, ASSISTANT }

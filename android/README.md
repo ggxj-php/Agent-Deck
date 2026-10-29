@@ -103,6 +103,19 @@ app/src/local/res/mipmap-anydpi-v26/ic_launcher.xml
 ./gradlew :app:assembleLocalRelease  # 私有：用 app/src/local 里的名字和图标
 ```
 
+
+## 交互式选择卡（ask_user）
+
+服务端在客户端声明支持交互时，才允许模型用 `ask_user` 弹选择框（技能包、PPT 风格这类需要拍板的地方）。
+
+- `/api/chat` 请求头带 `X-Client-Capabilities: interactive`
+- SSE 里识别 `await_user`（`question` / `options` / `allow_custom`），渲染成气泡里的选择卡
+- 用户点选项（或自己输入）后，App 照常发一条 `我选择：<选项>` 的消息，服务端接着跑下一轮
+- 不带这个头的旧客户端不会收到 `ask_user`，模型会在正文里直接问，功能不丢
+
+技能包（Agent Skills）本身在服务端安装/启停，App 侧不需要额外接口：模型调用
+`list_skills` / `load_skill` 时，App 按普通工具卡片展示。
+
 ## 渲染与性能
 
 - 消息正文走 `ui/components/Markdown.kt` 的自研渲染器（标题/段落/列表/代码块/表格/引用/链接/图片），

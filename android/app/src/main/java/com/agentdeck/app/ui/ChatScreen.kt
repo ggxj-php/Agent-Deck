@@ -220,7 +220,13 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                 }
             },
         ) { padding ->
-            MessageList(state, palette, Modifier.padding(padding)) { previewUrl = it }
+            MessageList(
+                state = state,
+                palette = palette,
+                modifier = Modifier.padding(padding),
+                onPreview = { previewUrl = it },
+                onAskPick = viewModel::pickAsk,
+            )
         }
     }
 
@@ -583,6 +589,7 @@ private fun MessageList(
     palette: com.agentdeck.app.ui.theme.DeckPalette,
     modifier: Modifier = Modifier,
     onPreview: (String) -> Unit,
+    onAskPick: (Long, Int, String) -> Unit,
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -669,6 +676,7 @@ private fun MessageList(
                     palette = palette,
                     avatarUrl = state.persona.avatarUrl(state.serverUrl),
                     onPreview = onPreview,
+                    onAskPick = onAskPick,
                 )
             }
             item { Spacer(Modifier.height(8.dp)) }

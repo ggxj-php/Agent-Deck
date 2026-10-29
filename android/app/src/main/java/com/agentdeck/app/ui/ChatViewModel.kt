@@ -504,6 +504,35 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
         }
     }
 
+    /**
+     * 用户点了选择卡：把这张卡标记成已选，然后照常发一条「我选择：X」。
+     * 服务端会接着原来的任务跑下一轮（网页端也是这么做的）。
+     */
+    fun pickAsk(messageId: Long, blockIndex: Int, option: String) {
+        val text = option.trim()
+        if (text.isEmpty()) return
+        _state.update { current ->
+            current.copy(
+                messages = current.messages.map { message ->
+                    if (message.id != messageId) {
+                        message
+                    } else {
+                        message.copy(
+                            blocks = message.blocks.mapIndexed { index, block ->
+                                if (index == blockIndex && block is Block.Ask && block.chosen == null) {
+                                    block.copy(chosen = text)
+                                } else {
+                                    block
+                                }
+                            },
+                        )
+                    }
+                },
+            )
+        }
+        send("我选择：$text")
+    }
+
     /** 把最新一条助手消息的「等待首 token」占位状态更新一下。 */
     private fun setWaiting(label: String) {
         val now = System.currentTimeMillis()
@@ -569,6 +598,16 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                     // 正文还没开始（或刚好停在句子边界）就立刻显示
                     flushStickers()
                 }
+            }
+
+            is ChatEvent.AwaitUser -> updateLastAssistant { msg ->
+                msg.copy(
+                    blocks = settleThinking(msg.blocks) + Block.Ask(
+                        question = event.question.ifBlank { "要我怎么做？" },
+                        options = event.options,
+                        allowCustom = event.allowCustom,
+                    ),
+                )
             }
 
             is ChatEvent.Artifact -> {

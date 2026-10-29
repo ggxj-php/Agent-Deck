@@ -244,6 +244,8 @@ class DeckApi(context: android.content.Context) {
         val request = Request.Builder()
             .url("$baseUrl/api/chat")
             .header("Accept", "text/event-stream")
+            // 声明支持交互：服务端才会给模型 ask_user（老客户端不带就退回纯文本提问）
+            .header("X-Client-Capabilities", "interactive")
             .header("User-Agent", USER_AGENT)
             .post(payload.toString().toRequestBody(jsonMedia))
             .build()
@@ -372,6 +374,8 @@ class DeckApi(context: android.content.Context) {
                 id = obj.optString("id"),
                 title = obj.optString("title"),
             )
+
+            "await_user" -> parseAwaitUser(obj)
             "cut" -> ChatEvent.Cut(obj.optString("reason"))
             "compressed" -> ChatEvent.Compressed(
                 dropped = obj.optInt("dropped"),

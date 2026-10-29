@@ -77,6 +77,13 @@ sealed interface ChatEvent {
     data class ToolEnd(val name: String, val result: String) : ChatEvent
     data class Sticker(val mood: String, val name: String) : ChatEvent
     data class Artifact(val id: String, val title: String) : ChatEvent
+
+    /** 服务端让用户拍板：弹选择卡（网页端 ask_user 的 SSE 事件）。 */
+    data class AwaitUser(
+        val question: String,
+        val options: List<String>,
+        val allowCustom: Boolean,
+    ) : ChatEvent
     data class Cut(val reason: String) : ChatEvent
     data class Compressed(val dropped: Int, val beforeTokens: Int, val afterTokens: Int) : ChatEvent
     data class Done(val context: ContextUsage?) : ChatEvent
