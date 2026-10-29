@@ -67,6 +67,9 @@ def _is_write(mode, flags):
 
 def main():
     workspace = os.path.normcase(os.path.realpath(sys.argv[1]))
+    # 技能脚本（workspace/skills/ 下）允许起子进程：PPT 生成那套要靠外部命令。
+    # 这是管理员从仓库装的受信任代码，和模型现写的脚本区别对待。
+    skill_mode = os.environ.get("DSH_SKILL_SCRIPT") == "1"
     script = sys.argv[2]
     sys.argv = sys.argv[2:]      # 让脚本看到自己的参数，跟直接 python 它一样
 
@@ -114,9 +117,10 @@ def main():
     def hook(event, args):
         if event == "import":
             name = args[0]
-            if name in BLOCKED_MODULES or any(
-                name.startswith(m + ".") for m in BLOCKED_MODULES
-            ):
+            blocked = (name in BLOCKED_MODULES
+                       or any(name.startswith(m + ".") for m in BLOCKED_MODULES))
+            if blocked and skill_mode and name.split(".")[0] in ("subprocess", "socket", "ctypes", "_ctypes"):
+                return          # 技能脚本：允许 import，实际动作另有审计
                 # 抛 ImportError 而不是 PermissionError：标准库里有些 import 是
                 # try ... except ImportError 的（比如 ntpath 试 _winapi、pathlib 试 nt），
                 # 抛别的异常会把正常库的 import 链整个炸掉。
@@ -132,13 +136,24 @@ def main():
                 return
             if _is_write(mode, flags):
                 deny(f"试图写 workspace 以外的文件：{path}")
+            if skill_mode:
+                return                     # 技能脚本：允许读系统文件（字体/mime 等），写仍然限制
             if not any(_inside(full, r) for r in roots):
                 deny(f"试图读 workspace 以外的文件：{path}")
             return
 
         for prefix in FORBIDDEN:
-            if event.startswith(prefix):
-                deny(f"调用 {event} 被禁止")
+            if not event.startswith(prefix):
+                continue
+            if skill_mode and (prefix.startswith("subprocess")
+                               or prefix.startswith("os.system")
+                               or prefix.startswith("os.exec")
+                               or prefix.startswith("os.spawn")
+                               or prefix.startswith("os.posix_spawn")
+                               or prefix.startswith("ctypes")):
+                # 技能脚本允许起子进程、允许 ctypes（numpy 导入就要用）
+                continue
+            deny(f"调用 {event} 被禁止")
 
         if event in WRITE_EVENTS:
             for arg in args:

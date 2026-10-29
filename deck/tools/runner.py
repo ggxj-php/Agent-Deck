@@ -96,7 +96,16 @@ def _kill_tree(proc):
             pass
 
 
-def _exec(cmd: list, timeout: int, stdin: str = ""):
+def _is_skill_script(full_path):
+    """是不是装在 workspace/skills/ 下的技能脚本（技能是管理员装的、按信任代码处理）"""
+    try:
+        rel = os.path.relpath(os.path.realpath(full_path), os.path.realpath(WORKSPACE))
+    except ValueError:
+        return False
+    return rel.replace(os.sep, "/").startswith("skills/")
+
+
+def _exec(cmd: list, timeout: int, stdin: str = "", skill_script: bool = False):
     """在 workspace 目录下执行命令，返回 (退出码, 输出)，超时连子进程一起杀。
 
     输出是边读边数的，累计超过 RUN_OUT_BYTES 就杀进程——否则 while True: print(...)
@@ -108,6 +117,11 @@ def _exec(cmd: list, timeout: int, stdin: str = ""):
     }
     env["PYTHONIOENCODING"] = "utf-8"   # 让 python 子进程输出 utf-8，免得中文乱码
     env["PYTHONUTF8"] = "1"
+    if skill_script:
+        # 技能脚本允许起子进程（pptx 转换/字体处理那套要靠它）。
+        # 技能由管理员在后台从仓库安装并明确启用，按「受信任代码」处理；
+        # 普通 workspace 脚本仍然禁 subprocess。
+        env["DSH_SKILL_SCRIPT"] = "1"
     proc = subprocess.Popen(
         cmd,
         cwd=WORKSPACE,
@@ -246,7 +260,8 @@ def run_code(path: str, args=None, stdin: str = "", timeout: int = RUN_TIMEOUT) 
 
     if ext == ".py":
         code, out = _exec(
-            [sys.executable, _PY_GUARD, WORKSPACE, full] + args, timeout, stdin
+            [sys.executable, _PY_GUARD, WORKSPACE, full] + args, timeout, stdin,
+            skill_script=_is_skill_script(full),
         )
         return out if code is None else f"退出码 {code}\n{_shorten(out)}"
 

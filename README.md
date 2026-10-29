@@ -943,8 +943,10 @@ description: 一句话说明这个技能干什么、什么时候用
 
 - 只能读写 `workspace/`（技能装在 `workspace/skills/`，所以能读）
 - **不能联网**（`urllib`/`socket` 的真实连接会在审计钩子里被拦）
-- **不能起子进程**（`subprocess` 被禁用）——需要外部命令的技能会失败，
-  要用的依赖请提前用 `pip install` 装进 venv
+- **技能脚本例外**：`workspace/skills/` 下的脚本按「管理员安装的受信任代码」处理，
+  允许起子进程（PPT 转换、字体处理那套要靠它）；模型现写的普通脚本仍然禁用 `subprocess`
+- 技能需要的 Python 依赖请提前用 `pip install -r workspace/skills/<名字>/requirements.txt` 装进 venv
+- 只安装你信任的技能：技能脚本拥有较强的系统能力
 
 ### 附带的示例
 
