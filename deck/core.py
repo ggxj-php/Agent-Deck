@@ -18,11 +18,15 @@ from .config import (
     MAX_ROUNDS,
     RESUME_INSTRUCTION,
     RESUME_WORDS,
+    SAME_RESULT_LIMIT,
     STICKER_LIMIT,
     TOOL_RESULT_PRUNE_AT,
     TOOL_RESULT_PRUNE_HEAD,
     TOOL_RESULT_PRUNE_TAIL,
+    TURN_TOOL_BUDGET,
+    TURN_TRIAL_ROUNDS,
 )
+from .fuse import TurnFuse
 from .llm import stream_chat
 from .llm_errors import ContextOverflow, LLMError
 from .tools import active_specs, execute
@@ -472,6 +476,10 @@ class DeckAgent:
             recent_sigs = []          # 最近的工具调用签名，用来发现重复重试
             search_counts = {}        # 这一轮各搜索工具调了几次
             search_cache = {}         # 工具名 -> [(特征集合, 结果)]，判定「又搜了一遍」
+            fuse = TurnFuse(tool_budget=TURN_TOOL_BUDGET,
+                            trial_rounds=TURN_TRIAL_ROUNDS,
+                            same_result_limit=SAME_RESULT_LIMIT)
+            fuse_notified = False
 
             for _ in range(MAX_ROUNDS):
                 message = None
@@ -667,6 +675,20 @@ class DeckAgent:
                     search_counts[name] = count + 1
 
                 todo = [p for p in plans if not p["reused"] and not p.get("blocked")]
+                if fuse.active:
+                    # 已经熔断：这一轮的工具一个都不执行，只把「停下来说明卡点」回给模型
+                    for plan in todo:
+                        plan["args"] = {}
+                        plan["result"] = fuse.blocked_text()
+                    todo = []
+                else:
+                    for _plan in todo:
+                        fuse.observe_call()
+                    if fuse.active:
+                        for plan in todo:
+                            plan["args"] = {}
+                            plan["result"] = fuse.blocked_text()
+                        todo = []
                 if len(todo) == 1:
                     one = todo[0]
                     one["args"], one["result"] = _safe_execute(one["name"], one["call"])
@@ -677,6 +699,17 @@ class DeckAgent:
                         for future in as_completed(futures):
                             item = futures[future]
                             item["args"], item["result"] = future.result()
+
+                # 工具结果重复检测：同一个工具反复返回差不多内容 → 提醒，次数多了熔断
+                for plan in plans:
+                    if plan.get("result") is None or plan.get("blocked"):
+                        continue
+                    warning = fuse.observe_result(plan["name"], plan["result"])
+                    if warning:
+                        plan["result"] = str(plan["result"]) + "\n\n" + warning
+                if fuse.active and plans:
+                    last = plans[-1]
+                    last["result"] = str(last.get("result") or "") + "\n\n" + fuse.blocked_text()
 
                 for plan in plans:
                     if plan.get("_bag") and plan.get("result"):
@@ -773,6 +806,11 @@ class DeckAgent:
                            "allow_custom": bool(payload.get("allow_custom", True))}
                     yield {"type": "done", "context": self.context_usage(), "awaiting": True}
                     return
+
+                fuse.observe_round([p["name"] for p in plans if not p.get("reused")])
+                if fuse.active and not fuse_notified:
+                    fuse_notified = True
+                    yield {"type": "notice", "text": fuse.notice()}
 
                 # 收尾：正文写完了、工具只调了表情包 → 这一轮到此为止，
                 # 不再给模型「接着说」的机会，这是治刷屏的关键一步。

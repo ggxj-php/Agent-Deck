@@ -208,6 +208,11 @@ LLM_TPM_MAX_WAIT = float(os.environ.get("LLM_TPM_MAX_WAIT", "45") or 45)
 # 上下文溢出后，最多再压缩重试几次（DSH 默认 1）
 CONTEXT_OVERFLOW_RETRIES = int(os.environ.get("CONTEXT_OVERFLOW_RETRIES", "1") or 1)
 
+# ---- 工具熔断（防「同一件事反复试错没有进展」）----
+TURN_TOOL_BUDGET = int(os.environ.get("TURN_TOOL_BUDGET", "40") or 40)
+TURN_TRIAL_ROUNDS = int(os.environ.get("TURN_TRIAL_ROUNDS", "6") or 6)
+SAME_RESULT_LIMIT = int(os.environ.get("SAME_RESULT_LIMIT", "5") or 5)
+
 # 压缩时至少保留最近这么多条消息的原文。工具调用和它的结果不能被拆开，
 # 所以实际断点会往后找一条安全的用户消息对齐（见 context._cut_index）。
 CONTEXT_KEEP_RECENT = int(os.environ.get("CONTEXT_KEEP_RECENT", "12") or 12)
