@@ -137,11 +137,21 @@ internal fun snapStickersToBoundaries(text: String): String {
     for (mark in marks) {
         if (mark.range.first < cursor) continue
         out.append(text, cursor, mark.range.first)
+        // 已经站在句末（标记前面紧跟句号/换行）就原地不动，
+        // 否则会被一路推到下一个句子之后，越挪越远
+        val before = text.getOrNull(mark.range.first - 1)
+        if (before != null && (before == '\n' || "。！？!?".contains(before))) {
+            out.append(mark.value)
+            cursor = mark.range.last + 1
+            continue
+        }
         var cut = -1
         var i = mark.range.last + 1
         while (i < text.length) {
             val ch = text[i]
-            if (ch == '\n' || "。！？!?…；;".contains(ch)) {
+            // 只认真正的句末：省略号/分号在中文里常是句中断续（「消耗…咕噜」），
+            // 挪到那儿等于没挪，括号还是被劈成两半
+            if (ch == '\n' || "。！？!?".contains(ch)) {
                 cut = i + 1
                 break
             }

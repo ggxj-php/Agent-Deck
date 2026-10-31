@@ -107,6 +107,7 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
     val snackbar = remember { SnackbarHostState() }
     var pendingDelete by remember { mutableStateOf<SessionSummary?>(null) }
     var showPasswordDialog by remember { mutableStateOf(false) }
+    var showAccount by remember { mutableStateOf(false) }
     var previewUrl by remember { mutableStateOf<String?>(null) }
     var showDownloads by remember { mutableStateOf(false) }
     var confirmExit by remember { mutableStateOf(false) }
@@ -186,6 +187,7 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                     onChangePassword = { showPasswordDialog = true },
                     onOpenDownloads = { showDownloads = true },
                     onCheckUpdate = { viewModel.checkForUpdate(manual = true) },
+                    onOpenAccount = { showAccount = true },
                 )
             }
         },
@@ -226,6 +228,7 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                 modifier = Modifier.padding(padding),
                 onPreview = { previewUrl = it },
                 onAskPick = viewModel::pickAsk,
+                onContinue = viewModel::continueGeneration,
             )
         }
     }
@@ -255,6 +258,25 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                 viewModel.changePassword(oldPassword, newPassword)
                 showPasswordDialog = false
             },
+        )
+    }
+
+    // 用户中心：对齐网页端 #user-modal（邀请码复制 / 注册时间 / 会话数 / 改密码 / 退出）
+    if (showAccount) {
+        AccountSheet(
+            state = state,
+            palette = palette,
+            onDismiss = { showAccount = false },
+            onRefresh = viewModel::refreshAccount,
+            onChangePassword = {
+                showAccount = false
+                showPasswordDialog = true
+            },
+            onLogout = {
+                showAccount = false
+                viewModel.logout()
+            },
+            onSetServer = viewModel::setServerUrl,
         )
     }
 
@@ -397,6 +419,258 @@ private fun PasswordDialog(
             TextButton(onClick = onDismiss) { Text("取消", color = palette.inkSoft) }
         },
     )
+}
+
+/* ---------------- 用户中心（网页端 #user-modal 的移动版） ---------------- */
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AccountSheet(
+    state: ChatUiState,
+    palette: com.agentdeck.app.ui.theme.DeckPalette,
+    onDismiss: () -> Unit,
+    onRefresh: () -> Unit,
+    onChangePassword: () -> Unit,
+    onLogout: () -> Unit,
+    onSetServer: (String) -> Unit,
+) {
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val context = LocalContext.current
+    var copied by remember { mutableStateOf(false) }
+    var editingServer by remember { mutableStateOf(false) }
+    var serverInput by remember(state.serverUrl) { mutableStateOf(state.serverUrl) }
+
+    LaunchedEffect(Unit) { onRefresh() }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1600)
+            copied = false
+        }
+    }
+
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = palette.bubble,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 18.dp)
+                .padding(bottom = 16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AsyncImage(
+                    model = state.persona.avatarUrl(state.serverUrl),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(54.dp)
+                        .shadow(6.dp, CircleShape)
+                        .clip(CircleShape),
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = state.account?.name ?: "未登录",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.ink,
+                    )
+                    Text(
+                        text = if (state.account?.isAdmin == true) "管理员 · 用户中心" else "用户中心",
+                        fontSize = 12.sp,
+                        color = palette.inkSoft,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // 邀请码：点一下复制（网页端 #user-invite 也是这个交互，方便发给朋友注册）
+            val invite = state.account?.inviteCode.orEmpty()
+            if (invite.isNotEmpty()) {
+                Surface(
+                    onClick = {
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(invite))
+                        copied = true
+                    },
+                    color = palette.softFill,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("我的邀请码", fontSize = 11.sp, color = palette.inkSoft)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = invite,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = palette.ink,
+                            )
+                        }
+                        Text(
+                            text = if (copied) "已复制" else "点击复制",
+                            fontSize = 11.5.sp,
+                            color = palette.accent,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+
+            AccountInfoRow("注册时间", formatAccountDate(state.account?.createdAt ?: 0.0), palette)
+            AccountInfoRow("我的会话", "${state.accountSessions} 条", palette)
+            AccountInfoRow(
+                label = "服务器",
+                value = state.serverUrl.ifBlank { "未配置" },
+                palette = palette,
+                trailing = "切换",
+                onTrailing = {
+                    serverInput = state.serverUrl
+                    editingServer = !editingServer
+                },
+            )
+
+            if (editingServer) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = serverInput,
+                    onValueChange = { serverInput = it.take(200) },
+                    singleLine = true,
+                    label = { Text("服务器地址（如 https://你的域名）", fontSize = 11.5.sp) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = palette.accent,
+                        unfocusedBorderColor = palette.line,
+                        focusedLabelColor = palette.accent,
+                        cursorColor = palette.accent,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = {
+                        val url = serverInput.trim()
+                        if (url.isNotEmpty()) {
+                            editingServer = false
+                            onDismiss()
+                            onSetServer(url)
+                        }
+                    }) { Text("保存并重连", color = palette.accent, fontSize = 13.sp) }
+                    TextButton(onClick = { editingServer = false }) {
+                        Text("取消", color = palette.inkSoft, fontSize = 13.sp)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AccountAction("改密码", palette, onChangePassword, Modifier.weight(1f))
+                if (state.account?.isAdmin == true) {
+                    AccountAction(
+                        text = "管理员后台",
+                        palette = palette,
+                        onClick = {
+                            val intent = android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse(state.serverUrl.trimEnd('/') + "/admin"),
+                            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            runCatching { context.startActivity(intent) }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            AccountAction(
+                text = "退出登录",
+                palette = palette,
+                onClick = onLogout,
+                modifier = Modifier.fillMaxWidth(),
+                danger = true,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountInfoRow(
+    label: String,
+    value: String,
+    palette: com.agentdeck.app.ui.theme.DeckPalette,
+    trailing: String? = null,
+    onTrailing: (() -> Unit)? = null,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 7.dp),
+    ) {
+        Text(label, fontSize = 12.5.sp, color = palette.inkSoft)
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = value,
+            fontSize = 12.5.sp,
+            color = palette.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 210.dp),
+        )
+        if (trailing != null && onTrailing != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = trailing,
+                fontSize = 12.sp,
+                color = palette.accent,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onTrailing)
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountAction(
+    text: String,
+    palette: com.agentdeck.app.ui.theme.DeckPalette,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    danger: Boolean = false,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        color = if (danger) palette.pinkMist else palette.softFill,
+        modifier = modifier,
+    ) {
+        Text(
+            text = text,
+            fontSize = 13.sp,
+            color = if (danger) MaterialTheme.colorScheme.error else palette.ink,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 11.dp),
+        )
+    }
+}
+
+/** 注册时间只显示到天：`2026-10-31`。 */
+private fun formatAccountDate(epochSeconds: Double): String {
+    if (epochSeconds <= 0) return "—"
+    return runCatching {
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date((epochSeconds * 1000).toLong()))
+    }.getOrDefault("—")
 }
 
 /* ---------------- 顶栏 ---------------- */
@@ -590,6 +864,7 @@ private fun MessageList(
     modifier: Modifier = Modifier,
     onPreview: (String) -> Unit,
     onAskPick: (Long, Int, String) -> Unit,
+    onContinue: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -677,6 +952,7 @@ private fun MessageList(
                     avatarUrl = state.persona.avatarUrl(state.serverUrl),
                     onPreview = onPreview,
                     onAskPick = onAskPick,
+                    onContinue = onContinue,
                 )
             }
             item { Spacer(Modifier.height(8.dp)) }
@@ -767,7 +1043,17 @@ private fun DrawerContent(
     onChangePassword: () -> Unit,
     onOpenDownloads: () -> Unit,
     onCheckUpdate: () -> Unit,
+    onOpenAccount: () -> Unit,
 ) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var inviteCopied by remember { mutableStateOf(false) }
+    LaunchedEffect(inviteCopied) {
+        if (inviteCopied) {
+            delay(1600)
+            inviteCopied = false
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxHeight()
@@ -775,7 +1061,15 @@ private fun DrawerContent(
             .statusBarsPadding()
             .padding(horizontal = 12.dp, vertical = 14.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // 点头像这一块进用户中心（网页端左侧栏顶部也是这个交互）
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(onClick = onOpenAccount)
+                .padding(vertical = 2.dp),
+        ) {
             AsyncImage(
                 model = state.persona.avatarUrl(state.serverUrl),
                 contentDescription = null,
@@ -785,18 +1079,30 @@ private fun DrawerContent(
                     .clip(CircleShape),
             )
             Spacer(Modifier.width(12.dp))
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = state.account?.name ?: "未登录",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = palette.ink,
                 )
-                Text(
-                    text = state.account?.inviteCode?.let { "邀请码 $it" }.orEmpty(),
-                    fontSize = 11.sp,
-                    color = palette.inkSoft,
-                )
+                val invite = state.account?.inviteCode.orEmpty()
+                if (invite.isEmpty()) {
+                    Text("点这里看账号信息", fontSize = 11.sp, color = palette.inkSoft)
+                } else {
+                    Text(
+                        text = if (inviteCopied) "邀请码已复制" else "邀请码 $invite",
+                        fontSize = 11.sp,
+                        color = if (inviteCopied) palette.accent else palette.inkSoft,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(5.dp))
+                            .clickable {
+                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(invite))
+                                inviteCopied = true
+                            }
+                            .padding(vertical = 1.dp),
+                    )
+                }
             }
         }
 

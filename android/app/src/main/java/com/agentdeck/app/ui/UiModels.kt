@@ -26,8 +26,17 @@ sealed interface Block {
 
     data class Sticker(val url: String) : Block
 
-    /** 系统提示（压缩上下文、网络中断、报错……）。 */
-    data class Notice(val text: String, val isError: Boolean = false) : Block
+    /**
+     * 系统提示（压缩上下文、网络中断、报错、限速排队……）。
+     *
+     * [canContinue] 对应网页端 `noticeBubble(turn, text, canContinue)` 的第三个参数：
+     * 断流/截断/报错这类「接着再讲一次就行」的场景，下面会挂一个「继续」按钮。
+     */
+    data class Notice(
+        val text: String,
+        val isError: Boolean = false,
+        val canContinue: Boolean = false,
+    ) : Block
 
     /** 助手画出来的图/卡片，点开用浏览器看。 */
     data class Artifact(val id: String, val title: String) : Block
@@ -69,8 +78,12 @@ data class ChatUiState(
     val booting: Boolean = true,
     val account: Account? = null,
     val persona: Persona = Persona(),
-    /** 当前生效的后端地址（构建时注入或用户在登录页改的）。 */
+    /** 当前生效的后端地址（用户填的优先，没填就用构建时注入的）。 */
     val serverUrl: String = "",
+    /** 还没配服务器（占位地址）——登录页要把地址输入框摆出来。 */
+    val needsServer: Boolean = true,
+    /** 用户中心要显示的会话总数（`/api/auth/me` 的 sessions 字段）。 */
+    val accountSessions: Int = 0,
     val sessions: List<SessionSummary> = emptyList(),
     val currentSessionId: String? = null,
     val messages: List<UiMessage> = emptyList(),

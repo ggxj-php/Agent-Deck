@@ -84,6 +84,19 @@ private val IMAGE_LINE = Regex("""^!\[([^\]]*)]\(([^)\s]+)\)$""")
 /** 行内公式：$...$、$$...$$、\(...\) 都算。 */
 private val INLINE_MATH = Regex("""\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$|\\\(([\s\S]+?)\\\)""")
 
+/**
+ * 公式占位符：私用区字符包住序号，正常正文里绝不会出现。
+ *
+ * 网页端做的是同一件事（`@@math:0@@`）：**先把公式从正文里摘出去，让 markdown
+ * 拿到一段结构完整的纯文本，排完版再把公式放回来**。反过来（先按公式把段落切开、
+ * 每段单独解析）会让 `**加粗**`、`` `代码` ``、`[链接](...)` 被公式劈成两半，
+ * 两半各自都找不到配对，于是 `**` 就原样印在屏幕上了。
+ */
+internal const val MATH_MARK = '\uE000'
+
+/** 一段正文按公式切开后的结果：正文里是占位符，公式按序号存在 formulas 里。 */
+internal data class MathSplitText(val text: String, val formulas: List<String>)
+
 internal data class InlineSegment(val text: String, val math: Boolean)
 
 internal fun splitInlineMath(source: String): List<InlineSegment> {
@@ -99,6 +112,24 @@ internal fun splitInlineMath(source: String): List<InlineSegment> {
     }
     if (last < source.length) out.add(InlineSegment(source.substring(last), false))
     return out
+}
+
+/**
+ * 把公式换成占位符，其余正文原样保留（包括 `**`、反引号、链接这些 markdown 结构）。
+ * 和网页端 `mathify` 的 bag 思路一致：正文先交给排版器，公式最后再嵌回去。
+ */
+internal fun splitInlineMathPlaceholders(source: String): MathSplitText {
+    val formulas = mutableListOf<String>()
+    val out = StringBuilder(source.length)
+    var last = 0
+    for (match in INLINE_MATH.findAll(source)) {
+        out.append(source, last, match.range.first)
+        formulas.add(match.groupValues.drop(1).firstOrNull { it.isNotEmpty() } ?: "")
+        out.append(MATH_MARK).append(formulas.lastIndex).append(MATH_MARK)
+        last = match.range.last + 1
+    }
+    out.append(source, last, source.length)
+    return MathSplitText(out.toString(), formulas)
 }
 
 private val DOWNLOAD_LINE = Regex("""\[([^\]]*)]\((/d/[^)\s]+)\)""")
@@ -602,6 +633,10 @@ private fun highlightCode(code: String, lang: String): AnnotatedString {
  * 一段可能含行内公式的文字：拆成文字和公式混排。
  * 网页端是对整段 markdown 统一做 mathify，所以列表、引用、表格里也都有公式；
  * 这里做成可复用组件，避免只有段落支持。
+ *
+ * 顺序照搬网页端：**先把公式摘成占位符，整段过一次行内排版，最后按占位符切回去**。
+ * 早先的写法是「按公式把段落切段、每段单独解析」，于是 `**加粗**` 只要被公式劈开，
+ * 两半各自都找不到配对的星号，屏幕上就露出 `**` 了——截图里第一处正是这个原因。
  */
 @Composable
 private fun MathText(
@@ -614,8 +649,9 @@ private fun MathText(
 ) {
     // 打开字体合成，保证没有粗体字面的中文字体也能「加粗」
     val style = androidx.compose.ui.text.TextStyle(fontSynthesis = FontSynthesis.All)
-    val segments = remember(text) { splitInlineMath(text) }
-    if (segments.none { it.math }) {
+    val split = remember(text) { splitInlineMathPlaceholders(text) }
+
+    if (split.formulas.isEmpty()) {
         Text(
             text = remember(text, palette.accent) { inline(demath(text), palette) },
             style = style,
@@ -624,24 +660,28 @@ private fun MathText(
             color = color,
             modifier = modifier,
         )
-    } else {
-        androidx.compose.foundation.layout.FlowRow(
-            modifier = modifier,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            segments.forEach { segment ->
-                if (segment.math) {
-                    LatexImage(
-                        latex = segment.text,
-                        palette = palette,
-                        textSize = fontSize.value.toInt().coerceAtLeast(12),
-                    )
-                } else if (segment.text.isNotBlank()) {
+        return
+    }
+
+    // 整段先解析一遍：此时公式已换成占位符，加粗/斜体/行内代码都能正常配对
+    val chunks = remember(split.text, palette.accent) { inlineAndSplit(split.text, palette) }
+
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        chunks.forEach { chunk ->
+            when (chunk) {
+                is InlineChunk.Math -> LatexImage(
+                    latex = split.formulas.getOrElse(chunk.index) { "" },
+                    palette = palette,
+                    textSize = fontSize.value.toInt().coerceAtLeast(12),
+                )
+
+                is InlineChunk.Text -> if (chunk.annotated.text.isNotBlank()) {
                     Text(
-                        text = remember(segment.text, palette.accent) {
-                            inline(demath(segment.text), palette)
-                        },
+                        text = chunk.annotated,
                         style = style,
                         fontSize = fontSize,
                         lineHeight = lineHeight,
@@ -651,6 +691,37 @@ private fun MathText(
             }
         }
     }
+}
+
+/** 行内排版后按公式占位符切开的一节：文字段自带算好的样式，公式段只留序号。 */
+internal sealed interface InlineChunk {
+    data class Text(val annotated: AnnotatedString) : InlineChunk
+    data class Math(val index: Int) : InlineChunk
+}
+
+/**
+ * 先整段 [inline] 解析，再按占位符切成「文字 / 公式」交替的序列。
+ *
+ * 关键在于切分发生在解析之后：`**…公式…**` 这种跨公式的样式已经落到 AnnotatedString 的
+ * span 上，切出来的每一段都自带加粗/斜体，不会再出现半截星号。
+ */
+internal fun inlineAndSplit(text: String, palette: DeckPalette): List<InlineChunk> {
+    val full = inline(text, palette)
+    val plain = full.text
+    val out = mutableListOf<InlineChunk>()
+    var cursor = 0
+    while (true) {
+        val start = plain.indexOf(MATH_MARK, cursor)
+        if (start < 0) break
+        val end = plain.indexOf(MATH_MARK, start + 1)
+        if (end < 0) break
+        val index = plain.substring(start + 1, end).toIntOrNull()
+        if (start > cursor) out.add(InlineChunk.Text(full.subSequence(cursor, start)))
+        if (index != null) out.add(InlineChunk.Math(index))
+        cursor = end + 1
+    }
+    if (cursor < plain.length) out.add(InlineChunk.Text(full.subSequence(cursor, plain.length)))
+    return out
 }
 
 @Composable
@@ -689,7 +760,10 @@ private fun TableRow(    cells: List<String>,
 /** 测试入口：只关心行内解析出来的纯文本，便于用单测验证内容没被吞。 */
 internal fun inlinePlainText(text: String, palette: DeckPalette): String = inline(text, palette).text
 
-private fun inline(text: String, palette: DeckPalette): AnnotatedString = buildAnnotatedString {
+private fun inline(
+    text: String,
+    palette: DeckPalette,
+): AnnotatedString = buildAnnotatedString {
     // 中文字体大多没有独立的 Bold 字重，W900 + fontSynthesis 合成出来的加粗才看得出来
     val bold = SpanStyle(fontWeight = FontWeight.W900, color = Color(0xFF171219))
     val italic = SpanStyle(fontStyle = FontStyle.Italic)
@@ -830,7 +904,7 @@ private val COMMAND = Regex("""\\([A-Za-z]+)""")
 private fun renderMathBody(source: String): String =
     demathExpr(source).replace(Regex("""\s+"""), " ").trim()
 
-private fun demathExpr(input: String): String {
+internal fun demathExpr(input: String): String {
     var text = input
     // 先把 \text{...} / \mathrm{...} 这层壳剥掉：否则 S_{\text{总}} 这种嵌套花括号
     // 会让后面的下标/分式正则一个都匹配不上（之前数学没渲染出来就是这个原因）。

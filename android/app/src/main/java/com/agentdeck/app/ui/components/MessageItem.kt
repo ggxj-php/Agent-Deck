@@ -67,6 +67,9 @@ import coil.request.ImageRequest
 import com.agentdeck.app.ui.Block
 import com.agentdeck.app.ui.Role
 import com.agentdeck.app.ui.UiMessage
+import com.agentdeck.app.ui.HistoryParser
+import com.agentdeck.app.ui.StickerPart
+import com.agentdeck.app.ui.splitStickerMarks
 import com.agentdeck.app.ui.theme.DeckPalette
 
 fun resolveUrl(baseUrl: String, raw: String): String =
@@ -89,10 +92,20 @@ fun MessageItem(
     avatarUrl: String,
     onPreview: (String) -> Unit = {},
     onAskPick: (Long, Int, String) -> Unit = { _, _, _ -> },
+    /** 提示条下面那个「继续」按钮：出错/截断后让模型接着讲。 */
+    onContinue: () -> Unit = {},
 ) {
     when (message.role) {
         Role.USER -> UserMessage(message, baseUrl, palette, onPreview)
-        Role.ASSISTANT -> AssistantMessage(message, baseUrl, palette, avatarUrl, onPreview, onAskPick)
+        Role.ASSISTANT -> AssistantMessage(
+            message = message,
+            baseUrl = baseUrl,
+            palette = palette,
+            avatarUrl = avatarUrl,
+            onPreview = onPreview,
+            onAskPick = onAskPick,
+            onContinue = onContinue,
+        )
     }
 }
 
@@ -215,6 +228,7 @@ private fun AssistantMessage(
     avatarUrl: String,
     onPreview: (String) -> Unit,
     onAskPick: (Long, Int, String) -> Unit,
+    onContinue: () -> Unit,
 ) {
     val bubbleShape = RoundedCornerShape(
         topStart = 5.dp,
@@ -251,8 +265,8 @@ private fun AssistantMessage(
                 when (block) {
                     is Block.Text -> {
                         androidx.compose.foundation.text.selection.SelectionContainer {
-                            MarkdownText(
-                                text = block.markdown,
+                            MarkdownWithStickers(
+                                markdown = block.markdown,
                                 palette = palette,
                                 baseUrl = baseUrl,
                                 onPreview = onPreview,
@@ -272,7 +286,13 @@ private fun AssistantMessage(
                         }
                     }
 
-                    is Block.Notice -> NoticeRow(block.text, block.isError, palette)
+                    is Block.Notice -> NoticeRow(
+                        text = block.text,
+                        isError = block.isError,
+                        canContinue = block.canContinue,
+                        palette = palette,
+                        onContinue = onContinue,
+                    )
 
                     is Block.Artifact -> ArtifactBlock(block, baseUrl, palette, onPreview)
 
@@ -314,6 +334,56 @@ private fun StickerImage(url: String, onPreview: (String) -> Unit) {
             .widthIn(max = 160.dp)
             .clickable { onPreview(url) },
     )
+}
+
+/**
+ * 带表情包的正文。
+ *
+ * 流式时表情包是以 `[sticker:心情:文件名]` 的形式留在正文里的（不是独立的一块），
+ * 所以这里能像网页端 `hydrateStickers` 那样：先把标记挪到句子边界，再按标记切段渲染。
+ * 之前表情包是直接往消息末尾追加一个块，位置一定下来就再也没法纠正，
+ * 落在括号中间只能认了——这就是「表情包插在奇怪地方」的由来。
+ */
+@Composable
+private fun MarkdownWithStickers(
+    markdown: String,
+    palette: DeckPalette,
+    baseUrl: String,
+    onPreview: (String) -> Unit,
+) {
+    val parts = remember(markdown) {
+        splitStickerMarks(HistoryParser.snapStickersToBoundaries(markdown))
+    }
+    if (parts.none { it is StickerPart.Mark }) {
+        MarkdownText(text = markdown, palette = palette, baseUrl = baseUrl, onPreview = onPreview)
+        return
+    }
+    Column {
+        parts.forEach { part ->
+            when (part) {
+                is StickerPart.Text -> {
+                    val body = part.value.trim('\n')
+                    if (body.isNotBlank()) {
+                        MarkdownText(
+                            text = body,
+                            palette = palette,
+                            baseUrl = baseUrl,
+                            onPreview = onPreview,
+                        )
+                    }
+                }
+
+                is StickerPart.Mark -> {
+                    val name = part.name
+                    if (name.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        StickerImage("$baseUrl/api/persona/sticker/$name", onPreview)
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -451,22 +521,50 @@ private fun MonoBlock(text: String, palette: DeckPalette) {
 }
 
 @Composable
-private fun NoticeRow(text: String, isError: Boolean, palette: DeckPalette) {
+private fun NoticeRow(
+    text: String,
+    isError: Boolean,
+    canContinue: Boolean,
+    palette: DeckPalette,
+    onContinue: () -> Unit,
+) {
     val color = if (isError) MaterialTheme.colorScheme.error else palette.inkSoft
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 3.dp),
-    ) {
-        Icon(
-            imageVector = if (isError) Icons.Rounded.ReportProblem else Icons.Rounded.Psychology,
-            contentDescription = null,
-            modifier = Modifier.size(13.dp),
-            tint = color,
-        )
-        Spacer(Modifier.width(5.dp))
-        Text(text = text, fontSize = 12.sp, lineHeight = 17.sp, color = color)
+    Column(modifier = Modifier
+        .fillMaxWidth()
+        .padding(vertical = 3.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = if (isError) Icons.Rounded.ReportProblem else Icons.Rounded.Psychology,
+                contentDescription = null,
+                modifier = Modifier.size(13.dp),
+                tint = color,
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(text = text, fontSize = 12.sp, lineHeight = 17.sp, color = color)
+        }
+        // 网页端 noticeBubble(turn, text, canContinue) 的第三个参数：
+        // 断流 / 截断 / 报错之后给个按钮，点一下自动发「继续」，不用用户自己打字
+        if (canContinue) {
+            var sent by remember(text) { mutableStateOf(false) }
+            Surface(
+                onClick = {
+                    if (sent) return@Surface
+                    sent = true
+                    onContinue()
+                },
+                color = Color.Transparent,
+                shape = RoundedCornerShape(7.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, palette.accent.copy(alpha = 0.5f)),
+                modifier = Modifier.padding(top = 5.dp),
+            ) {
+                Text(
+                    text = if (sent) "已继续" else "接着讲",
+                    fontSize = 11.5.sp,
+                    color = if (sent) palette.inkSoft else palette.accent,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
+        }
     }
 }
 

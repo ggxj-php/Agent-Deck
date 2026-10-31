@@ -89,11 +89,17 @@ private fun CrashScreen(
 ) {
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
-    var uploadState by remember { mutableStateOf("正在上报…") }
+    var uploadState by remember { mutableStateOf("日志已保存在本地") }
 
     LaunchedEffect(Unit) {
+        // 远端上报默认是关的（服务端还没有 /api/app-crash 这个接口），
+        // 关掉时别骗用户说「上报失败」，直接告诉他日志在本地、可以复制。
+        if (!CrashReporter.remoteEnabled()) {
+            uploadState = "日志已保存在本地，可以点下面「复制日志」发给开发者"
+            return@LaunchedEffect
+        }
         val ok = CrashReporter.upload(context, log)
-        uploadState = if (ok) "日志已上报到服务器" else "上报失败，日志已保存在本地（下次启动自动补传）"
+        uploadState = if (ok) "日志已上报到服务器" else "上报失败，日志已保存在本地"
     }
 
     Column(

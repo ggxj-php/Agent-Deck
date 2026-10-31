@@ -45,22 +45,38 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
 
     private fun boot() {
         viewModelScope.launch {
+            // 还没配服务器（开源版默认是占位地址）：先把登录页放出来让用户填，
+            // 不然所有请求都打到 example.com，只能看到一句莫名其妙的网络错误。
+            if (api.needsServer) {
+                _state.update {
+                    it.copy(
+                        booting = false,
+                        account = null,
+                        needsServer = true,
+                        serverUrl = api.baseUrl,
+                    )
+                }
+                return@launch
+            }
+
             // 人设和表情包都是公开接口，先拿下来，登录页也能显示名字和欢迎语
             val persona = runCatching { api.persona() }.getOrDefault(Persona())
             stickerLib = runCatching { api.stickers() }.getOrDefault(emptyMap())
-            _state.update { it.copy(persona = persona, serverUrl = api.baseUrl) }
+            _state.update { it.copy(persona = persona, serverUrl = api.baseUrl, needsServer = false) }
 
             try {
-                val account = api.me()
+                val info = api.me()
                 val sessions = runCatching { api.sessions() }.getOrDefault(emptyList())
                 api.syncWebViewCookie()
                 _state.update {
                     it.copy(
                         booting = false,
-                        account = account,
+                        account = info.account,
+                        accountSessions = info.sessions,
                         sessions = sessions,
                         currentSessionId = sessions.firstOrNull()?.id,
                         serverUrl = api.baseUrl,
+                        needsServer = false,
                     )
                 }
                 sessions.firstOrNull()?.let { openSession(it.id) }
@@ -83,6 +99,30 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * 换服务器：存下新地址、清掉旧的登录态，然后重新走一遍启动流程。
+     * 登录页那个「服务器地址」输入框和用户中心的「切换服务器」都走这里。
+     */
+    fun setServerUrl(raw: String) {
+        val saved = api.saveServerUrl(raw)
+        if (saved.isEmpty()) {
+            _state.update { it.copy(loginError = "服务器地址不能为空") }
+            return
+        }
+        viewModelScope.launch {
+            runCatching { api.logout() }
+            api.syncWebViewCookie()
+            _state.value = ChatUiState(
+                booting = true,
+                persona = _state.value.persona,
+                serverUrl = saved,
+                needsServer = false,
+                thinking = _state.value.thinking,
+            )
+            boot()
         }
     }
 
@@ -174,7 +214,7 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
 
     /** 登录或注册成功后的共同收尾：拉人设、会话、表情包，并把 cookie 同步给 WebView。 */
     private suspend fun afterAuth() {
-        val account = api.me()
+        val info = api.me()
         val persona = runCatching { api.persona() }.getOrDefault(Persona())
         val sessions = runCatching { api.sessions() }.getOrDefault(emptyList())
         stickerLib = runCatching { api.stickers() }.getOrDefault(emptyMap())
@@ -182,7 +222,8 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
         _state.update {
             it.copy(
                 loggingIn = false,
-                account = account,
+                account = info.account,
+                accountSessions = info.sessions,
                 persona = persona,
                 sessions = sessions,
                 currentSessionId = null,
@@ -191,6 +232,7 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                 captcha = null,
                 authMode = AuthMode.LOGIN,
                 serverUrl = api.baseUrl,
+                needsServer = false,
             )
         }
         sessions.firstOrNull()?.let { openSession(it.id) }
@@ -202,7 +244,23 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             api.logout()
             api.syncWebViewCookie()
             _state.update {
-                ChatUiState(booting = false, persona = it.persona, serverUrl = api.baseUrl)
+                ChatUiState(
+                    booting = false,
+                    persona = it.persona,
+                    serverUrl = api.baseUrl,
+                    // 已经配过的服务器不该再让用户填一遍，退出登录 ≠ 忘掉地址
+                    needsServer = api.needsServer,
+                    thinking = it.thinking,
+                )
+            }
+        }
+    }
+
+    /** 重新拉一次 `/api/auth/me`：用户中心打开时刷一下会话数和注册时间。 */
+    fun refreshAccount() {
+        viewModelScope.launch {
+            runCatching { api.me() }.onSuccess { info ->
+                _state.update { it.copy(account = info.account, accountSessions = info.sessions) }
             }
         }
     }
@@ -211,7 +269,7 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
 
     fun checkForUpdate(manual: Boolean = false) {
         viewModelScope.launch {
-            val info = runCatching { UpdateChecker.check(api.baseUrl) }.getOrNull()
+            val info = runCatching { UpdateChecker.check(api.baseUrl) { api.latestApk() } }.getOrNull()
             if (info != null) {
                 _state.update { it.copy(update = info) }
             } else if (manual) {
@@ -455,8 +513,12 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
     }
 
     /**
-     * 排队中的表情包：和网页端的 queuedStickers 一样，先收着，
-     * 等正文出现句末标点/换行再插，避免把一句话从中间劈开。
+     * 排队中的表情包标记（`[sticker:心情:文件名]`），和网页端的 queuedStickers 一样：
+     * 先收着，等正文出现句末标点/换行再插，避免把一句话从中间劈开。
+     *
+     * 存标记而不是图片地址，是为了让它**留在正文里**——这样渲染时还能统一往后挪
+     * 到句子边界。之前它是作为独立块追加到消息末尾的，位置一旦定下就再也动不了，
+     * 落在括号中间也只能认了。
      */
     private val queuedStickers = ArrayDeque<String>()
 
@@ -490,17 +552,29 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             }
         }
         if (force) {
-            while (queuedStickers.isNotEmpty()) {
-                val url = queuedStickers.removeFirst()
-                updateLastAssistant { msg ->
-                    msg.copy(blocks = settleThinking(msg.blocks) + Block.Sticker(url))
-                }
-            }
+            while (queuedStickers.isNotEmpty()) appendStickerMark(queuedStickers.removeFirst())
         } else {
-            val url = queuedStickers.removeFirst()
-            updateLastAssistant { msg ->
-                msg.copy(blocks = settleThinking(msg.blocks) + Block.Sticker(url))
+            appendStickerMark(queuedStickers.removeFirst())
+        }
+    }
+
+    /**
+     * 把表情包标记接在正文末尾（和网页端的 `contentChunk('@@sticker:0@@')` 一个意思）。
+     *
+     * 接在正文里而不是新起一个块：渲染时会统一做一次 snapStickersToBoundaries，
+     * 万一标记落在句子/括号中间，还能被挪到真正的句末去。
+     */
+    private fun appendStickerMark(mark: String) {
+        if (mark.isBlank()) return
+        updateLastAssistant { msg ->
+            val blocks = settleThinking(msg.blocks).toMutableList()
+            val last = blocks.lastOrNull()
+            if (last is Block.Text) {
+                blocks[blocks.size - 1] = last.copy(markdown = last.markdown + mark)
+            } else {
+                blocks.add(Block.Text(mark))
             }
+            msg.copy(blocks = blocks)
         }
     }
 
@@ -572,9 +646,12 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             is ChatEvent.ToolPending -> setWaiting("正在准备 ${event.name}…")
 
             is ChatEvent.ToolStart -> {
+                // send_sticker 不用画工具卡片：紧接着的 sticker 事件就是它的样子。
+                // 网页端 handleEvent 里也有这一句，不然每条表情包会多一张空卡片。
+                if (event.name == "send_sticker") return
                 flushStickers(force = true)
                 updateLastAssistant { msg ->
-                val blocks = settleThinking(msg.blocks).toMutableList()
+                    val blocks = settleThinking(msg.blocks).toMutableList()
                     blocks.add(Block.Tool(event.name, event.arguments, null, false))
                     msg.copy(blocks = blocks)
                 }
@@ -592,9 +669,10 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             }
 
             is ChatEvent.Sticker -> {
-                val url = stickerUrl(event.name, event.mood)
-                if (url.isNotEmpty()) {
-                    queuedStickers.addLast(url)
+                // 文件名在这一刻就定死（随机挑的那张），刷新后还是同一张
+                val file = stickerFilename(event.name, event.mood)
+                if (file.isNotEmpty()) {
+                    queuedStickers.addLast("[sticker:" + event.mood + ":" + file + "]")
                     // 正文还没开始（或刚好停在句子边界）就立刻显示
                     flushStickers()
                 }
@@ -619,7 +697,11 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
 
             is ChatEvent.Cut -> updateLastAssistant { msg ->
                 msg.copy(
-                    blocks = msg.blocks + Block.Notice("回复被中断：${event.reason.ifEmpty { "网络中断" }}")
+                    blocks = msg.blocks + Block.Notice(
+                        text = "回复被中断：${event.reason.ifEmpty { "网络中断" }}",
+                        // 截断/断流都能靠「继续」接着讲，和网页端 noticeBubble(..., true) 一致
+                        canContinue = true,
+                    )
                 )
             }
 
@@ -633,16 +715,51 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                 )
             }
 
+            // 限速排队 / 工具熔断 / 工具组被关掉：网页端会画一条灰色提示，App 以前直接丢了
+            is ChatEvent.Notice -> updateLastAssistant { msg ->
+                msg.copy(blocks = msg.blocks + Block.Notice(event.text))
+            }
+
             is ChatEvent.Done -> event.context?.let { usage ->
                 _state.update { it.copy(context = usage) }
             }
 
             is ChatEvent.Error -> updateLastAssistant { msg ->
-                msg.copy(blocks = msg.blocks + Block.Notice("喵呜…出错了：${event.message}", isError = true))
+                msg.copy(
+                    blocks = msg.blocks + Block.Notice(
+                        text = "喵呜…出错了：${event.message}",
+                        isError = true,
+                        // 报错后大多能靠「继续」重试一次，网页端 errorBubble(turn, msg, true)
+                        canContinue = true,
+                    )
+                )
             }
 
             is ChatEvent.Unknown -> Unit
         }
+    }
+
+    /**
+     * 从后台切回前台：探一次活。
+     *
+     * 手机切走几分钟，nginx / 服务重启 / 换网都会让原来的连接失效；
+     * 回来先 ping 一下，失败就明确告诉用户，而不是等他发消息才看到报错
+     * （网页端 `resume()` 做的是同一件事）。
+     */
+    fun onAppResume() {
+        if (_state.value.account == null || _state.value.busy) return
+        viewModelScope.launch {
+            val ok = api.ping()
+            if (!ok) {
+                _state.update { it.copy(toast = "连不上服务器，检查一下网络或服务器地址") }
+            }
+        }
+    }
+
+    /** 点了提示条下面的「继续」：照常发一条「继续」，让模型接着上一轮说下去。 */
+    fun continueGeneration() {
+        if (_state.value.busy) return
+        send("继续")
     }
 
     private fun settleThinking(blocks: List<Block>): List<Block> =
@@ -659,11 +776,13 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
     }
 
     private fun stickerUrl(name: String?, mood: String): String {
-        val chosen = name?.takeIf { it.isNotBlank() }
-            ?: stickerLib[mood]?.randomOrNull()
-            ?: return ""
-        return "${api.baseUrl}/api/persona/sticker/$chosen"
+        val chosen = stickerFilename(name, mood)
+        return if (chosen.isEmpty()) "" else "${api.baseUrl}/api/persona/sticker/$chosen"
     }
+
+    /** 挑一张表情包：优先用后端定好的文件名，否则按心情随机（刷新前后保持一致）。 */
+    private fun stickerFilename(name: String?, mood: String): String =
+        name?.takeIf { it.isNotBlank() } ?: stickerLib[mood]?.randomOrNull().orEmpty()
 
     private fun report(error: Throwable) {
         val text = if (error is DeckException) error.message else (error.message ?: "操作失败")

@@ -18,13 +18,35 @@ data class Persona(
         if (avatar.startsWith("http")) avatar else baseUrl + avatar
 }
 
-/** 登录用户。 */
+/** 登录用户。字段与后端 `auth.public_user()` 一一对应。 */
 data class Account(
     val id: Long = 0,
     val name: String = "",
     val inviteCode: String = "",
     val isAdmin: Boolean = false,
     val banned: Boolean = false,
+    /** 注册时间（Unix 秒），用于用户中心显示。 */
+    val createdAt: Double = 0.0,
+)
+
+/**
+ * `/api/auth/me` 的完整回包：用户 + 会话数 + 数据库是否健康。
+ * 网页端用户中心就靠这三个字段（见 app.js 的 openUserModal）。
+ */
+data class AccountInfo(
+    val account: Account = Account(),
+    val sessions: Int = 0,
+    val dbOk: Boolean = true,
+)
+
+/** `/api/app/latest` 返回的最新安装包信息。 */
+data class ApkInfo(
+    val filename: String = "",
+    val version: String = "",
+    val url: String = "",
+    val sizeMb: Double = 0.0,
+    val minAndroid: String = "",
+    val updatedAt: Long = 0L,
 )
 
 /** 侧边栏的一条会话。 */
@@ -86,6 +108,12 @@ sealed interface ChatEvent {
     ) : ChatEvent
     data class Cut(val reason: String) : ChatEvent
     data class Compressed(val dropped: Int, val beforeTokens: Int, val afterTokens: Int) : ChatEvent
+
+    /**
+     * 系统提示条（不是助手说的话）：限速排队、工具熔断、后台关了某组工具……
+     * 网页端对应 `noticeBubble()`，以前 App 把它当 Unknown 丢掉，用户什么都看不到。
+     */
+    data class Notice(val text: String) : ChatEvent
     data class Done(val context: ContextUsage?) : ChatEvent
     data class Error(val message: String) : ChatEvent
     data class Unknown(val type: String) : ChatEvent

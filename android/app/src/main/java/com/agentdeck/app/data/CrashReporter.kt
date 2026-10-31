@@ -28,6 +28,16 @@ object CrashReporter {
     private const val DIR = "crashes"
     private const val ENDPOINT = "/api/app-crash"
 
+    /**
+     * 是否把崩溃日志发到服务器。
+     *
+     * 这个接口不在 FastAPI 里，而是 nginx 单独把 `POST /api/app-crash` 反代到一个
+     * 只监听 127.0.0.1 的小服务（`crash_receiver.py`），日志追加进 `crashes/crashes.jsonl`。
+     * 所以「后端 28 条路由里找不到它」不代表没有——部署方没配这条反代时会返回 404，
+     * 那种情况下 [uploadPending] 会把文件改名成 `.failed` 归档，不会每次启动重传。
+     */
+    private const val REMOTE_UPLOAD = true
+
     private val client by lazy {
         OkHttpClient.Builder()
             .connectTimeout(6, TimeUnit.SECONDS)
@@ -89,8 +99,14 @@ object CrashReporter {
         context.startActivity(intent)
     }
 
-    /** 启动时补传之前没发出去的崩溃日志。 */
+    /**
+     * 启动时补传之前没发出去的崩溃日志。
+     *
+     * 传不上去的直接改名成 `.failed` 归档，不再每启动一次试一遍——
+     * 以前服务端没有 /api/app-crash，这里会变成「永远在重传」的死循环。
+     */
     fun uploadPending(context: Context) {
+        if (!REMOTE_UPLOAD) return
         val dir = File(context.filesDir, DIR)
         val files = dir.listFiles()?.filter { it.name.endsWith(".txt") } ?: return
         if (files.isEmpty()) return
@@ -98,18 +114,27 @@ object CrashReporter {
             files.forEach { file ->
                 val text = runCatching { file.readText() }.getOrNull() ?: return@forEach
                 val ok = runCatching { uploadBlocking(context, text) }.getOrDefault(false)
-                if (ok) runCatching { file.delete() }
+                if (ok) {
+                    runCatching { file.delete() }
+                } else {
+                    runCatching { file.renameTo(File(file.parentFile, file.name + ".failed")) }
+                }
             }
         }.start()
     }
 
-    /** 上报一条日志，成功返回 true。 */
+    /** 远端上报是否打开（崩溃页用它决定文案）。 */
+    fun remoteEnabled(): Boolean = REMOTE_UPLOAD
+
+    /** 上报一条日志，成功返回 true。远端没开就直接返回 false，日志留在本地。 */
     suspend fun upload(context: Context, text: String): Boolean = withContext(Dispatchers.IO) {
+        if (!REMOTE_UPLOAD) return@withContext false
         runCatching { uploadBlocking(context, text) }.getOrDefault(false)
     }
 
     private fun uploadBlocking(context: Context, text: String): Boolean {
-        val base = ServerConfig.baseUrl(context)
+        val base = AppSettings.baseUrl(context).trimEnd('/')
+        if (base.isEmpty()) return false
         val body = JSONObject()
             .put("app", "agentdeck")
             .put("version", BuildConfig.VERSION_NAME)
@@ -125,9 +150,4 @@ object CrashReporter {
             .build()
         return client.newCall(request).execute().use { it.isSuccessful }
     }
-}
-
-/** 后端地址：构建时注入，开源版默认是占位地址。 */
-object ServerConfig {
-    fun baseUrl(context: Context): String = BuildConfig.BASE_URL.trimEnd('/')
 }

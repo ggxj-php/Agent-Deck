@@ -7,7 +7,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.agentdeck.app.ui.ChatScreen
@@ -17,7 +21,7 @@ import com.agentdeck.app.ui.SplashScreen
 import com.agentdeck.app.ui.theme.DeckTheme
 
 /**
- * 唯一的 Activity：Compose 负责壳、列表、输入框和工具卡片；单条消息的正文交给 WebView。
+ * 唯一的 Activity：整页都是 Compose（含正文的 markdown 渲染），没有 WebView。
  */
 class MainActivity : ComponentActivity() {
 
@@ -26,6 +30,16 @@ class MainActivity : ComponentActivity() {
         setContent {
             val viewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory)
             val state by viewModel.state.collectAsStateWithLifecycle()
+
+            // 从后台回前台先探活：连接早断了的话，发消息才发现会很莫名其妙
+            val lifecycleOwner = LocalLifecycleOwner.current
+            DisposableEffect(lifecycleOwner) {
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_RESUME) viewModel.onAppResume()
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+            }
 
             DeckTheme(accentHex = state.persona.theme) {
                 Surface(
@@ -40,6 +54,7 @@ class MainActivity : ComponentActivity() {
                             onRegister = viewModel::register,
                             onSwitchMode = viewModel::switchAuthMode,
                             onRefreshCaptcha = viewModel::refreshCaptcha,
+                            onSetServer = viewModel::setServerUrl,
                         )
                         else -> ChatScreen(state, viewModel)
                     }

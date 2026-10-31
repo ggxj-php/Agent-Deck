@@ -30,8 +30,14 @@ class DeckApi(context: android.content.Context) {
 
     private val appContext = context.applicationContext
 
-    /** 后端地址可以随时改（登录页里填），所以每次现读，不缓存。 */
-    val baseUrl: String get() = BuildConfig.BASE_URL.trimEnd('/')
+    /**
+     * 后端地址：用户在登录页填的优先，没填就用构建时注入的默认值。
+     * 每次现读 [AppSettings]，所以切换服务器不用重启 App。
+     */
+    val baseUrl: String get() = AppSettings.baseUrl(appContext)
+
+    /** 还没配服务器（地址为空或还是占位地址）。 */
+    val needsServer: Boolean get() = AppSettings.needsServer(appContext)
 
     val cookieJar = PersistentCookieJar(SecureStore(appContext))
 
@@ -62,10 +68,39 @@ class DeckApi(context: android.content.Context) {
         return parseAccount(user)
     }
 
-    suspend fun me(): Account {
+    /** 当前登录用户 + 会话数 + 数据库状态（用户中心要显示的那几个数）。 */
+    suspend fun me(): AccountInfo {
         val obj = JSONObject(call("GET", "/api/auth/me", null))
-        return parseAccount(obj.optJSONObject("user"))
+        return AccountInfo(
+            account = parseAccount(obj.optJSONObject("user")),
+            sessions = obj.optInt("sessions"),
+            dbOk = obj.optBoolean("db", true),
+        )
     }
+
+    /** 探活：从后台切回来时用，不碰会话也不刷新 token。 */
+    suspend fun ping(): Boolean = runCatching {
+        JSONObject(call("GET", "/api/ping", null)).optBoolean("ok")
+    }.getOrDefault(false)
+
+    /**
+     * 最新安装包（服务端 `static/app 目录里的 APK` 里版本号最大的那个）。
+     * 没上传过 APK 时后端返回 404，这里吞掉返回 null。
+     */
+    suspend fun latestApk(): ApkInfo? = runCatching {
+        val obj = JSONObject(call("GET", "/api/app/latest", null))
+        ApkInfo(
+            filename = obj.optString("filename"),
+            version = obj.optString("version"),
+            url = obj.optString("url").let { if (it.startsWith("http")) it else baseUrl + it },
+            sizeMb = obj.optDouble("size_mb", 0.0),
+            minAndroid = obj.optString("min_android"),
+            updatedAt = obj.optLong("updated_at"),
+        )
+    }.getOrNull()
+
+    /** 记住用户填的服务器地址（规范化后再存），返回实际生效的地址。 */
+    fun saveServerUrl(raw: String): String = AppSettings.setBaseUrl(appContext, raw)
 
     /** 注册用图形验证码：后端返回 {id, image(data URL), ttl}。 */
     suspend fun captcha(): Captcha {
@@ -171,10 +206,8 @@ class DeckApi(context: android.content.Context) {
         call("DELETE", "/api/sessions/$id", null)
     }
 
-    suspend fun renameSession(id: String, title: String) {
-        val body = JSONObject().put("title", title).toString()
-        call("PATCH", "/api/sessions/$id", body)
-    }
+    // 注意：后端没有 PATCH /api/sessions/{id}（只有 GET/POST/DELETE），
+    // 所以这里不提供「重命名会话」——以前那个方法发出去只会拿到 405。
 
     suspend fun history(id: String): HistoryPage {
         val obj = JSONObject(call("GET", "/api/sessions/$id/messages", null))
@@ -331,6 +364,7 @@ class DeckApi(context: android.content.Context) {
             inviteCode = user.optString("invite_code"),
             isAdmin = user.optBoolean("is_admin"),
             banned = user.optBoolean("banned"),
+            createdAt = user.optDouble("created_at", 0.0),
         )
     }
 
@@ -382,6 +416,8 @@ class DeckApi(context: android.content.Context) {
                 beforeTokens = obj.optInt("before_tokens"),
                 afterTokens = obj.optInt("after_tokens"),
             )
+            // 限速排队 / 工具熔断 / 工具组被关掉…… 网页端 noticeBubble() 处理的就是它
+            "notice" -> ChatEvent.Notice(obj.optString("text"))
             "done" -> ChatEvent.Done(parseContext(obj.optJSONObject("context")))
             "error" -> ChatEvent.Error(obj.optString("message"))
             else -> ChatEvent.Unknown(obj.optString("type"))
