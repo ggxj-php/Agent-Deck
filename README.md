@@ -982,6 +982,28 @@ description: 一句话说明这个技能干什么、什么时候用
 - **用量观测**：每轮记录 `[usage] prompt=… completion=…` 日志；
   后台 `GET /api/admin/usage` 看最近 10 分钟 / 今天 / 累计的 tokens 和请求数。
 
+## 浏览器操控（Playwright + Chromium）
+
+Agent 可以用真实浏览器打开网页、点击、填表单、翻页、抓正文、抓图：
+
+| 工具 | 作用 |
+|---|---|
+| `browser_open(url)` | 打开页面，返回带 `[ref]` 编号的可交互元素快照 |
+| `browser_snapshot()` | 重新取快照（ref 随页面变化）|
+| `browser_click(ref)` / `browser_type(ref, text)` / `browser_key(Enter)` | 点击 / 填输入框 / 按键 |
+| `browser_scroll(dy)` | 滚动（懒加载、加载更多）|
+| `browser_extract()` | 取正文纯文本（≤6000 字）|
+| `browser_images()` | 抓页面所有图片（含懒加载图/背景图/视频封面）→ zip + 下载链接 |
+| `browser_screenshot()` | 截可视区域 → 下载链接 |
+| `browser_close()` | 关浏览器释放内存 |
+
+实现：一个 Chromium 实例 + **每用户一个 BrowserContext**（登录态隔离、省内存），
+Playwright 跑在单独线程；默认拦图片/字体/媒体渲染省内存（抓图走 request 另取）；
+每用户 60 步预算、空闲 10 分钟自动关、最多 2 个 Context。
+
+依赖：`pip install playwright patchright`，`patchright install chromium`，
+系统库 `patchright install-deps chromium`。
+
 ## 生成文件自动清理
 
 技能/代码生成出来的成品（`.pptx` `.ppt` `.pdf` `.docx` `.xlsx`）和 `workspace/projects/`

@@ -8,6 +8,7 @@ import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from . import browser as browser_mod
 from . import context, ratelimit, settings, uploads
 from . import usage as usage_mod
 from .config import (
@@ -472,6 +473,10 @@ class DeckAgent:
         try:
             # 下载链接按用户隔离：工具里靠这个拿到当前用户 id
             download_tool.set_owner(self.owner)
+            try:
+                browser_mod.manager().reset_steps(self.owner or 0)
+            except Exception:                 # noqa: BLE001
+                pass
             stickers_sent = 0
             recent_sigs = []          # 最近的工具调用签名，用来发现重复重试
             search_counts = {}        # 这一轮各搜索工具调了几次

@@ -24,3 +24,6 @@ charset-normalizer>=3.0
 # 网页版后端
 fastapi>=0.110
 uvicorn>=0.29
+
+playwright
+patchright
