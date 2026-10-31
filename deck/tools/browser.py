@@ -25,6 +25,23 @@ def _owner():
     return download_tool.current_owner() or 0
 
 
+RISK_WORDS = ("IP存在风险", "存在风险", "安全限制", "访问受限", "访问过于频繁",
+              "请验证", "滑动验证", "验证码", "captcha", "verify",
+              "请登录后", "登录后查看", "403 Forbidden", "拒绝访问", "异常流量",
+              "300012", "风控")
+
+
+def _risk_hint(text):
+    """页面是不是撞风控了？是就附一句提示，让模型用 ask_user 问用户怎么处理。"""
+    low = str(text or "")
+    for word in RISK_WORDS:
+        if word.lower() in low.lower():
+            return ("\n\n⚠️ 检测到「访问受限/风控」迹象（命中了「" + word + "」）。"
+                    "别反复重试同一种方式：可以用 ask_user 问用户怎么处理，选项建议给"
+                    "「换一种方式获取（搜索/摘要）」「用代理再试（需管理员已配置代理）」「先算了」。")
+    return ""
+
+
 def _dumps(payload, limit=9000):
     text = json.dumps(payload, ensure_ascii=False)
     if len(text) > limit:
@@ -59,7 +76,7 @@ def browser_open(url: str) -> str:
         data = browser.manager().open(_owner(), url)
     except Exception as exc:                 # noqa: BLE001
         return f"错误：{exc}"
-    return _elements_text(data)
+    return _elements_text(data) + _risk_hint(_elements_text(data))
 
 
 def browser_snapshot() -> str:
@@ -68,7 +85,7 @@ def browser_snapshot() -> str:
         data = browser.manager().snapshot(_owner())
     except Exception as exc:                 # noqa: BLE001
         return f"错误：{exc}"
-    return _elements_text(data)
+    return _elements_text(data) + _risk_hint(_elements_text(data))
 
 
 def browser_click(ref: int) -> str:
@@ -119,7 +136,8 @@ def browser_extract() -> str:
         return f"错误：{exc}"
     text = data.get("text") or ""
     note = "（内容过长，已截断）" if data.get("truncated") else ""
-    return f"URL: {data.get('url')}\n标题: {data.get('title')}{note}\n\n{text}"
+    body = f"URL: {data.get('url')}\n标题: {data.get('title')}{note}\n\n{text}"
+    return body + _risk_hint(body)
 
 
 def browser_images() -> str:
@@ -135,6 +153,7 @@ def browser_images() -> str:
     return _dumps({
         "ok": True,
         "count": data.get("count"),
+        "_risk": bool(_risk_hint(str(data))),
         "files": data.get("files"),
         "download_url": link or "（下载链接生成失败，但文件已保存）",
         "zip_path": zip_path,
