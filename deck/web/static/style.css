@@ -296,6 +296,38 @@ body {
 
 .msg.user .bubble .text { margin-top: 6px; }
 
+/* 用户气泡下面那排小按钮：复制 / 重新发送（和 App 端一样，只用小字，不加图标） */
+.msg-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  max-width: 84%;
+  min-width: 0;
+}
+
+.msg-col .bubble { max-width: 100%; }
+
+.msg-acts {
+  display: flex;
+  gap: 2px;
+  margin: 3px 4px 0;
+}
+
+.msg-act {
+  border: none;
+  background: transparent;
+  color: #b39aa8;
+  font: inherit;
+  font-size: 11.5px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.msg-act:hover { color: var(--pink-deep); background: #fff0f7; }
+.msg-act:active { transform: scale(.96); }
+
 /* Markdown 正文 */
 .content > *:first-child { margin-top: 0; }
 .content > *:last-child { margin-bottom: 0; }
@@ -2335,10 +2367,14 @@ body.chat-page .sidebar.open { transform: translateX(0); }
 
 .side-foot {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   border-top: 1px solid var(--line, #f0d9e6);
   padding-top: 10px;
 }
+
+/* 脚上现在有四个入口（反馈 / 下载 App / 改密码 / 退出），两个一行排开 */
+.side-foot .side-link { flex: 1 1 calc(50% - 4px); }
 
 .side-link {
   flex: 1;
@@ -2616,6 +2652,222 @@ body.chat-page .topbar { padding-left: 50px; }
 }
 
 .user-logout:hover { background: #ffe9eb; }
+
+/* ================= 意见反馈 ================= */
+
+/* 用户中心里那一行入口 */
+.user-issue {
+  width: 100%;
+  margin: 0 0 12px;
+  border: 1px dashed var(--line, #f0d9e6);
+  background: var(--pink-mist, #ffeaf5);
+  color: var(--pink-deep, #e0729f);
+  border-radius: 11px;
+  padding: 9px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.user-issue:hover { background: #fff0f7; border-color: var(--pink-dark, #ff9ec7); }
+
+.issue-box {
+  position: relative;
+  max-width: 460px;
+  max-height: min(88vh, 760px);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 16px 10px;
+}
+
+.issue-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.issue-avatar { width: 40px; height: 40px; border-width: 2px; }
+.issue-head-text { min-width: 0; }
+.issue-title { font-size: 16px; font-weight: 600; }
+.issue-sub { margin-top: 2px; font-size: 11.5px; line-height: 1.6; color: #9a8a94; }
+
+.issue-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 2px;
+}
+
+.issue-form { display: flex; flex-direction: column; gap: 8px; }
+
+.issue-field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: #8a7680; }
+
+.issue-field input,
+.issue-field textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--line, #f0d9e6);
+  border-radius: 11px;
+  background: #fff8fc;
+  color: var(--ink, #4a3b43);
+  font: inherit;
+  font-size: 16px;      /* iOS 上小于 16px 会自动放大页面 */
+  line-height: 1.5;
+  outline: none;
+  resize: vertical;
+}
+
+.issue-field textarea { min-height: 84px; max-height: 220px; }
+
+.issue-field input:focus,
+.issue-field textarea:focus { border-color: var(--pink-dark); background: #fff; }
+
+.issue-pics { display: flex; flex-wrap: wrap; gap: 8px; }
+.issue-pics[hidden] { display: none; }
+
+.issue-pic {
+  position: relative;
+  width: 62px;
+  height: 62px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line, #f0d9e6);
+}
+.issue-pic img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+.issue-pic-del {
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(74, 59, 67, .55);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.issue-form-foot { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+
+.issue-pick {
+  border: 1px solid var(--line, #f0d9e6);
+  background: var(--pink-mist, #ffeaf5);
+  color: var(--pink-deep, #e0729f);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.issue-pick:hover { background: #ffeef6; }
+.issue-pick:disabled { opacity: .5; cursor: default; }
+
+.issue-count { flex: 1; min-width: 0; font-size: 11.5px; color: #a795a0; }
+
+.issue-submit {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 18px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, var(--pink-dark), var(--pink-deep));
+  box-shadow: 0 3px 10px rgba(224, 114, 159, .28);
+  cursor: pointer;
+}
+.issue-submit:disabled { opacity: .55; box-shadow: none; }
+
+.issue-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 16px 0 8px;
+  padding-top: 12px;
+  border-top: 1px dashed #f6e3ee;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #9a8a94;
+}
+
+.issue-refresh {
+  border: none;
+  background: var(--pink-mist, #ffeaf5);
+  color: var(--pink-deep, #e0729f);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.issue-refresh:hover { background: #ffeef6; }
+
+.issue-list { display: flex; flex-direction: column; gap: 10px; padding-bottom: 4px; }
+
+.issue-empty {
+  padding: 18px 12px;
+  border-radius: 12px;
+  background: var(--pink-mist, #ffeaf5);
+  border: 1px dashed var(--line, #f0d9e6);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #9a8a94;
+  text-align: center;
+}
+
+.issue-card {
+  border: 1px solid var(--line, #f0d9e6);
+  border-radius: 13px;
+  background: #fffafc;
+  padding: 10px 12px;
+}
+
+.issue-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.issue-card-title { font-size: 13.5px; font-weight: 600; color: #4a3b43; overflow-wrap: anywhere; }
+.issue-card-time { margin-top: 2px; font-size: 11px; color: #b3a2ac; }
+
+.issue-card-body {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #6b5a63;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.issue-card-pics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.issue-card-pics img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 9px;
+  border: 1px solid var(--line, #f0d9e6);
+  cursor: zoom-in;
+}
+
+.issue-card-note {
+  margin-top: 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border-left: 3px solid var(--pink, #ffb7d5);
+  background: var(--pink-mist, #ffeaf5);
+  color: #8a5a72;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.issue-chip {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid #f3dcb9;
+  background: #fff2dd;
+  color: #b06a1e;
+  font-size: 11px;
+  font-weight: 600;
+}
+.issue-chip.accepted { background: #eaf7ef; border-color: #c9e8d5; color: #1f8a5b; }
+.issue-chip.rejected { background: #fff0f2; border-color: #ffd3da; color: #c0392b; }
 
 #pass-msg.ok { color: #1f8a5b; }
 

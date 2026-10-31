@@ -895,8 +895,9 @@ function fileChips(files) {
   return wrap;
 }
 
-function addUser(text, images, files) {
+function addUser(text, images, files, plain) {
   const row = el('div', 'msg user');
+  const col = el('div', 'msg-col');
   const bubble = el('div', 'bubble');
   if (images && images.length) {
     const wrap = el('div', 'sent-images');
@@ -914,10 +915,63 @@ function addUser(text, images, files) {
     box.textContent = text;
     bubble.appendChild(box);
   }
-  row.appendChild(bubble);
+  col.appendChild(bubble);
+
+  /* 气泡下面那排「复制 / 重新发送」。
+     重发只认还在手上的内容：历史消息里的图片是 /api/uploads/xx 这种地址，
+     当成 data URL 再发一遍服务端不认，所以只重发文字和附件 id（跟 App 端一个规矩）。 */
+  const realText = plain === undefined ? text : plain;
+  const againImages = (images || []).filter((src) => String(src).startsWith('data:'));
+  const againFiles = (files || [])
+    .filter((file) => file && file.id)
+    .map((file) => ({ id: file.id, name: file.name, size: file.size }));
+  if (realText || againImages.length || againFiles.length) {
+    col.appendChild(userActions({ text: realText || '', images: againImages, files: againFiles, bubble }));
+  }
+
+  row.appendChild(col);
   messagesEl.appendChild(row);
   scrollToBottom();
   updateEmptyHero(true);
+}
+
+/* 用户消息下面的小按钮：复制全文 / 重新发送。样式克制一点，别抢气泡的戏。 */
+function userActions(payload) {
+  const bar = el('div', 'msg-acts');
+
+  if (payload.text) {
+    const copy = el('button', 'msg-act');
+    copy.type = 'button';
+    copy.textContent = t('msgCopy');
+    copy.addEventListener('click', async () => {
+      const ok = await copyText(payload.text);
+      copy.textContent = ok ? t('msgCopied') : t('msgCopyManual');
+      if (!ok) selectNode(payload.bubble.querySelector('.text') || payload.bubble);
+      setTimeout(() => { copy.textContent = t('msgCopy'); }, 1800);
+    });
+    bar.appendChild(copy);
+  }
+
+  const again = el('button', 'msg-act');
+  again.type = 'button';
+  again.textContent = t('msgResend');
+  again.addEventListener('click', () => resendUser(payload));
+  bar.appendChild(again);
+
+  return bar;
+}
+
+/* 重新发送：原样再发一遍（文字 / 图片 / 附件），不动输入框里正在写的东西。 */
+function resendUser(payload) {
+  if (busy) {
+    statusEl.textContent = t('resendBusy');
+    return;
+  }
+  if (!payload.text && !payload.images.length && !payload.files.length) {
+    statusEl.textContent = t('resendEmpty');
+    return;
+  }
+  send(payload.text, payload.images, { files: payload.files, keepDraft: true });
 }
 
 /* 历史里的用户消息长这样：「我发了两张图\n\n[图片 #abc123 uploads/abc123.jpg：摘要]」
@@ -967,7 +1021,8 @@ function renderHistory(items) {
       body = parsed.clean;
       addUser(body || (ids.length || parsed.files.length ? '' : '（空消息）'),
               ids.map((id) => `/api/uploads/${id}`),
-              parsed.files);
+              parsed.files,
+              body);          // 第 4 个参数是「复制 / 重发」用的正文，别把「（空消息）」这种占位符带上
       return;
     }
     renderAssistantBlock(block.text);
@@ -1845,6 +1900,249 @@ sideLogoutEl.addEventListener('click', async () => {
   location.replace('/login');
 });
 
+/* ---------------- 意见反馈 ----------------
+   和 App 端共用一套接口：POST /api/issues 提交，GET /api/issues/mine 看自己提过的。
+   图片走 data URL 提交（服务端按 id 归档，管理员处理完会把图删掉），
+   列表里的图要带 cookie 才能看，所以直接 img.src 指到 /api/issues/image/... 。 */
+
+const ISSUE_MAX_IMAGES = 4;
+const ISSUE_MAX_BYTES = 4 * 1024 * 1024;   // 单张上限，和后端 issues.MAX_IMAGE_BYTES 对齐
+const ISSUE_STATUS_TEXT = { pending: '审核中', accepted: '已采纳', rejected: '已打回' };
+
+const sideIssueEl = document.getElementById('side-issue');
+const userIssueEl = document.getElementById('user-issue');
+const issueModalEl = document.getElementById('issue-modal');
+const issueCloseEl = document.getElementById('issue-close');
+const issueSubEl = document.getElementById('issue-sub');
+const issueFormEl = document.getElementById('issue-form');
+const issueSubjectEl = document.getElementById('issue-subject');
+const issueBodyEl = document.getElementById('issue-body');
+const issuePicsEl = document.getElementById('issue-pics');
+const issueFileEl = document.getElementById('issue-file');
+const issuePickEl = document.getElementById('issue-pick');
+const issueCountEl = document.getElementById('issue-count');
+const issueSubmitEl = document.getElementById('issue-submit');
+const issueMsgEl = document.getElementById('issue-msg');
+const issueListEl = document.getElementById('issue-list');
+const issueRefreshEl = document.getElementById('issue-refresh');
+
+let issueImages = [];      // 还没提交的配图（data URL）
+
+function issueMsg(text, ok) {
+  issueMsgEl.hidden = !text;
+  issueMsgEl.textContent = text || '';
+  issueMsgEl.classList.toggle('ok', Boolean(ok));
+}
+
+function renderIssuePics() {
+  issuePicsEl.innerHTML = '';
+  issueImages.forEach((src, index) => {
+    const item = el('div', 'issue-pic');
+    const img = el('img');
+    img.src = src;
+    img.alt = '反馈配图';
+    const del = el('button', 'issue-pic-del');
+    del.type = 'button';
+    del.textContent = '×';
+    del.setAttribute('aria-label', '去掉这张图');
+    del.addEventListener('click', () => {
+      issueImages.splice(index, 1);
+      renderIssuePics();
+    });
+    item.append(img, del);
+    issuePicsEl.appendChild(item);
+  });
+  issuePicsEl.hidden = !issueImages.length;
+  issuePickEl.disabled = issueImages.length >= ISSUE_MAX_IMAGES;
+  issueCountEl.textContent = issueImages.length
+    ? `${issueImages.length}/${ISSUE_MAX_IMAGES} 张`
+    : `最多 ${ISSUE_MAX_IMAGES} 张，单张 ${ISSUE_MAX_BYTES / 1024 / 1024}MB`;
+}
+
+issuePickEl.addEventListener('click', () => issueFileEl.click());
+
+issueFileEl.addEventListener('change', () => {
+  const files = Array.from(issueFileEl.files || []);
+  issueFileEl.value = '';
+  files.forEach((file) => {
+    if (issueImages.length >= ISSUE_MAX_IMAGES) {
+      issueMsg(`最多带 ${ISSUE_MAX_IMAGES} 张图`);
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      issueMsg('只能加图片');
+      return;
+    }
+    if (file.size > ISSUE_MAX_BYTES) {
+      issueMsg(`这张太大：${file.name}（单张上限 ${ISSUE_MAX_BYTES / 1024 / 1024}MB）`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      issueImages.push(reader.result);
+      renderIssuePics();
+    };
+    reader.onerror = () => issueMsg('读图片失败');
+    reader.readAsDataURL(file);
+  });
+});
+
+function issueStamp(ts) {
+  const num = Number(ts);
+  if (!num) return '';
+  const d = new Date(num * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function issueCard(item) {
+  const card = el('div', 'issue-card');
+
+  const head = el('div', 'issue-card-head');
+  const title = el('div', 'issue-card-title');
+  title.textContent = item.title || '（没有标题）';
+  const status = item.status || 'pending';
+  const chip = el('span', 'issue-chip');
+  chip.classList.add(status);
+  chip.textContent = ISSUE_STATUS_TEXT[status] || ISSUE_STATUS_TEXT.pending;
+  head.append(title, chip);
+  card.appendChild(head);
+
+  const time = el('div', 'issue-card-time');
+  time.textContent = issueStamp(item.created_at);
+  card.appendChild(time);
+
+  if (item.body) {
+    const body = el('div', 'issue-card-body');
+    body.textContent = item.body;
+    card.appendChild(body);
+  }
+
+  const pics = item.images || [];
+  if (pics.length) {
+    const wrap = el('div', 'issue-card-pics');
+    pics.forEach((name) => {
+      const img = el('img');
+      img.src = `/api/issues/image/${item.id}/${encodeURIComponent(name)}`;
+      img.alt = '反馈配图';
+      img.loading = 'lazy';
+      img.addEventListener('click', () => window.open(img.src, '_blank', 'noopener'));
+      wrap.appendChild(img);
+    });
+    card.appendChild(wrap);
+  }
+
+  if (item.admin_note) {
+    const note = el('div', 'issue-card-note');
+    note.textContent = `管理员回复：${item.admin_note}`;
+    card.appendChild(note);
+  }
+
+  return card;
+}
+
+function renderIssues(items) {
+  issueListEl.innerHTML = '';
+  if (!items.length) {
+    const empty = el('div', 'issue-empty');
+    empty.textContent = '还没提过反馈。碰到问题、想要什么功能，上面写完点提交就行。';
+    issueListEl.appendChild(empty);
+    return;
+  }
+  items.forEach((item) => issueListEl.appendChild(issueCard(item)));
+}
+
+async function loadIssues() {
+  issueListEl.innerHTML = '';
+  const loading = el('div', 'issue-empty');
+  loading.textContent = '正在读…';
+  issueListEl.appendChild(loading);
+  try {
+    const resp = await fetch('/api/issues/mine', { cache: 'no-store' });
+    if (!resp.ok) {
+      throw new Error(resp.status === 401 ? '登录状态过期了，刷新一下页面' : `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    renderIssues(data.issues || []);
+  } catch (err) {
+    issueListEl.innerHTML = '';
+    const bad = el('div', 'issue-empty');
+    bad.textContent = `读不到反馈列表：${err.message || err}`;
+    issueListEl.appendChild(bad);
+  }
+}
+
+function closeIssueModal() {
+  issueModalEl.hidden = true;
+  issueMsg('');
+}
+
+function openIssueModal() {
+  closeSidebar();
+  closeUserModal();
+  issueModalEl.hidden = false;
+  // 文案跟着身份卡走：换人设不用改这里
+  const who = (personaInfo && personaInfo.name) || '助手';
+  issueSubEl.textContent = `${who} 还在打磨，碰到问题或者想要什么功能，写在这里；管理员处理完这里会显示结果。`;
+  renderIssuePics();
+  issueMsg('');
+  loadIssues();
+  setTimeout(() => issueSubjectEl.focus(), 60);
+}
+
+sideIssueEl.addEventListener('click', openIssueModal);
+userIssueEl.addEventListener('click', openIssueModal);
+issueCloseEl.addEventListener('click', closeIssueModal);
+issueRefreshEl.addEventListener('click', loadIssues);
+issueModalEl.addEventListener('click', (event) => {
+  if (event.target === issueModalEl) closeIssueModal();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !issueModalEl.hidden) closeIssueModal();
+});
+
+issueFormEl.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const title = issueSubjectEl.value.trim();
+  const body = issueBodyEl.value.trim();
+  if (!title) {
+    issueMsg('标题别空着');
+    issueSubjectEl.focus();
+    return;
+  }
+  if (!body) {
+    issueMsg('正文别空着');
+    issueBodyEl.focus();
+    return;
+  }
+  issueSubmitEl.disabled = true;
+  issueMsg('提交中…');
+  try {
+    const resp = await fetch('/api/issues', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, body, images: issueImages }),
+    });
+    let data = null;
+    try { data = await resp.json(); } catch (err) { data = null; }
+    if (!resp.ok) {
+      issueMsg((data && data.detail) || `提交失败（HTTP ${resp.status}）`);
+      issueSubmitEl.disabled = false;
+      return;
+    }
+    issueSubjectEl.value = '';
+    issueBodyEl.value = '';
+    issueImages = [];
+    renderIssuePics();
+    issueMsg(t('issueSent'), true);
+    statusEl.textContent = t('issueSent');
+    await loadIssues();
+  } catch (err) {
+    issueMsg('连不上服务器，等会儿再试');
+  }
+  issueSubmitEl.disabled = false;
+});
+
 /* ---------------- 改密码 ---------------- */
 
 function closePassModal() {
@@ -2147,19 +2445,25 @@ window.addEventListener('pageshow', (e) => { if (e.persisted) resume(); });
 
 /* ---------------- 发送 ---------------- */
 
-async function send(text, images) {
+async function send(text, images, options) {
   if (busy) return;
+  // 「重新发送」不带 options：它自己带附件 id，也不该清掉输入框里正在写的东西
+  const opts = options || {};
   busy = true;
   sendEl.disabled = true;
   pickPlusEl.disabled = true;
-  inputEl.value = '';
-  autosize();
+  if (!opts.keepDraft) {
+    inputEl.value = '';
+    autosize();
+  }
   statusEl.textContent = thinkingText();
   // 先把待发附件记下来：clearImage() 会把 pendingFiles 清空，
   // 之前就是它抢在组装请求前清掉，导致 agent 永远收不到附件
-  const filesToSend = pendingFiles.map((f) => ({ id: f.id }));
-  addUser(text, images, filesToSend);
-  clearImage();
+  // 请求里只带 id；气泡上的文件卡片还得靠 name/size，所以分开传
+  const chipFiles = opts.files ? opts.files : pendingFiles.slice();
+  const filesToSend = chipFiles.map((f) => ({ id: f.id }));
+  addUser(text, images, chipFiles);
+  if (!opts.files) clearImage();
 
   const turn = addAgent();
   showLoading(turn);            // 首字回来之前先显示「正在想…」

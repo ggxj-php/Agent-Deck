@@ -39,6 +39,17 @@ window.UI_TEXT = {
   cutNotice: '话说一半就断了（{reason}）。点下面按钮让它接着讲。',
   compressedNotice: '这段聊得有点长，前面 {n} 条旧记录已压成摘要（上下文 {before}k → {after}k），接着聊就好～',
 
+  /* ---------- 自己发出去的消息（气泡下面那排） ---------- */
+  msgCopy: '复制',
+  msgCopied: '已复制',
+  msgCopyManual: '长按选中复制',
+  msgResend: '重新发送',
+  resendBusy: '上一条还在回，等它说完再重发',
+  resendEmpty: '这条消息没有能重发的内容',
+
+  /* ---------- 意见反馈 ---------- */
+  issueSent: '反馈提交好啦，处理完在「我提过的」里看结果',
+
   /* ---------- 后台 ---------- */
   adminSaved: '存好了',
   adminSaveFailed: '存不下来',

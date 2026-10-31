@@ -26,6 +26,7 @@
   <a class="side-admin" id="side-admin" href="/admin" hidden>⚙ 管理员后台</a>
   <div class="side-list" id="side-list"></div>
   <div class="side-foot">
+    <button type="button" class="side-link" id="side-issue">意见反馈</button>
     <a class="side-link side-download" href="/download" target="_blank" rel="noopener">下载 App</a>
     <button type="button" class="side-link" id="side-pass">改密码</button>
     <button type="button" class="side-link" id="side-logout">退出登录</button>
@@ -116,6 +117,8 @@
       <div class="user-row"><span>我的会话</span><b id="user-sessions">—</b></div>
     </div>
 
+    <button type="button" class="user-issue" id="user-issue">✍ 意见反馈 / 提需求</button>
+
     <h4 class="user-h4">改密码</h4>
     <form id="pass-form">
       <label class="pass-field"><span>原密码</span>
@@ -133,6 +136,48 @@
     </form>
 
     <button type="button" class="user-logout" id="user-logout">退出登录</button>
+  </div>
+</div>
+
+<!-- 意见反馈：写一条 + 看我提过的（和 App 端同一套接口 /api/issues） -->
+<div class="modal" id="issue-modal" hidden>
+  <div class="modal-box issue-box">
+    <button type="button" class="user-close" id="issue-close" aria-label="关闭">×</button>
+
+    <div class="issue-head">
+      <img class="user-avatar issue-avatar" id="issue-avatar" src="/static/avatar.jpg" alt="">
+      <div class="issue-head-text">
+        <div class="issue-title">意见反馈</div>
+        <div class="issue-sub" id="issue-sub">遇到问题、想要什么功能，写在这里。</div>
+      </div>
+    </div>
+
+    <div class="issue-scroll">
+      <form id="issue-form" class="issue-form" novalidate>
+        <label class="issue-field"><span>标题</span>
+          <input type="text" id="issue-subject" maxlength="120" required autocomplete="off"
+                 placeholder="一句话说清是什么问题"></label>
+        <label class="issue-field"><span>正文</span>
+          <textarea id="issue-body" rows="4" maxlength="8000" required
+                    placeholder="怎么操作的、看到什么、希望变成什么样…"></textarea></label>
+
+        <div class="issue-pics" id="issue-pics" hidden></div>
+
+        <div class="issue-form-foot">
+          <button type="button" class="issue-pick" id="issue-pick">＋ 图片</button>
+          <span class="issue-count" id="issue-count"></span>
+          <button type="submit" class="issue-submit" id="issue-submit">提交</button>
+        </div>
+        <p class="modal-msg" id="issue-msg" hidden></p>
+        <input type="file" id="issue-file" accept="image/*" multiple hidden>
+      </form>
+
+      <div class="issue-list-head">
+        <span>我提过的</span>
+        <button type="button" class="issue-refresh" id="issue-refresh">刷新</button>
+      </div>
+      <div class="issue-list" id="issue-list"></div>
+    </div>
   </div>
 </div>
 
