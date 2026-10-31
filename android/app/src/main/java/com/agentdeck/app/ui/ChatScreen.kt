@@ -110,11 +110,12 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
     var showAccount by remember { mutableStateOf(false) }
     var previewUrl by remember { mutableStateOf<String?>(null) }
     var showDownloads by remember { mutableStateOf(false) }
+    var showIssues by remember { mutableStateOf(false) }
     var confirmExit by remember { mutableStateOf(false) }
     val activity = LocalContext.current as? android.app.Activity
 
     // 返回键：抽屉开着先收抽屉；否则问一句再退出（和网页端 close 确认一个意思）
-    androidx.activity.compose.BackHandler(enabled = !showDownloads) {
+    androidx.activity.compose.BackHandler(enabled = !showDownloads && !showIssues) {
         if (drawerState.isOpen) {
             scope.launch { drawerState.close() }
         } else {
@@ -155,6 +156,11 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
         return
     }
 
+    if (showIssues) {
+        IssueScreen(palette) { showIssues = false }
+        return
+    }
+
     LaunchedEffect(state.toast) {
         state.toast?.let { message ->
             snackbar.showSnackbar(message)
@@ -186,6 +192,7 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                     onLogout = viewModel::logout,
                     onChangePassword = { showPasswordDialog = true },
                     onOpenDownloads = { showDownloads = true },
+                    onOpenIssues = { showIssues = true },
                     onCheckUpdate = { viewModel.checkForUpdate(manual = true) },
                     onOpenAccount = { showAccount = true },
                 )
@@ -229,6 +236,7 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                 onPreview = { previewUrl = it },
                 onAskPick = viewModel::pickAsk,
                 onContinue = viewModel::continueGeneration,
+                onResend = viewModel::resend,
             )
         }
     }
@@ -865,6 +873,7 @@ private fun MessageList(
     onPreview: (String) -> Unit,
     onAskPick: (Long, Int, String) -> Unit,
     onContinue: () -> Unit,
+    onResend: (UiMessage) -> Unit,
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -953,6 +962,7 @@ private fun MessageList(
                     onPreview = onPreview,
                     onAskPick = onAskPick,
                     onContinue = onContinue,
+                    onResend = onResend,
                 )
             }
             item { Spacer(Modifier.height(8.dp)) }
@@ -1042,6 +1052,7 @@ private fun DrawerContent(
     onLogout: () -> Unit,
     onChangePassword: () -> Unit,
     onOpenDownloads: () -> Unit,
+    onOpenIssues: () -> Unit,
     onCheckUpdate: () -> Unit,
     onOpenAccount: () -> Unit,
 ) {
@@ -1157,6 +1168,7 @@ private fun DrawerContent(
                 .padding(top = 10.dp),
         ) {
             DrawerFootButton("下载管理", palette, onOpenDownloads, Modifier.weight(1f))
+            DrawerFootButton("意见反馈", palette, onOpenIssues, Modifier.weight(1f))
             DrawerFootButton("检查更新", palette, onCheckUpdate, Modifier.weight(1f))
         }
         Row(

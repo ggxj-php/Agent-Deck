@@ -2,6 +2,7 @@ package com.agentdeck.app.ui.components
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.util.Log
 import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
@@ -68,27 +69,49 @@ object LatexRenderer {
  * 屏幕上露出一串 `\left` `\right`。它们不影响公式内容，删掉最安全。
  * ------------------------------------------------------------------ */
 
-private val TAG_CMD = Regex("""\\tag\*?\s*\{[^{}]*}""")
-private val LABEL_CMD = Regex("""\\label\s*\{[^{}]*}""")
-private val BOOL_CMD = Regex("""\\(?:nonumber|notag|noindent|allowbreak|displaylimits)\b""")
-private val SPACE_CMD = Regex("""\\(?:h|v)space\*?\s*\{[^{}]*}""")
-private val ENV_OPEN = Regex("""\\begin\s*\{\s*(align|alignat|eqnarray|gather|equation|multline)\*?\s*}""")
-private val ENV_CLOSE = Regex("""\\end\s*\{\s*(align|alignat|eqnarray|gather|equation|multline)\*?\s*}""")
+private class LatexRule(val pattern: Regex, val replacement: String)
+
+/**
+ * 清洗规则表。
+ *
+ * 两个坑记在这里，别再踩一遍：
+ * 1. 花括号一律写成 `[{]` / `[}]`。Android 走的是 ICU 正则，比 JVM 严——
+ *    虽然接受 `\{`、`\}`，但**裸露的 `}` 会直接抛 PatternSyntaxException**；
+ *    单元测试跑在 JVM 上发现不了，装到手机上就是 `ExceptionInInitializerError` 整页崩溃。
+ * 2. 规则在这里就尝试编译，编不过只跳过这一条。宁可少清洗一条，也不能让整个 App 起不来。
+ */
+private val LATEX_RULES: List<LatexRule> = buildList {
+    fun rule(pattern: String, replacement: String) {
+        runCatching { Regex(pattern) }
+            .getOrNull()
+            ?.let { add(LatexRule(it, replacement)) }
+            ?: Log.w("AgentDeck", "latex rule skipped (bad pattern): $pattern")
+    }
+    rule("""\\tag\*?\s*[{][^{}]*[}]""", "")
+    rule("""\\label\s*[{][^{}]*[}]""", "")
+    rule("""\\(?:nonumber|notag|noindent|allowbreak|displaylimits)\b""", "")
+    rule("""\\(?:h|v)space\*?\s*[{][^{}]*[}]""", " ")
+    // align / gather 这类「带编号的显示公式环境」在数学模式里不被接受，
+    // 换成内容等价、不编号的 aligned（cases、matrix 等本来就支持，不动）
+    rule(
+        """\\begin\s*[{]\s*(align|alignat|eqnarray|gather|equation|multline)\*?\s*[}]""",
+        """\begin{aligned}""",
+    )
+    rule(
+        """\\end\s*[{]\s*(align|alignat|eqnarray|gather|equation|multline)\*?\s*[}]""",
+        """\end{aligned}""",
+    )
+}
 
 /** 把一段 LaTeX 洗成 JLaTeXMath 能吃的样子；认不出来的命令一律保持原样，不吞内容。 */
 internal fun sanitizeLatex(latex: String): String {
     var text = latex
-    text = TAG_CMD.replace(text, "")
-    text = LABEL_CMD.replace(text, "")
-    text = BOOL_CMD.replace(text, "")
-    text = SPACE_CMD.replace(text, " ")
-    // align / gather 这类「带编号的显示公式环境」在数学模式里不被接受，
-    // 换成内容等价、不编号的 aligned（cases、matrix 等本来就支持，不动）
-    // 用 lambda 而不是字符串替换：替换串里的 "\b" 会被当成退格转义，反斜杠会丢掉
-    text = ENV_OPEN.replace(text) { """\begin{aligned}""" }
-    text = ENV_CLOSE.replace(text) { """\end{aligned}""" }
+    for (rule in LATEX_RULES) {
+        // 用 lambda 替换：替换串里的 "\b" 会被当成转义，反斜杠会丢
+        text = rule.pattern.replace(text) { rule.replacement }
+    }
     // 只剩对齐符没法验算的奇数行：aligned 里 & 多了会报错，简单兜一下
-    text = text.replace(Regex("""&{3,}"""), "&")
+    text = text.replace(Regex("&{3,}"), "&")
     return text.trim()
 }
 

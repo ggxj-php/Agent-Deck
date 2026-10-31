@@ -90,6 +90,32 @@ data class Captcha(
     val ttl: Int = 300,
 )
 
+/**
+ * 一条用户反馈（issue）。
+ *
+ * status：`pending` 审核中 / `accepted` 已采纳 / `rejected` 已打回。
+ * 管理员处理完会把图片删掉（服务器上不留），所以处理后的条目 images 是空的。
+ */
+data class IssueItem(
+    val id: Long = 0,
+    val title: String = "",
+    val body: String = "",
+    val status: String = "pending",
+    val adminNote: String = "",
+    val createdAt: Double = 0.0,
+    val images: List<String> = emptyList(),
+) {
+    val statusLabel: String
+        get() = when (status) {
+            "accepted" -> "已采纳"
+            "rejected" -> "已打回"
+            else -> "审核中"
+        }
+
+    /** 还没被处理，用户能看到的提示是「等一等」。 */
+    val pending: Boolean get() = status != "accepted" && status != "rejected"
+}
+
 /** SSE 事件。字段名与后端 `ask_stream` 吐出来的 JSON 一一对应。 */
 sealed interface ChatEvent {
     data class Thinking(val text: String) : ChatEvent

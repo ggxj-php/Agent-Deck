@@ -501,8 +501,8 @@ private fun readAsDataUrl(context: Context, uri: Uri): PickedFile? {
     }.getOrNull()
 }
 
-/** 最长边压到 1600px、JPEG 85，单张控制在 2MB 内再上传。 */
-private fun toDataUrl(context: Context, uri: Uri): String? {
+/** 最长边压到 1600px、JPEG 85，单张控制在 2MB 内再上传。反馈页也复用这一份。 */
+internal fun toDataUrl(context: Context, uri: Uri): String? {
     return runCatching {
         val raw = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
         if (raw.size > 24 * 1024 * 1024) return null

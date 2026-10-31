@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Psychology
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.ReportProblem
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.Icon
@@ -94,9 +95,11 @@ fun MessageItem(
     onAskPick: (Long, Int, String) -> Unit = { _, _, _ -> },
     /** 提示条下面那个「继续」按钮：出错/截断后让模型接着讲。 */
     onContinue: () -> Unit = {},
+    /** 用户消息上的「重新发送」。 */
+    onResend: (UiMessage) -> Unit = {},
 ) {
     when (message.role) {
-        Role.USER -> UserMessage(message, baseUrl, palette, onPreview)
+        Role.USER -> UserMessage(message, baseUrl, palette, onPreview, onResend)
         Role.ASSISTANT -> AssistantMessage(
             message = message,
             baseUrl = baseUrl,
@@ -115,34 +118,51 @@ private fun UserMessage(
     baseUrl: String,
     palette: DeckPalette,
     onPreview: (String) -> Unit,
+    onResend: (UiMessage) -> Unit,
 ) {
     val text = (message.blocks.filterIsInstance<Block.Text>().firstOrNull()?.markdown).orEmpty()
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 14.dp),
-        horizontalArrangement = Arrangement.End,
+        horizontalAlignment = Alignment.End,
     ) {
-        Column(
-            modifier = Modifier
-                .widthIn(max = 310.dp)
-                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 5.dp, bottomEnd = 16.dp, bottomStart = 16.dp))
-                .background(Brush.linearGradient(listOf(palette.accent, palette.userBubbleEnd)))
-                .padding(horizontal = 13.dp, vertical = 10.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
         ) {
-            message.images.forEach { raw ->
-                val url = resolveUrl(baseUrl, raw)
-                val context = LocalContext.current
-                // 刚发出去的图片是 data URI，Coil 解不了，先自己解成 Bitmap
-                val localBitmap = remember(url) {
-                    if (isDataUri(url)) decodeDataUri(url) else null
-                }
-                val request = remember(url) {
-                    ImageRequest.Builder(context).data(url).size(1200, 1200).build()
-                }
-                if (localBitmap != null) {
-                    androidx.compose.foundation.Image(
-                        bitmap = localBitmap.asImageBitmap(),
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 310.dp)
+                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 5.dp, bottomEnd = 16.dp, bottomStart = 16.dp))
+                    .background(Brush.linearGradient(listOf(palette.accent, palette.userBubbleEnd)))
+                    .padding(horizontal = 13.dp, vertical = 10.dp),
+            ) {
+                message.images.forEach { raw ->
+                    val url = resolveUrl(baseUrl, raw)
+                    val context = LocalContext.current
+                    // 刚发出去的图片是 data URI，Coil 解不了，先自己解成 Bitmap
+                    val localBitmap = remember(url) {
+                        if (isDataUri(url)) decodeDataUri(url) else null
+                    }
+                    val request = remember(url) {
+                        ImageRequest.Builder(context).data(url).size(1200, 1200).build()
+                    }
+                    if (localBitmap != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = localBitmap.asImageBitmap(),
+                            contentDescription = "发送的图片",
+                            contentScale = ContentScale.FillWidth,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 240.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onPreview(url) },
+                        )
+                        return@forEach
+                    }
+                    AsyncImage(
+                        model = request,
                         contentDescription = "发送的图片",
                         contentScale = ContentScale.FillWidth,
                         modifier = Modifier
@@ -151,29 +171,97 @@ private fun UserMessage(
                             .clip(RoundedCornerShape(12.dp))
                             .clickable { onPreview(url) },
                     )
-                    return@forEach
+                    Spacer(Modifier.height(6.dp))
                 }
-                AsyncImage(
-                    model = request,
-                    contentDescription = "发送的图片",
-                    contentScale = ContentScale.FillWidth,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 240.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onPreview(url) },
-                )
-                Spacer(Modifier.height(6.dp))
+                message.files.forEach { file -> UserFileChip(file.name, file.size) }
+                if (text.isNotBlank()) {
+                    Text(
+                        text = text,
+                        fontSize = 15.sp,
+                        lineHeight = 22.sp,
+                        color = Color.White,
+                    )
+                }
             }
-            message.files.forEach { file -> UserFileChip(file.name, file.size) }
-            if (text.isNotBlank()) {
-                Text(
-                    text = text,
-                    fontSize = 15.sp,
-                    lineHeight = 22.sp,
-                    color = Color.White,
-                )
+        }
+        // 没文字的消息（纯图 / 纯文件）没得复制，重发也只在有内容时给
+        if (text.isNotBlank() || message.images.isNotEmpty() || message.files.isNotEmpty()) {
+            UserActionRow(message, text, palette, onResend)
+        }
+    }
+}
+
+/** 用户消息下面那排小按钮：复制全文 / 重新发送。样式和助手消息的「复制」保持一致。 */
+@Composable
+private fun UserActionRow(
+    message: UiMessage,
+    plain: String,
+    palette: DeckPalette,
+    onResend: (UiMessage) -> Unit,
+) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var copied by remember(message.id) { mutableStateOf(false) }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.End,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp),
+    ) {
+        if (plain.isNotBlank()) {
+            Surface(
+                onClick = {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(plain))
+                    copied = true
+                },
+                color = Color.Transparent,
+                shape = RoundedCornerShape(6.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.ContentCopy,
+                        contentDescription = null,
+                        modifier = Modifier.size(12.dp),
+                        tint = if (copied) palette.accent else palette.inkSoft,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = if (copied) "已复制" else "复制",
+                        fontSize = 10.5.sp,
+                        color = if (copied) palette.accent else palette.inkSoft,
+                    )
+                }
             }
+        }
+        Spacer(Modifier.width(6.dp))
+        Surface(
+            onClick = { onResend(message) },
+            color = Color.Transparent,
+            shape = RoundedCornerShape(6.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(12.dp),
+                    tint = palette.inkSoft,
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("重新发送", fontSize = 10.5.sp, color = palette.inkSoft)
+            }
+        }
+    }
+    LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(1500)
+            copied = false
         }
     }
 }

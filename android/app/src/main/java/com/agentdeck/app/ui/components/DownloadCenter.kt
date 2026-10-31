@@ -214,7 +214,7 @@ object DownloadCenter {
 
 /* ---------------- 落盘 ---------------- */
 
-private object DownloadSaver {
+internal object DownloadSaver {
 
     suspend fun save(
         context: Context,
@@ -257,6 +257,87 @@ private object DownloadSaver {
         values.put(MediaStore.Downloads.IS_PENDING, 0)
         resolver.update(uri, values, null, null)
         return uri
+    }
+
+    /**
+     * 存进系统相册（`图片/AgentDeck`）——看图页「保存图片」走这里。
+     *
+     * 和附件下载的区别只在于落到 [MediaStore.Images] 而不是 Downloads。
+     * 两层校验：写字节失败、或 ROM 不认 IS_PENDING 归零（条目会一直挂着、相册里根本看不到），
+     * 都返回 null，让调用方去 Downloads 兜底，绝不「假装存好了」。
+     */
+    suspend fun saveImage(
+        context: Context,
+        file: File,
+        name: String,
+        mime: String,
+    ): Uri? = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            saveImageMediaStore(context, file, name, mime)
+        } else {
+            saveImageLegacy(context, file, name)
+        }
+    }
+
+    private fun saveImageMediaStore(
+        context: Context,
+        file: File,
+        name: String,
+        mime: String,
+    ): Uri? {
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, name)
+            put(MediaStore.Images.Media.MIME_TYPE, mime)
+            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/AgentDeck")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val uri = resolver.insert(collection, values) ?: return null
+        val written = runCatching {
+            resolver.openOutputStream(uri)?.use { out ->
+                file.inputStream().use { it.copyTo(out, 64 * 1024) }
+            } != null
+        }.getOrDefault(false)
+        if (!written) {
+            runCatching { resolver.delete(uri, null, null) }
+            return null
+        }
+        val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
+        val updated = runCatching { resolver.update(uri, done, null, null) }.getOrDefault(0)
+        if (updated <= 0) {
+            // 一直是 pending 的话相册不会显示，宁可删掉让上层兜底
+            runCatching { resolver.delete(uri, null, null) }
+            return null
+        }
+        return uri
+    }
+
+    @Suppress("DEPRECATION")
+    private fun saveImageLegacy(context: Context, file: File, name: String): Uri? {
+        // Android 9 及以下写公共图片目录要运行时权限，没给就别硬写
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted) return null
+        val dir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+            "AgentDeck",
+        )
+        if (!dir.exists() && !dir.mkdirs()) return null
+        val target = File(dir, name)
+        val ok = runCatching {
+            file.inputStream().use { source -> target.outputStream().use { out -> source.copyTo(out) } }
+            true
+        }.getOrDefault(false)
+        if (!ok) {
+            runCatching { target.delete() }
+            return null
+        }
+        // 让相册立刻能扫到，否则要等下次开机索引
+        runCatching { android.media.MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), null, null) }
+        return Uri.fromFile(target)
     }
 
     @Suppress("DEPRECATION")

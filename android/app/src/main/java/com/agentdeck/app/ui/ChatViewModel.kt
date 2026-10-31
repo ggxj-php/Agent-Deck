@@ -444,6 +444,29 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
         api.cancelChat()
     }
 
+    /**
+     * 重发一条用户消息。
+     *
+     * 图片只有还在内存里那种（data URI）才带得上——历史记录里的图是服务器路径，
+     * 后端只认 data URL，硬塞会整条被拒，所以这里直接跳过。
+     */
+    fun resend(message: UiMessage) {
+        if (_state.value.busy) {
+            _state.update { it.copy(toast = "上一条还在回，等它说完再重发") }
+            return
+        }
+        val text = message.blocks
+            .filterIsInstance<Block.Text>()
+            .joinToString("\n\n") { it.markdown }
+            .trim()
+        val images = message.images.filter { it.startsWith("data:") }
+        if (text.isEmpty() && images.isEmpty() && message.files.isEmpty()) {
+            _state.update { it.copy(toast = "这条消息没有能重发的内容") }
+            return
+        }
+        send(text = text, images = images, files = message.files)
+    }
+
     fun toggleThinking() {
         _state.update { it.copy(thinking = !it.thinking) }
     }

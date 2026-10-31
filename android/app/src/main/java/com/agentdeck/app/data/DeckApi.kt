@@ -317,6 +317,50 @@ class DeckApi(context: android.content.Context) {
         }
     }
 
+    // ---------------- 用户反馈 ----------------
+
+    /** 提一条反馈。图片是 data URL 列表，服务端会自己落盘并按 id 归档。 */
+    suspend fun submitIssue(title: String, body: String, images: List<String>): IssueItem {
+        val pictures = JSONArray()
+        images.forEach { pictures.put(it) }
+        val payload = JSONObject()
+            .put("title", title)
+            .put("body", body)
+            .put("images", pictures)
+            .toString()
+        val obj = JSONObject(call("POST", "/api/issues", payload))
+        return parseIssue(obj.optJSONObject("issue"))
+    }
+
+    /** 我提过的反馈，新的在前（服务端已经排好序）。 */
+    suspend fun myIssues(): List<IssueItem> {
+        val obj = JSONObject(call("GET", "/api/issues/mine", null))
+        val array = obj.optJSONArray("issues") ?: JSONArray()
+        return (0 until array.length()).mapNotNull { index ->
+            array.optJSONObject(index)?.let { parseIssue(it) }
+        }
+    }
+
+    /** 反馈里的图片要走 cookie 才能看，交给 Coil 用同一个 client 加载。 */
+    fun issueImageUrl(issueId: Long, name: String): String =
+        baseUrl.trimEnd('/') + "/api/issues/image/" + issueId + "/" + name
+
+    private fun parseIssue(obj: JSONObject?): IssueItem {
+        if (obj == null) return IssueItem()
+        val array = obj.optJSONArray("images") ?: JSONArray()
+        return IssueItem(
+            id = obj.optLong("id"),
+            title = obj.optString("title"),
+            body = obj.optString("body"),
+            status = obj.optString("status").ifBlank { "pending" },
+            adminNote = obj.optString("admin_note"),
+            createdAt = obj.optDouble("created_at", 0.0),
+            images = (0 until array.length()).mapNotNull { index ->
+                array.optString(index).takeIf { it.isNotBlank() }
+            },
+        )
+    }
+
     // ---------------- 内部 ----------------
 
     private suspend fun call(method: String, path: String, body: String?): String =
