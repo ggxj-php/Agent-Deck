@@ -486,23 +486,18 @@ def draw_dataflow(data, title=""):
         if k == "entity":
             body.append(_box(x, y, w + 24, h, n["label"], n.get("color") or "blue"))
         elif k == "store":
-            # 数据存储：上下无线条的开口矩形（左边一条竖线用来放编号）
+            # 数据存储：DeMarco 两条平行横线夹住名字，Gane 半开矩形（右侧开口）
             fill, stroke, text_color = _color_of(n.get("color") or "gray")
             left, right = x - (w + 24) / 2, x + (w + 24) / 2
-            inner = (f'<line x1="{left + 7:.1f}" y1="{y - h / 2:.1f}" x2="{left + 7:.1f}" '
-                     f'y2="{y + h / 2:.1f}" stroke="{stroke}" stroke-width="1.2"/>'
-                     if notation == "demarco" else "")
-            right_inner = (f'<line x1="{right - 7:.1f}" y1="{y - h / 2:.1f}" x2="{right - 7:.1f}" '
-                           f'y2="{y + h / 2:.1f}" stroke="{stroke}" stroke-width="1.2"/>'
-                           if notation == "demarco" else "")
+            top, bottom = y - h / 2, y + h / 2
+            d = (f"M{left:.1f},{top:.1f} H{right:.1f} "
+                 f"M{left:.1f},{bottom:.1f} H{right:.1f}")
+            if notation != "demarco":
+                d += f" M{left:.1f},{top:.1f} V{bottom:.1f}"
             body.append(
-                f'<rect x="{left:.1f}" y="{y - h / 2:.1f}" width="{w + 24:.1f}" height="{h}" '
+                f'<rect x="{left:.1f}" y="{top:.1f}" width="{w + 24:.1f}" height="{h}" '
                 f'fill="{fill}" stroke="none"/>'
-                f'<line x1="{left:.1f}" y1="{y - h / 2:.1f}" x2="{left:.1f}" '
-                f'y2="{y + h / 2:.1f}" stroke="{stroke}" stroke-width="2"/>'
-                + inner + right_inner +
-                f'<line x1="{right:.1f}" y1="{y - h / 2:.1f}" x2="{right:.1f}" '
-                f'y2="{y + h / 2:.1f}" stroke="{stroke}" stroke-width="2"/>'
+                f'<path d="{d}" fill="none" stroke="{stroke}" stroke-width="1.8"/>'
                 f'<text x="{x:.1f}" y="{y + 4.5:.1f}" font-size="{FONT}" fill="{text_color}" '
                 f'text-anchor="middle" font-family="system-ui, sans-serif">{_esc(n["label"])}</text>')
         elif notation == "gane":
@@ -880,15 +875,14 @@ _DOT_BIN = shutil.which("dot")
 _DOT_LOCK = threading.Lock()
 
 
-def _inject_open_rects(svg, dot_src, prefix="_store_", double=True):
-    """把数据存储节点的矩形换成「右侧开口」的长方形（课本里的数据存储符号）。
+def _inject_open_rects(svg, dot_src, prefix="_store_", notation="gane"):
+    """把数据存储节点的矩形换成课本里的数据存储符号。
 
     graphviz 2.43 不支持 HTML label 的 sides，所以先按普通 box 渲染（这样布局会
-    正常给它留位置、不会挤在一起），再把该节点 <g> 里的 polygon 换成三条边：
-    上边、下边、左边，右侧留开口。
+    正常给它留位置、不会挤在一起），再把该节点 <g> 里的 polygon 换成我们要的线：
 
-    double=True 走 DeMarco 画法：左边补一条内侧竖线（双线，放编号）；
-    double=False 走 Gane 画法：只留左侧一条竖线。
+      - DeMarco：上下**两条平行横线**（名字夹在中间，左右都不封口）
+      - Gane：**半开矩形**（上边、下边、左边，右侧开口）
     """
     if not svg:
         return svg
@@ -911,14 +905,17 @@ def _inject_open_rects(svg, dot_src, prefix="_store_", double=True):
             return match.group(0)
         xs, ys = nums[0::2], nums[1::2]
         left, right, top, bottom = min(xs), max(xs), min(ys), max(ys)
-        path = (f'<path d="M{left:.1f},{top:.1f} H{right:.1f} '
-                f'M{left:.1f},{top:.1f} V{bottom:.1f} '
-                f'M{left:.1f},{bottom:.1f} H{right:.1f}" '
-                'fill="none" stroke="#4b5563" stroke-width="1.8"/>')
-        if double:
-            # 左侧第二条竖线：DeMarco 的数据存储左边是双线（编号写在两线之间）
-            path += (f'<path d="M{left + 6:.1f},{top:.1f} V{bottom:.1f}" fill="none" '
-                     'stroke="#4b5563" stroke-width="1"/>')
+        if notation == "demarco":
+            # DeMarco：两条平行横线，名字夹在两条线中间
+            path = (f'<path d="M{left:.1f},{top:.1f} H{right:.1f} '
+                    f'M{left:.1f},{bottom:.1f} H{right:.1f}" '
+                    'fill="none" stroke="#4b5563" stroke-width="1.8"/>')
+        else:
+            # Gane：半开矩形（上、下、左三条边，右边开口）
+            path = (f'<path d="M{left:.1f},{top:.1f} H{right:.1f} '
+                    f'M{left:.1f},{top:.1f} V{bottom:.1f} '
+                    f'M{left:.1f},{bottom:.1f} H{right:.1f}" '
+                    'fill="none" stroke="#4b5563" stroke-width="1.8"/>')
         body = body.replace(poly.group(0), path, 1)
         changed += 1
         return head + body + tail
@@ -1104,9 +1101,11 @@ def _dot_dataflow(data):
                      "color": "#3c73c4", "fontcolor": "#1d4076",
                      "label": _dot_label(n["label"])}
         elif k == "store":
+            # 留点上下留白：DeMarco 那两条平行线才是上下边框，别贴着字
             attrs = {"shape": "box", "style": "filled", "fillcolor": "#f8fafc",
                      "color": "#4b5563", "penwidth": 1.0, "fontsize": 13,
-                     "fontcolor": "#33333d", "label": _dot_label(n["label"])}
+                     "margin": "0.26,0.17", "fontcolor": "#33333d",
+                     "label": _dot_label(n["label"])}
         elif notation == "gane":
             attrs = {"shape": "box", "style": "rounded,filled", "fillcolor": "#d8f3e0",
                      "color": "#3f9a63", "fontcolor": "#1d5a36",
@@ -1556,7 +1555,7 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
             if kwargs.get(k):
                 data["notation"] = kwargs[k]
                 break
-    dfd_double = _dfd_notation(data) != "gane"
+    dfd_notation = _dfd_notation(data)
     svg = ""
     builder = GRAPHVIZ_BUILDERS.get(key)
     if builder:
@@ -1567,7 +1566,7 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
                 if svg and key == "state":
                     svg = _fix_hr_lines(svg)
                 if svg and key == "dataflow":
-                    svg = _inject_open_rects(svg, dot_src, double=dfd_double)
+                    svg = _inject_open_rects(svg, dot_src, notation=dfd_notation)
             if not svg:
                 # 偶发失败（比如 dot 恰好超时）再给一次机会，别直接退回旧画法
                 print(f"[diagram] {key} 第一次渲染失败，重试一次", flush=True)
@@ -1575,7 +1574,7 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
                 if svg and key == "state":
                     svg = _fix_hr_lines(svg)
                 if svg and key == "dataflow":
-                    svg = _inject_open_rects(svg, dot_src, double=dfd_double)
+                    svg = _inject_open_rects(svg, dot_src, notation=dfd_notation)
         except Exception as exc:         # noqa: BLE001
             print(f"[diagram] {key} 构建 DOT 失败：{type(exc).__name__}: {exc}", flush=True)
             svg = ""
@@ -1647,7 +1646,9 @@ SPECS = [
                 "edges:[{from,to,label?}], notation?:demarco|gane}\n"
                 "    **画数据流图先定画法**：用户没说就先用 ask_user 问一句，"
                 "选项给「DeMarco（加工画圆）」和「Gane（加工画圆角矩形）」；"
-                "用户选完把结果写进 notation（demarco / gane），不写默认 demarco。\n"
+                "用户选完把结果写进 notation（demarco / gane），不写默认 demarco。"
+                "两种画法的数据存储符号也不同（DeMarco 两条平行横线 / Gane 半开矩形），"
+                "工具按 notation 自动画，你只标 kind=store 就行。\n"
                 "  arch: {layers:[{name, items:[\"模块\", ...]}]}（从上到下的分层架构）\n"
                 "  sequence: {actors:[\"客户端\",\"服务端\"], messages:[{from,to,text,dashed?}]}\n"
                 "  chart: {kind:bar|line|pie, labels:[...], values:[...]}\n"
