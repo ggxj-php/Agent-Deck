@@ -416,7 +416,7 @@ class BrowserManager:
     async def _snapshot(self, owner):
         sess = await self._session(owner)
         self._step(sess)
-        return self._snapshot_data(sess)
+        return await self._snapshot_data(sess)
 
     async def _click(self, owner, ref):
         sess = await self._session(owner)
@@ -435,9 +435,19 @@ class BrowserManager:
     async def _type(self, owner, ref, text):
         sess = await self._session(owner)
         self._step(sess)
-        ok = await sess.page.evaluate(_TYPE_JS, [int(ref), str(text)])
-        return {"ok": bool(ok), "ref": int(ref),
-                "error": "" if ok else f"ref={ref} 不是可输入元素"}
+        text = str(text)
+        loc = sess.page.locator(f'[data-dsh-ref="{int(ref)}"]')
+        try:
+            await loc.fill(text, timeout=8000)
+            return {"ok": True, "ref": int(ref), "error": "", "mode": "fill"}
+        except Exception:                       # noqa: BLE001
+            pass
+        try:
+            await loc.click(timeout=5000)
+            await sess.page.keyboard.type(text)
+            return {"ok": True, "ref": int(ref), "error": "", "mode": "type"}
+        except Exception as exc:                # noqa: BLE001
+            return {"ok": False, "ref": int(ref), "error": f"这个元素填不进去：{exc}"}
 
     async def _key(self, owner, key):
         sess = await self._session(owner)
