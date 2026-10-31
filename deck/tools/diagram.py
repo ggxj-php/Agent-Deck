@@ -1124,154 +1124,440 @@ def _dot_dataflow(data):
     return "\n".join(lines)
 
 
-def _er_parse(data):
-    """把 ER 数据整理成 (实体列表, 关系列表)。
+# ---------------- 9. ER 图（教材 3.3.3 的陈氏画法）----------------
+# 教材定义：实体=矩形（框里写实体名）、属性=椭圆（椭圆里写属性名）、
+# 联系=菱形（菱形里写联系名），三者之间连**无向边**，联系两端标 1 / N / M。
+# 这张图不交给 graphviz：属性要绕着所属实体摆一圈，dot 只会把它们排成一排，
+# 结果就是属性互相压、菱形被挤成扁条。所以坐标、尺寸、连线裁剪全部自己算。
 
-    实体：{"name", "attributes": [{"name", "pk"?, "fk"?} | "名字"]}
-    关系：{"from", "to", "label", "cardinality": "N:M"}
+_ATTR_SEP = re.compile(r"[、,，;；/／|]")
+_PAREN_TAIL = re.compile(r"^(.*?)[（(](.+)[）)]\s*$")
+_CARD_TAIL = re.compile(r"([0-9mMnN])\s*[:：]\s*([0-9mMnN])\s*$")
+
+ER_ENTITY_H = 42.0          # 实体矩形高
+ER_ATTR_H = 30.0            # 属性椭圆高
+ER_DIAMOND_RATIO = 0.62     # 菱形高 / 宽（保持是菱形，不会被拉成扁条）
+ER_ROW_GAP = 96.0           # 上下两层之间留给联系菱形的空当
+
+
+def _split_names(text):
+    """「学号、姓名、性别」→ 三个名字。"""
+    return [p.strip(" 　\t。.，,") for p in _ATTR_SEP.split(str(text))
+            if p.strip(" 　\t。.，,")]
+
+
+def _er_attrs(raw):
+    """属性统一成 [{name, pk, fk}]。
+
+    模型经常图省事，把一堆属性塞进一个字符串（「学号、姓名、性别」），
+    这里一律拆成单个属性——教材里每个属性都要单独画一个椭圆。
     """
-    entities, relations = [], []
+    out = []
+    for item in raw or []:
+        if isinstance(item, dict):
+            name = str(item.get("name") or item.get("label") or "").strip()
+            if not name:
+                continue
+            pk = bool(item.get("pk") or item.get("primary") or item.get("is_pk"))
+            fk = bool(item.get("fk") or item.get("foreign") or item.get("is_fk"))
+            pieces = _split_names(name) if _ATTR_SEP.search(name) else [name]
+            for piece in pieces:
+                out.append({"name": piece, "pk": pk, "fk": fk})
+        else:
+            for piece in _split_names(item):
+                out.append({"name": piece, "pk": False, "fk": False})
+    return out[:10]
+
+
+def _er_parse(data):
+    """把 ER 数据整理成（实体列表, 联系列表）。
+
+    实体：{"name", "attributes": [{"name", "pk"?, "fk"?} | "姓名"]}
+    联系：{"from", "to", "label", "cardinality": "M:N", "attributes": [...]}
+
+    容错：模型常把联系属性写进联系名（「借阅(借阅时间/到期时间)」）或把基数
+    写进名字（「借阅 M:N」），这里都拆出来，别让它挤在菱形里。
+    """
+    entities = []
     for ent in data.get("entities") or data.get("tables") or []:
         if isinstance(ent, dict):
             name = str(ent.get("name") or ent.get("label") or "").strip()
-            attrs = ent.get("attributes") or ent.get("fields") or []
+            raw_attrs = ent.get("attributes") or ent.get("fields") or []
         else:
-            name, attrs = str(ent).strip(), []
+            name, raw_attrs = str(ent).strip(), []
         if not name:
             continue
-        entities.append({"name": name, "attributes": [a for a in attrs
-                                                      if (a.get("name") if isinstance(a, dict) else a)]})
-    for rel in data.get("relations") or data.get("links") or []:
+        entities.append({"name": name, "attributes": _er_attrs(raw_attrs)})
+
+    known = {e["name"]: e["name"] for e in entities}
+    for e in entities:                      # 名字多写/少写一个空格的宽松匹配
+        known.setdefault(e["name"].replace(" ", ""), e["name"])
+
+    relations = []
+    raw_rels = (data.get("relations") or data.get("links")
+                or data.get("relationships") or [])
+    for rel in raw_rels:
         if not isinstance(rel, dict):
             continue
-        a, b = str(rel.get("from") or "").strip(), str(rel.get("to") or "").strip()
-        if a and b:
-            relations.append({"from": a, "to": b,
-                              "label": str(rel.get("label") or rel.get("name") or ""),
-                              "cardinality": str(rel.get("cardinality") or "")})
+        a = str(rel.get("from") or rel.get("entity1") or rel.get("source") or "").strip()
+        b = str(rel.get("to") or rel.get("entity2") or rel.get("target") or "").strip()
+        a = known.get(a) or known.get(a.replace(" ", ""))
+        b = known.get(b) or known.get(b.replace(" ", ""))
+        if not (a and b):
+            continue
+        label = str(rel.get("label") or rel.get("name") or rel.get("type") or "").strip()
+        card = str(rel.get("cardinality") or rel.get("card") or "").strip()
+        raw_attrs = list(rel.get("attributes") or rel.get("fields") or [])
+        # 「借阅(借阅时间/到期时间)」→ 联系名 + 联系自己的属性
+        m = _PAREN_TAIL.match(label)
+        if m:
+            label = m.group(1).strip()
+            raw_attrs.extend(_split_names(m.group(2)))
+        # 「借阅 1:N」→ 联系名 + 基数
+        if not card:
+            m = _CARD_TAIL.search(label)
+            if m:
+                card = f"{m.group(1)}:{m.group(2)}"
+                label = label[:m.start()].strip(" 　:：")
+        card = card.replace("：", ":").upper().replace(" ", "")
+        relations.append({
+            "from": a, "to": b,
+            "label": _clip(label or "联系", 6),
+            "cardinality": card,
+            "attributes": _er_attrs(raw_attrs)[:6],
+        })
     return entities, relations
 
 
-def _er_skeleton_positions(entities, relations):
-    """先用 dot 把「实体 + 关系菱形」的骨架排好，拿到每个节点的坐标（英寸）。"""
-    lines = [_dot_graph(rankdir="TB", splines="line", nodesep=2.1, ranksep=2.7)]
-    ids = {}
-    for i, ent in enumerate(entities):
-        ids[ent["name"]] = f"e{i}"
-        lines.append(f'  e{i} [shape=box, width=1.0, height=0.45, '
-                     f'label="{_dot_label(ent["name"])}"];')
-    for j, rel in enumerate(relations):
-        rid = f"r{j}"
-        lines.append(f'  {rid} [shape=diamond, width=1.15, height=0.55, '
-                     f'label="{_dot_label(rel["label"] or "关系")}"];')
-        lines.append(f'  {ids[rel["from"]]} -> {rid} [arrowhead=none];')
-        lines.append(f'  {rid} -> {ids[rel["to"]]};')
-    lines.append("}")
-    src = "\n".join(lines)
-    binary = _DOT_BIN
-    if not binary:
-        return {}
-    try:
-        with _DOT_LOCK:
-            proc = subprocess.run([binary, "-Tplain"], input=src.encode("utf-8"),
-                                  capture_output=True, timeout=8)
-        if proc.returncode != 0:
-            return {}
-        pos = {}
-        for line in proc.stdout.decode("utf-8", "ignore").splitlines():
-            parts = line.split(" ")
-            if parts[0] == "node" and len(parts) >= 4:
-                try:
-                    pos[parts[1]] = (float(parts[2]), float(parts[3]))
-                except ValueError:
-                    continue
-        return pos
-    except Exception:                        # noqa: BLE001
-        return {}
+def _er_entity_size(name):
+    """实体矩形：只要装得下实体名，别做太大。"""
+    return max(92.0, _label_len(name) + 40), ER_ENTITY_H
 
 
-def _dot_er(data):
-    """ER 图（经典 Chen 画法，按课本排版）：
-    实体 = 长方形；关系 = 菱形；属性 = 椭圆形，绕着所属实体一圈摆放。
-    两遍布局：先 dot 排实体/关系骨架，再用 neato 按固定坐标画，
-    属性和实体之间用不带箭头的细线连，关系两侧标 1 / N / M。
+def _er_diamond_size(label):
+    """联系菱形：宽按联系名算，**高跟着宽走**。
+
+    以前宽高写死 1.15 / 0.55，名字一长只有宽度被拉大，菱形就被压成一根扁条。
+    菱形内能放字的区域只有宽的一半，所以系数给到 1.6，高度固定取宽的 0.62。
+    """
+    w = max(72.0, _label_len(label) * 1.6 + 36)
+    return w, w * ER_DIAMOND_RATIO
+
+
+def _er_attr_size(name):
+    """属性椭圆：横向长椭圆。"""
+    return max(66.0, _label_len(name) + 34), ER_ATTR_H
+
+
+def _er_ring_radius(base_r, sizes, ratio=0.88):
+    """绕一圈要多大半径：按每个椭圆占的角宽，一圈排得下为止。"""
+    r = max(58.0, base_r)
+    for _ in range(50):
+        span = sum(2 * math.asin(min(0.985, (s[0] / 2 + 9) / r)) for s in sizes)
+        if span <= 2 * math.pi * ratio:
+            break
+        r *= 1.06
+    return r
+
+
+def _er_place_attrs(sizes, radius, occupied):
+    """按每个椭圆实际占的角度依次摆一圈（所以不会互相压），
+    起始角挑「离连线方向最远」的那个相位。"""
+    if not sizes:
+        return []
+    spans = [2 * math.asin(min(0.985, (s[0] / 2 + 9) / radius)) for s in sizes]
+    gap = max(0.0, 2 * math.pi - sum(spans)) / len(sizes)
+    best = None
+    for k in range(72):
+        start = 2 * math.pi * k / 72
+        angs, cur, cost = [], start, 0.0
+        for sp in spans:
+            mid = cur + sp / 2
+            angs.append(mid)
+            for occ in occupied:
+                d = abs((mid - occ + math.pi) % (2 * math.pi) - math.pi)
+                if d < 0.75:
+                    cost += (0.75 - d) ** 2
+            cur += sp + gap
+        if best is None or cost < best[0]:
+            best = (cost, angs)
+    return best[1]
+
+
+def _er_half(kind, w, h, ang):
+    """从节点中心沿 ang 方向走到边界要几步（用来把连线裁到框边，不钻进节点里）。"""
+    ca, sa = abs(math.cos(ang)), abs(math.sin(ang))
+    if kind == "rect":
+        return min(w / 2 / max(ca, 1e-6), h / 2 / max(sa, 1e-6))
+    if kind == "diamond":
+        return 1.0 / (ca / (w / 2) + sa / (h / 2) + 1e-9)
+    return 1.0 / math.sqrt((ca / (w / 2)) ** 2 + (sa / (h / 2)) ** 2 + 1e-9)
+
+
+def _er_link(p1, s1, k1, p2, s2, k2, label="", color=LINE, width=1.35, font_size=12.5):
+    """两个节点之间的无向连线（ER 图不画箭头），标签放在靠 p1 的一端。"""
+    (x1, y1), (x2, y2) = p1, p2
+    ang = math.atan2(y2 - y1, x2 - x1)
+    d1 = _er_half(k1, s1[0], s1[1], ang)
+    d2 = _er_half(k2, s2[0], s2[1], ang + math.pi)
+    ax, ay = x1 + d1 * math.cos(ang), y1 + d1 * math.sin(ang)
+    bx, by = x2 - d2 * math.cos(ang), y2 - d2 * math.sin(ang)
+    parts = [f'<line x1="{ax:.1f}" y1="{ay:.1f}" x2="{bx:.1f}" y2="{by:.1f}" '
+             f'stroke="{color}" stroke-width="{width}"/>']
+    if label:
+        lx = ax + 24 * math.cos(ang)
+        ly = ay + 24 * math.sin(ang)
+        # 往垂直方向让开一点，1 / N / M 才不会压在线上
+        ox, oy = -math.sin(ang) * 14, math.cos(ang) * 14
+        parts.append(f'<text x="{lx + ox:.1f}" y="{ly + oy + 4.5:.1f}" font-size="{font_size}" '
+                     f'font-weight="600" fill="#8a5a12" text-anchor="middle" '
+                     f'font-family="system-ui, sans-serif">{_esc(label)}</text>')
+    return "".join(parts)
+
+
+def _er_entity_node(x, y, w, h, name):
+    """实体：矩形，框里只写实体名。"""
+    return (f'<rect x="{x - w / 2:.1f}" y="{y - h / 2:.1f}" width="{w:.1f}" height="{h:.1f}" '
+            f'rx="4" fill="#dbe9ff" stroke="#3c73c4" stroke-width="1.8"/>'
+            f'<text x="{x:.1f}" y="{y + 5:.1f}" font-size="13.5" font-weight="600" '
+            f'fill="#1d4076" text-anchor="middle" '
+            f'font-family="system-ui, sans-serif">{_esc(name)}</text>')
+
+
+def _er_diamond_node(x, y, w, h, name):
+    """联系：菱形，框里只写联系名（选课 / 任教 / 借阅）。"""
+    pts = (f"{x:.1f},{y - h / 2:.1f} {x + w / 2:.1f},{y:.1f} "
+           f"{x:.1f},{y + h / 2:.1f} {x - w / 2:.1f},{y:.1f}")
+    return (f'<polygon points="{pts}" fill="#ffefc9" stroke="#c39327" stroke-width="1.8"/>'
+            f'<text x="{x:.1f}" y="{y + 4.5:.1f}" font-size="13" fill="#6b4d08" '
+            f'text-anchor="middle" font-family="system-ui, sans-serif">{_esc(name)}</text>')
+
+
+def _er_attr_node(x, y, w, h, name, pk=False):
+    """属性：椭圆，名字写在椭圆里；主键加下划线（教材写法）。"""
+    text_w = _label_len(name)
+    parts = [f'<ellipse cx="{x:.1f}" cy="{y:.1f}" rx="{w / 2:.1f}" ry="{h / 2:.1f}" '
+             f'fill="#ffffff" stroke="#8a8fa3" stroke-width="1.3"/>',
+             f'<text x="{x:.1f}" y="{y + 4.5:.1f}" font-size="12.5" fill="#3d404a" '
+             f'text-anchor="middle" font-family="system-ui, sans-serif">{_esc(name)}</text>']
+    if pk:
+        parts.append(f'<line x1="{x - text_w / 2:.1f}" y1="{y + 8.5:.1f}" '
+                     f'x2="{x + text_w / 2:.1f}" y2="{y + 8.5:.1f}" '
+                     f'stroke="#3d404a" stroke-width="1"/>')
+    return "".join(parts)
+
+
+def _er_levels(names, adj):
+    """挑一个根做 BFS，让「最挤的那一层」实体最少（图才不会宽到看不清字）。"""
+    best = None
+    for root in names:
+        level = {root: 0}
+        queue = [root]
+        while queue:
+            cur = queue.pop(0)
+            for nb in adj[cur]:
+                if nb not in level:
+                    level[nb] = level[cur] + 1
+                    queue.append(nb)
+        for n in names:
+            level.setdefault(n, 0)
+        rows = {}
+        for n in names:
+            rows.setdefault(level[n], []).append(n)
+        score = (max(len(v) for v in rows.values()), max(level.values()))
+        if best is None or score < best[0]:
+            best = (score, level)
+    return best[1]
+
+
+def draw_er(data, title=""):
+    """E-R 图（教材陈氏画法）：实体矩形、联系菱形、属性椭圆，三者之间无向边。
+
+    排版思路：
+      1. 按联系分层（自动挑「最宽层最窄」的根），同层实体左右排开；
+      2. 联系菱形放在两端实体连线的中点，层与层之间专门留一条空当给它；
+      3. 属性按各自占的角度绕实体摆一圈，整体旋转避开连线方向，互不叠压；
+      4. 连线一律裁到节点边界，不钻进框里。
     """
     entities, relations = _er_parse(data)
     if not entities:
-        return ""
-    pos = _er_skeleton_positions(entities, relations)
+        raise ValueError("entities 是空的，至少给一个实体")
 
-    PT = 72.0                              # neato 的 pos 用「点」，1 英寸 = 72 点
+    names = [e["name"] for e in entities]
+    dim = {e["name"]: _er_entity_size(e["name"]) for e in entities}
+    asize = {e["name"]: [_er_attr_size(a["name"]) for a in e["attributes"]]
+             for e in entities}
 
-    def coord(name, fallback=(0.0, 0.0)):
-        x, y = pos.get(name, fallback)
-        return x * PT, y * PT
+    adj = {n: [] for n in names}
+    for rel in relations:
+        adj[rel["from"]].append(rel["to"])
+        adj[rel["to"]].append(rel["from"])
 
-    lines = [
-        "graph G {",
-        '  graph [bgcolor="transparent", splines=false, overlap=false, '
-        f'pad=0.3, fontname="{DOT_FONT}"];',
-        '  node [fontname="' + DOT_FONT + '", fontsize=13, penwidth=1.4];',
-        '  edge [color="#9aa0ae", penwidth=1.2, fontname="' + DOT_FONT + '", fontsize=11];',
-    ]
-    # 实体
-    ent_ids = {}
-    for i, ent in enumerate(entities):
-        x, y = coord(f"e{i}")
-        ent_ids[ent["name"]] = f"e{i}"
-        lines.append(f'  e{i} [shape=box, width=1.0, height=0.45, fixedsize=true, '
-                     f'pos="{x:.3f},{y:.3f}!", pin=true, style="filled", fillcolor="#dbe9ff", '
-                     f'color="#3c73c4", fontcolor="#1d4076", label="{_dot_label(ent["name"])}"];')
-    # 关系
-    rel_ids = {}
-    for j, rel in enumerate(relations):
-        x, y = coord(f"r{j}")
-        rel_ids[j] = f"r{j}"
-        lines.append(f'  r{j} [shape=diamond, width=1.15, height=0.55, fixedsize=true, '
-                     f'pos="{x:.3f},{y:.3f}!", pin=true, style="filled", fillcolor="#ffefc9", '
-                     f'color="#c39327", fontcolor="#6b4d08", label="{_dot_label(rel["label"] or "关系")}"];')
-    # 关系连线 + 基数
-    for j, rel in enumerate(relations):
-        card = rel["cardinality"]
-        tail, head = ("", "")
-        if ":" in card:
-            tail, head = [x.strip() for x in card.split(":", 1)]
-        lines.append(f'  {ent_ids[rel["from"]]} -- r{j} [taillabel="{tail}", '
-                     f'labeldistance=1, fontcolor="#6b4d08"];')
-        lines.append(f'  r{j} -- {ent_ids[rel["to"]]} [taillabel="{head}", '
-                     f'labeldistance=1, fontcolor="#6b4d08"];')
-    # 属性：绕实体一圈（从正上方开始顺时针），半径随属性数变大
-    for i, ent in enumerate(entities):
-        ex, ey = coord(f"e{i}")
-        attrs = ent["attributes"][:12]
-        count = len(attrs)
-        if not count:
+    level = _er_levels(names, adj)
+    rows = {}
+    for n in names:
+        rows.setdefault(level[n], []).append(n)
+
+    # 属性圈半径：既要绕得下一圈，也不能压到实体框
+    rad = {}
+    for e in entities:
+        sizes = asize[e["name"]]
+        if not sizes:
+            rad[e["name"]] = 0.0
             continue
-        for aidx, attr in enumerate(attrs):
-            if isinstance(attr, dict):
-                aname = str(attr.get("name") or attr.get("label") or "")
-                pk = bool(attr.get("pk") or attr.get("primary"))
-            else:
-                aname, pk = str(attr), False
-            if not aname:
-                continue
-            # 课本画法：主键属性加下划线，不写 PK/FK 这种英文缩写
-            nid = f"a{i}_{aidx}"
-            label = (f'<<u>{_esc(aname)}</u>>' if pk else f'"{_dot_label(aname)}"')
-            lines.append(f'  {nid} [shape=ellipse, width=0.95, height=0.42, '
-                         f'style="filled", fillcolor="#ffffff", '
-                         f'color="#9aa0ae", fontcolor="#3d404a", fontsize=12, '
-                         f'label={label}];')
-            lines.append(f'  e{i} -- {nid} [arrowhead=none, color="#9aa0ae"];')
-    lines.append("}")
-    # neato 固定坐标渲染在大图上会画出毛边/虚线伪影，这里改让 dot 自己排：
-    # 把 pos / pin / fixedsize 去掉，符号（矩形/菱形/椭圆）保持不变。
-    out = []
-    for line in "\n".join(lines).split("\n"):
-        line = re.sub(r'pos="[^"]*", ', "", line)
-        line = line.replace("pin=true, ", "").replace("fixedsize=true, ", "")
-        out.append(line)
-    return "\n".join(out)
+        w, h = dim[e["name"]]
+        rad[e["name"]] = _er_ring_radius(
+            max(w, h) / 2 + max(s[0] for s in sizes) / 2 + 26, sizes)
+
+    # 联系自己的属性也要绕菱形一圈，层间空当得按它算
+    rsizes, rrad = {}, {}
+    row_gap = ER_ROW_GAP
+    for j, rel in enumerate(relations):
+        dw, dh = _er_diamond_size(rel["label"])
+        sizes = [_er_attr_size(a["name"]) for a in rel["attributes"]]
+        rsizes[j] = sizes
+        rrad[j] = 0.0
+        if sizes:
+            rrad[j] = _er_ring_radius(max(dw, dh) / 2 + max(s[0] for s in sizes) / 2 + 22,
+                                      sizes)
+            row_gap = max(row_gap, 2 * (rrad[j] + 18) + dh)
+
+    # 层内顺序：按上一层邻居的平均槽位排，减少连线交叉
+    order, slot = {}, {}
+    for lv in sorted(rows):
+        row = rows[lv]
+        if lv and len(row) > 1:
+            def keyf(n):
+                near = [slot[o] for o in adj[n] if o in slot]
+                return sum(near) / len(near) if near else 0.5
+            row = sorted(row, key=keyf)
+        order[lv] = row
+        for i, n in enumerate(row):
+            slot[n] = i / max(1, len(row) - 1)
+
+    def gap_between(a, b):
+        """同一层里相邻实体之间的空隙：中间要放联系菱形，所以留够。"""
+        if b not in adj[a]:
+            return 52.0
+        label = next((r["label"] for r in relations
+                      if {r["from"], r["to"]} == {a, b}), "")
+        return max(52.0, _er_diamond_size(label)[0] + 88)
+
+    row_w = {}
+    for lv, row in order.items():
+        total = sum(2 * rad[n] + dim[n][0] for n in row)
+        total += sum(gap_between(row[i], row[i + 1]) for i in range(len(row) - 1))
+        row_w[lv] = total
+    max_w = max(row_w.values()) if row_w else 0.0
+
+    pos = {}
+    y = PAD + 34
+    for lv in sorted(order):
+        row = order[lv]
+        row_h = max(2 * rad[n] + dim[n][1] for n in row)
+        cy = y + row_h / 2
+        x = PAD + max(0.0, (max_w - row_w[lv]) / 2)
+        for i, n in enumerate(row):
+            w, _ = dim[n]
+            pos[n] = (x + rad[n] + w / 2, cy)
+            x += 2 * rad[n] + w
+            if i + 1 < len(row):
+                x += gap_between(n, row[i + 1])
+        y += row_h + row_gap
+    bottom = y - row_gap
+
+    # 联系菱形的落点：两端连线的中点；跨层的错开，别叠在一起
+    relgeo, placed = [], []
+    for j, rel in enumerate(relations):
+        ax, ay = pos[rel["from"]]
+        bx, by = pos[rel["to"]]
+        dw, dh = _er_diamond_size(rel["label"])
+        same_row = abs(ay - by) < 1
+        mx, my = (ax + bx) / 2, (ay if same_row else (ay + by) / 2)
+        if not same_row:
+            for _ in range(6):
+                if all(math.hypot(mx - px, my - py) > (dw + pw) / 2 + 34
+                       for px, py, pw in placed):
+                    break
+                my += dh + 26
+        placed.append((mx, my, dw))
+        relgeo.append((mx, my, dw, dh))
+
+    def attr_points(cx, cy, radius, sizes, occupied):
+        return [(cx + radius * math.cos(a), cy + radius * math.sin(a))
+                for a in _er_place_attrs(sizes, radius, occupied)]
+
+    body = []
+    # 先画线（节点后画，压住线头）
+    for e in entities:
+        n = e["name"]
+        if not asize[n]:
+            continue
+        cx, cy = pos[n]
+        occupied = []
+        for rel, (mx, my, dw, dh) in zip(relations, relgeo):
+            if n in (rel["from"], rel["to"]):
+                occupied.append(math.atan2(my - cy, mx - cx))
+        for (ax, ay), s in zip(attr_points(cx, cy, rad[n], asize[n], occupied), asize[n]):
+            body.append(_er_link((cx, cy), dim[n], "rect", (ax, ay), s, "ellipse",
+                                 color="#9aa0ae", width=1.1))
+
+    for j, rel in enumerate(relations):
+        mx, my, dw, dh = relgeo[j]
+        tail, head = "", ""
+        if ":" in rel["cardinality"]:
+            tail, head = [p.strip() for p in rel["cardinality"].split(":", 1)]
+        body.append(_er_link(pos[rel["from"]], dim[rel["from"]], "rect",
+                             (mx, my), (dw, dh), "diamond", label=tail, width=1.4))
+        body.append(_er_link(pos[rel["to"]], dim[rel["to"]], "rect",
+                             (mx, my), (dw, dh), "diamond", label=head, width=1.4))
+        if rsizes[j]:
+            occupied = [math.atan2(pos[rel["from"]][1] - my, pos[rel["from"]][0] - mx),
+                        math.atan2(pos[rel["to"]][1] - my, pos[rel["to"]][0] - mx)]
+            for (ax, ay), s in zip(attr_points(mx, my, rrad[j], rsizes[j], occupied),
+                                   rsizes[j]):
+                body.append(_er_link((mx, my), (dw, dh), "diamond", (ax, ay), s, "ellipse",
+                                     color="#9aa0ae", width=1.1))
+
+    for e in entities:
+        n = e["name"]
+        w, h = dim[n]
+        cx, cy = pos[n]
+        body.append(_er_entity_node(cx, cy, w, h, n))
+
+    for j, rel in enumerate(relations):
+        mx, my, dw, dh = relgeo[j]
+        body.append(_er_diamond_node(mx, my, dw, dh, rel["label"]))
+
+    for e in entities:
+        n = e["name"]
+        if not asize[n]:
+            continue
+        cx, cy = pos[n]
+        occupied = []
+        for rel, (mx, my, dw, dh) in zip(relations, relgeo):
+            if n in (rel["from"], rel["to"]):
+                occupied.append(math.atan2(my - cy, mx - cx))
+        for (ax, ay), s, attr in zip(attr_points(cx, cy, rad[n], asize[n], occupied),
+                                     asize[n], e["attributes"]):
+            body.append(_er_attr_node(ax, ay, s[0], s[1], attr["name"], attr["pk"]))
+
+    for j, rel in enumerate(relations):
+        if not rsizes[j]:
+            continue
+        mx, my, dw, dh = relgeo[j]
+        occupied = [math.atan2(pos[rel["from"]][1] - my, pos[rel["from"]][0] - mx),
+                    math.atan2(pos[rel["to"]][1] - my, pos[rel["to"]][0] - mx)]
+        for (ax, ay), s, attr in zip(attr_points(mx, my, rrad[j], rsizes[j], occupied),
+                                     rsizes[j], rel["attributes"]):
+            body.append(_er_attr_node(ax, ay, s[0], s[1], attr["name"], False))
+
+    width = max(max_w + PAD * 2, 300.0)
+    height = bottom + PAD
+    svg = _canvas(width, height, "".join(body), title)
+    # 按原始尺寸显示：ER 图常常很窄（两三个实体竖着排），
+    # 用 width=100% 会被拉到满屏、字大得离谱；窄屏由外层 CSS 的 max-width 兜底。
+    return svg.replace('width="100%"', f'width="{width:.0f}"', 1)
 
 
 def _state_lines(raw):
@@ -1475,7 +1761,6 @@ GRAPHVIZ_BUILDERS = {
     "flow": _dot_flow,
     "graph": _dot_graph_plain,
     "dataflow": _dot_dataflow,
-    "er": _dot_er,
     "arch": _dot_arch,
     "state": _dot_state,
 }
@@ -1653,9 +1938,13 @@ SPECS = [
                 "  sequence: {actors:[\"客户端\",\"服务端\"], messages:[{from,to,text,dashed?}]}\n"
                 "  chart: {kind:bar|line|pie, labels:[...], values:[...]}\n"
                 "  timeline: {items:[{time,text}]}\n"
-                "  er: （经典 Chen 画法：实体=矩形、关系=菱形、属性=椭圆）"
-                "{entities:[{name, attributes:[{name, pk?, fk?}]}], "
-                "relations:[{from,to,label?,cardinality?}]}（ER 图，cardinality 写 1:1 / 1:N / N:M）\n"
+                "  er: （教材陈氏画法：实体=矩形、联系=菱形、属性=椭圆）"
+                "{entities:[{name, attributes:[{name, pk?}]}], "
+                "relations:[{from,to,label,cardinality?,attributes?}]}\n"
+                "    ER 图规矩：菱形里只写联系名（2~4 字，如「选课」「借阅」「任教」）；"
+                "实体和联系的属性一律画成椭圆挂上去，不要写进名字里、也不要塞进括号；"
+                "联系自己的属性（借阅时间、到期时间…）放 relations[].attributes；"
+                "cardinality 按语义写 1:1 / 1:N / M:N，多对多就直接写 M:N，别硬拆。\n"
                 "一个图最多 60 个节点、40 字以内的标签，节点太多就拆成两张图。"
                 "title 写一句图名（比如「红黑树插入后结构」）。"
             ),
