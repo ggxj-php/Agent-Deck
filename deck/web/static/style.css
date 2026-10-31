@@ -2373,8 +2373,20 @@ body.chat-page .sidebar.open { transform: translateX(0); }
   padding-top: 10px;
 }
 
-/* 脚上现在有四个入口（反馈 / 下载 App / 改密码 / 退出），两个一行排开 */
-.side-foot .side-link { flex: 1 1 calc(50% - 4px); }
+/* 脚上现在有四个入口（反馈 / 下载 App / 改密码 / 退出），两个一行排开。
+   四个必须一样大：button 默认 inline-block、a.side-download 是 flex，排版规则不同，
+   以前各写各的 padding 就出现「一行里一个高一个矮」。这里统一成同一套 flex 盒子 +
+   min-height，谁加边框加粗都不会再把尺寸带跑。 */
+.side-foot .side-link {
+  flex: 1 1 calc(50% - 4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 6px;
+  line-height: 1.15;
+  white-space: nowrap;
+}
 
 .side-link {
   flex: 1;
@@ -3165,7 +3177,10 @@ body.drop-active::after {
   flex: none;
 }
 
-/* 侧栏「下载 App」入口（服务器本地页面，不进仓库） */
+/* 侧栏「下载 App」入口（服务器本地页面，不进仓库）。
+   注意：别再给这里加 margin —— 它是跟「意见反馈 / 改密码 / 退出」并排的两列按钮之一，
+   带了 margin 就会被 flex 挤矮、把同一行撑出高度差（以前这里留了句 margin-bottom: 6px，
+   结果「下载 App」比旁边矮 6px、整行还比下一行高，看着就是四个按钮三种大小）。 */
 a.side-download {
   display: flex;
   align-items: center;
@@ -3176,7 +3191,6 @@ a.side-download {
   font-weight: 600;
   background: linear-gradient(135deg, var(--pink-mist, #ffe6f2), var(--pink-pale, #ffd9ea));
   border: 1px solid var(--line, rgba(224, 114, 159, .22));
-  margin-bottom: 6px;
 }
 a.side-download:hover { filter: brightness(.97); }
 
