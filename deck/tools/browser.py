@@ -1,5 +1,6 @@
 """把浏览器操控暴露成工具：打开、快照、点击、输入、滚动、取正文、抓图、截图。"""
 import json
+import os
 
 from .. import browser
 from . import download as download_tool
@@ -185,6 +186,12 @@ def browser_video() -> str:
                "page_url": data.get("page_url"), "title": data.get("title")}
     if data.get("saved"):
         payload["download_url"] = _download_link(data["saved"]) or "（链接生成失败）"
+        try:
+            payload["saved_path"] = os.path.relpath(data["saved"], os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "workspace"))
+        except Exception:                    # noqa: BLE001
+            payload["saved_path"] = data["saved"]
+        payload["note"] = "视频已存到服务器，12 小时后自动清理；把 download_url 原样发给用户即可"
     return _dumps(payload)
 
 
