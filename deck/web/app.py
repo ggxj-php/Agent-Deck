@@ -36,6 +36,7 @@ from ..tools import render as render_tool
 from . import stickers
 from .admin import router as admin_router
 from .content import router as content_router
+from .issues import router as issues_router
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -198,6 +199,7 @@ app = FastAPI(title="Agent Deck", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.include_router(admin_router)
 app.include_router(content_router)
+app.include_router(issues_router)
 
 
 @app.middleware("http")

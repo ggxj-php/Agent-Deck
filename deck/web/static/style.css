@@ -3011,3 +3011,120 @@ a.side-download:hover { filter: brightness(.97); }
 .ask-send { background: #6b5bd2; color: #fff; border-color: transparent; }
 .ask-send:hover:not(:disabled) { background: #5b4bc2; }
 .ask-picked { margin-top: 10px; font-size: 13px; color: #6b5bd2; }
+
+/* ================= 后台用户反馈（App 里提的 issue） =================
+   配色一律走身份卡注入的那几个变量（--pink* / --line / --ink*，见 applyThemeColor），
+   换一张身份卡、换一个主题色，这一页跟着变，不写死任何一种粉。 */
+
+/* 导航上的待审核数字：有没处理的才出现 */
+.nav-item .nav-badge {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 17px;
+  text-align: center;
+  color: var(--pink-deep);
+  background: var(--pink-mist);
+  border: 1px solid var(--line);
+}
+
+.nav-item .nav-badge[hidden] { display: none; }
+
+/* 选中的那一项本身就是粉色渐变底，数字反过来用半透明白 */
+.nav-item.on .nav-badge {
+  color: #fff;
+  background: rgba(255, 255, 255, .26);
+  border-color: rgba(255, 255, 255, .55);
+}
+
+/* 筛选下拉：别让它撑满整行，跟右边的刷新按钮并排 */
+body.admin .card .user-create-row select {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 148px;
+  margin-top: 0;
+}
+
+/* 表格里的操作按钮：跟卡片主按钮同一套色，只是收小一圈，一行塞得下三个 */
+body.admin .card button.tiny {
+  margin: 0 4px 2px 0;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+body.admin .card button.tiny.danger {
+  color: #fff;
+  background: linear-gradient(135deg, #ff9d8a, #e0603a);
+}
+
+/* 状态徽章沿用 user-badge 的形状，只换配色（跟 App 里那三个状态对上） */
+.user-badge.pending { background: #fff0e0; color: #b06a1e; }
+.user-badge.accepted { background: #e8f7ef; color: #1f8a5b; }
+.user-badge.rejected { background: #ffe3e6; color: #c0392b; }
+
+/* 标题 + 正文：正文最多露三行，长的不把表格撑爆 */
+.issue-main { max-width: 460px; }
+
+.issue-title {
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.issue-body {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 管理员写回去的那句话 */
+.issue-note {
+  margin-top: 4px;
+  padding: 4px 8px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--pink-deep);
+  background: var(--pink-mist);
+  overflow-wrap: anywhere;
+}
+
+.issue-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 150px;
+}
+
+.issue-thumbs a {
+  display: block;
+  width: 42px;
+  height: 42px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--pink-mist);
+}
+
+.issue-thumbs img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#issue-msg { color: #c0392b; }
+#issue-msg.ok { color: #1f8a5b; }

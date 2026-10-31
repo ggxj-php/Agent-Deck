@@ -118,6 +118,10 @@
           <button type="button" class="nav-item" data-view="users" title="用户管理">
             <span class="nav-text">用户管理</span>
           </button>
+          <button type="button" class="nav-item" data-view="issues" title="用户反馈">
+            <span class="nav-text">用户反馈</span>
+            <span class="nav-badge" id="nav-issue-count" hidden>0</span>
+          </button>
         </div>
       </section>
 
@@ -196,6 +200,40 @@
             <span class="hint" id="user-analysis-time"></span>
           </div>
           <div class="analysis-md" id="user-analysis-box" hidden></div>
+        </div>
+      </section>
+
+      <!-- ---------- 用户反馈 ---------- -->
+      <section class="view" data-view="issues" hidden>
+        <div class="card">
+          <h2>用户反馈（待审核 <span id="issue-pending-count">0</span> 条 · 共 <span id="issue-total-count">0</span> 条）</h2>
+          <p class="hint">
+            App 里点右上角那个 <b>+</b> 提交的意见反馈都收在这儿，<b>待审核的永远排在最前面</b>。
+            <b>采纳</b>或<b>打回</b>之后，这条反馈带的图片会当场从磁盘上删掉（只留状态和你写的回复），
+            用户在 App 里刷新就能看到「已采纳 / 已打回」和你的回复。<br>
+            点缩略图可以看原图。垃圾提交直接用<b>删除</b>抹掉，连图片一起。
+          </p>
+          <div class="user-create-row">
+            <select id="issue-filter">
+              <option value="">全部（新的在前）</option>
+              <option value="pending">只看待审核</option>
+              <option value="accepted">只看已采纳</option>
+              <option value="rejected">只看已打回</option>
+            </select>
+            <button type="button" id="issue-refresh" class="ghost">刷新列表</button>
+            <span class="hint" id="issue-msg" hidden></span>
+          </div>
+          <div class="table-wrap">
+            <table class="user-table">
+              <thead>
+                <tr>
+                  <th>#</th><th>标题 / 正文</th><th>提交人</th><th>提交时间</th>
+                  <th>图片</th><th>状态</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="issue-rows"></tbody>
+            </table>
+          </div>
         </div>
       </section>
 

@@ -300,6 +300,7 @@ const VIEW_HOOKS = {
   tools: loadTools,
   personas: loadPersonas,
   users: loadUsers,
+  issues: loadIssues,
   dashboard: refreshSysinfo,
   traffic: loadTraffic,
   prompt: loadPrompt,
@@ -477,6 +478,7 @@ async function load(message) {
     render(await api('/api/admin/state'));
     loadBranding();
     loadCapabilities();
+    refreshIssueBadge();
     flash(message || '已登录', true);
   } catch (err) {
     showLogin(err && err.status === 401 ? '先输口令' : err.message);
@@ -2658,6 +2660,163 @@ async function runUserAnalysis(force) {
   }
 }
 
+/* ---------------- 用户反馈（App 里提的 issue） ---------------- */
+
+/* 三种状态的叫法跟 App 里一致：审核中 / 已采纳 / 已打回 */
+const ISSUE_STATUS_TEXT = { pending: '审核中', accepted: '已采纳', rejected: '已打回' };
+
+let issueFilter = '';
+
+function issueMsg(text, ok) {
+  const node = document.getElementById('issue-msg');
+  if (!node) return;
+  node.hidden = !text;
+  node.textContent = text || '';
+  node.classList.toggle('ok', Boolean(ok));
+}
+
+function issueBadge(status) {
+  const key = ISSUE_STATUS_TEXT[status] ? status : 'pending';
+  return `<span class="user-badge ${key}">${ISSUE_STATUS_TEXT[key]}</span>`;
+}
+
+/* 状态小按钮：主按钮（采纳）= 粉色胶囊，次按钮（打回）= 白底描边，删除 = 橙红 */
+function issueOp(text, handler, variant) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'tiny' + (variant ? ' ' + variant : '');
+  btn.textContent = text;
+  btn.addEventListener('click', handler);
+  return btn;
+}
+
+function paintIssueCounts(counts) {
+  const pending = Number((counts && counts.pending) || 0);
+  const total = pending + Number((counts && counts.accepted) || 0) +
+    Number((counts && counts.rejected) || 0);
+  const pendingEl = document.getElementById('issue-pending-count');
+  if (pendingEl) pendingEl.textContent = pending;
+  const totalEl = document.getElementById('issue-total-count');
+  if (totalEl) totalEl.textContent = total;
+  /* 导航上的小红点：有没处理的才显示，别挂个 0 在那儿 */
+  const badge = document.getElementById('nav-issue-count');
+  if (badge) {
+    badge.textContent = pending;
+    badge.hidden = !pending;
+    badge.title = pending ? `${pending} 条待审核` : '';
+  }
+}
+
+/* 进后台先探一下有没有待审核的，别等点进那一页才知道 */
+async function refreshIssueBadge() {
+  if (!document.getElementById('nav-issue-count')) return;
+  try {
+    const data = await api('/api/admin/issues?limit=1');
+    paintIssueCounts(data.counts);
+  } catch (err) {
+    /* 后端还没重启（404）就当没有，别影响后台别的地方 */
+  }
+}
+
+async function loadIssues() {
+  const rows = document.getElementById('issue-rows');
+  if (!rows) return;
+  rows.innerHTML = '<tr><td colspan="7" class="hint">读取中…</td></tr>';
+  try {
+    const query = issueFilter ? `?status=${encodeURIComponent(issueFilter)}` : '';
+    const data = await api(`/api/admin/issues${query}`);
+    paintIssueCounts(data.counts);
+    renderIssues(data.issues || []);
+    issueMsg('');
+  } catch (err) {
+    rows.innerHTML =
+      `<tr><td colspan="7" class="hint">拉不到反馈列表：${escapeHtml((err && err.message) || '')}</td></tr>`;
+  }
+}
+
+function issueThumb(id, name) {
+  const url = `/api/issues/image/${id}/${encodeURIComponent(name)}`;
+  return `<a href="${url}" target="_blank" rel="noopener">
+    <img src="${url}" alt="" loading="lazy"></a>`;
+}
+
+function renderIssues(list) {
+  const rows = document.getElementById('issue-rows');
+  if (!rows) return;
+  if (!list.length) {
+    rows.innerHTML = `<tr><td colspan="7" class="hint">${
+      issueFilter ? '这个状态下还没有反馈。' : '还没有人提反馈。'}</td></tr>`;
+    return;
+  }
+  rows.innerHTML = '';
+  list.forEach((item) => {
+    const tr = document.createElement('tr');
+    const images = (item.images || []).map((name) => issueThumb(item.id, name)).join('');
+    tr.innerHTML = `
+      <td>${item.id}</td>
+      <td class="issue-main">
+        <div class="issue-title">${escapeHtml(item.title || '（没写标题）')}</div>
+        <div class="issue-body">${escapeHtml(item.body || '')}</div>
+        ${item.admin_note
+          ? `<div class="issue-note">回复：${escapeHtml(item.admin_note)}</div>`
+          : ''}
+      </td>
+      <td>${escapeHtml(item.user_name || '—')}</td>
+      <td>${fmtTime(item.created_at)}</td>
+      <td>${images ? `<div class="issue-thumbs">${images}</div>` : '—'}</td>
+      <td>${issueBadge(item.status)}</td>`;
+    const ops = document.createElement('td');
+    ops.className = 'user-ops';
+    if (item.status === 'pending') {
+      ops.append(
+        issueOp('采纳', () => decideIssue(item, 'accept'), ''),
+        issueOp('打回', () => decideIssue(item, 'reject'), 'ghost'),
+      );
+    }
+    ops.append(issueOp('删除', () => removeIssue(item), 'danger'));
+    tr.appendChild(ops);
+    rows.appendChild(tr);
+  });
+}
+
+/* 采纳 / 打回：先问一句要回什么话，再确认一次（图片删了就回不来了） */
+async function decideIssue(item, action) {
+  const verb = action === 'accept' ? '采纳' : '打回';
+  const note = window.prompt(
+    `${verb}反馈 #${item.id}「${item.title || '没写标题'}」\n` +
+    '给用户回一句（可以留空）：',
+    action === 'accept' ? '收到，已经排进后面的版本了，谢谢。' : '这条先不做，还是谢谢反馈。');
+  if (note === null) return;
+  const count = (item.images || []).length;
+  const warn = count
+    ? `${verb}之后，这条反馈的 ${count} 张图片会从服务器上删掉（留不住），确定？`
+    : `确定${verb}这条反馈？`;
+  if (!window.confirm(warn)) return;
+  try {
+    const r = await api('/api/admin/issues/decision', { id: item.id, action, note });
+    issueMsg(`已${verb} #${item.id}` +
+      (r.removed_images ? `，连带删掉 ${r.removed_images} 张图片` : ''), true);
+    await loadIssues();
+  } catch (err) {
+    issueMsg((err && err.message) || `${verb}失败了`, false);
+  }
+}
+
+async function removeIssue(item) {
+  const count = (item.images || []).length;
+  if (!window.confirm(
+    `把反馈 #${item.id}「${item.title || '没写标题'}」整条删掉？` +
+    (count ? `\n${count} 张图片也会一起删。` : '') + '\n删了就找不回来。')) return;
+  try {
+    const r = await api('/api/admin/issues/delete', { id: item.id });
+    issueMsg(`已删除 #${item.id}` +
+      (r.removed_images ? `，连带删掉 ${r.removed_images} 张图片` : ''), true);
+    await loadIssues();
+  } catch (err) {
+    issueMsg((err && err.message) || '删除失败', false);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const runBtn = document.getElementById('user-analysis-run');
   const refreshBtn = document.getElementById('user-analysis-refresh');
@@ -2687,4 +2846,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (page > 0) loadUsers(page);
     });
   }
+  /* 用户反馈：筛选 + 手动刷新 */
+  const issueFilterEl = document.getElementById('issue-filter');
+  if (issueFilterEl) {
+    issueFilterEl.addEventListener('change', () => {
+      issueFilter = issueFilterEl.value || '';
+      loadIssues();
+    });
+  }
+  const issueRefreshEl = document.getElementById('issue-refresh');
+  if (issueRefreshEl) issueRefreshEl.addEventListener('click', () => loadIssues());
 });
