@@ -10,6 +10,7 @@
 """
 import asyncio
 import os
+import re
 import threading
 import time
 import zipfile
@@ -150,14 +151,33 @@ _TYPE_JS = r"""
 """
 
 
+_VIDEO_JS = r"""
+() => {
+  const urls = [];
+  const push = (u) => { if (u) urls.push(u); };
+  for (const v of document.querySelectorAll('video')) { push(v.currentSrc || v.src); }
+  for (const s of document.querySelectorAll('video source, source[src]')) { push(s.src || s.getAttribute('src')); }
+  for (const m of document.querySelectorAll('meta[property="og:video"], meta[property="og:video:url"], meta[property="og:video:secure_url"]')) { push(m.getAttribute('content')); }
+  for (const a of document.querySelectorAll('a[href]')) {
+    if (/\.(mp4|m3u8|webm|flv)(\?|$)/i.test(a.href)) push(a.href);
+  }
+  const html = document.documentElement ? document.documentElement.innerHTML : '';
+  const re = /https?:[^"'\\\s]+\.(?:mp4|m3u8|webm|flv)(?:\?[^"'\\\s]*)?/gi;
+  let m; while ((m = re.exec(html)) && urls.length < 30) { push(m[0]); }
+  return urls;
+}
+"""
+
+
 class _Session:
-    __slots__ = ("ctx", "page", "last", "steps")
+    __slots__ = ("ctx", "page", "last", "steps", "media")
 
     def __init__(self, ctx):
         self.ctx = ctx
         self.page = None
         self.last = time.time()
         self.steps = 0
+        self.media = []
 
     async def close(self):
         try:
@@ -236,6 +256,18 @@ class BrowserManager:
         await ctx.route("**/*", self._route)
         sess = _Session(ctx)
         sess.page = await ctx.new_page()
+
+        async def _capture(resp):
+            try:
+                ctype = str((resp.headers or {}).get("content-type", "")).lower()
+                url = resp.url
+                if "video" in ctype or re.search(r"\.(mp4|m3u8|webm|flv)(\?|$)", url, re.I):
+                    if len(sess.media) < 20 and url not in sess.media:
+                        sess.media.append(url)
+            except Exception:               # noqa: BLE001
+                pass
+
+        sess.page.on("response", _capture)
         self._sessions[owner] = sess
         return sess
 
@@ -310,6 +342,9 @@ class BrowserManager:
 
     def images(self, owner):
         return self._call(self._images, owner, timeout=240)
+
+    def videos(self, owner):
+        return self._call(self._videos, owner, timeout=180)
 
     def screenshot(self, owner):
         return self._call(self._screenshot, owner, timeout=120)
@@ -485,6 +520,43 @@ class BrowserManager:
         return {"ok": True, "count": len(saved), "dir": outdir,
                 "files": [os.path.basename(p) for p in saved],
                 "zip_path": zip_path, "page_url": page.url}
+
+
+    async def _videos(self, owner):
+        sess = await self._session(owner)
+        self._step(sess)
+        try:
+            raw = await sess.page.evaluate(_VIDEO_JS) or []
+        except Exception:                       # noqa: BLE001
+            raw = []
+        urls, seen = [], set()
+        for url in list(raw) + list(sess.media):
+            url = str(url or "").strip()
+            if not re.match(r"^https?://", url) or url in seen:
+                continue
+            seen.add(url)
+            urls.append(url)
+            if len(urls) >= 12:
+                break
+        saved = ""
+        mp4 = next((u for u in urls if ".mp4" in u.lower()), "")
+        if mp4:
+            try:
+                resp = await sess.page.context.request.get(
+                    mp4, headers={"referer": sess.page.url}, timeout=90000)
+                if resp.ok:
+                    body = await resp.body()
+                    if len(body) > 50 * 1024:
+                        outdir = os.path.join(BROWSER_DIR, str(owner), "video")
+                        os.makedirs(outdir, exist_ok=True)
+                        path = os.path.join(outdir, time.strftime("video-%Y%m%d-%H%M%S.mp4"))
+                        with open(path, "wb") as fp:
+                            fp.write(body)
+                        saved = path
+            except Exception:                   # noqa: BLE001
+                pass
+        return {"ok": bool(urls or saved), "urls": urls, "saved": saved,
+                "page_url": sess.page.url, "title": await sess.page.title()}
 
     async def _screenshot(self, owner):
         sess = await self._session(owner)

@@ -153,6 +153,22 @@ def browser_screenshot() -> str:
                    "download_url": link or "（下载链接生成失败）"})
 
 
+def browser_video() -> str:
+    """抓当前页面上的视频直链；能直接下载的 mp4 会顺带存下来给下载链接。"""
+    try:
+        data = browser.manager().videos(_owner())
+    except Exception as exc:                 # noqa: BLE001
+        return f"错误：{exc}"
+    if not data.get("ok"):
+        return json.dumps({"ok": False, "error": "页面上没找到视频直链（可能需要播放一下或等页面加载完）",
+                           "page_url": data.get("page_url", "")}, ensure_ascii=False)
+    payload = {"ok": True, "video_urls": data.get("urls") or [],
+               "page_url": data.get("page_url"), "title": data.get("title")}
+    if data.get("saved"):
+        payload["download_url"] = _download_link(data["saved"]) or "（链接生成失败）"
+    return _dumps(payload)
+
+
 def browser_close() -> str:
     """关掉当前用户的浏览器（释放内存）。"""
     try:
@@ -207,6 +223,11 @@ SPECS = [
     {"type": "function", "function": {
         "name": "browser_screenshot",
         "description": "截当前页面可视区域，返回图片下载链接。",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "browser_video",
+        "description": "抓当前页面上的视频直链（mp4/m3u8/webm），能直接下载的 mp4 会顺带存下来给下载链接。"
+                       "用户要视频文件/直链时用它；不播放视频也能抓。",
         "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {
         "name": "browser_close",

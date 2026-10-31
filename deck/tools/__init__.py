@@ -113,7 +113,7 @@ TOOL_GROUPS = {
         "desc": "真实浏览器打开网页、点击、填表、抓图（吃内存，默认上限 60 步）",
         "tools": ("browser_open", "browser_snapshot", "browser_click", "browser_type",
                   "browser_key", "browser_scroll", "browser_extract", "browser_images",
-                  "browser_screenshot", "browser_close"),
+                  "browser_video", "browser_screenshot", "browser_close"),
     },
     "skills": {
         "label": "技能包",
