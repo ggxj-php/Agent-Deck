@@ -1863,7 +1863,16 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
         except Exception as exc:         # noqa: BLE001
             print(f"[diagram] {key} 构建 DOT 失败：{type(exc).__name__}: {exc}", flush=True)
             svg = ""
-    if not svg and key in ("er", "state", "dataflow"):
+    # er 不走 graphviz（属性绕实体一圈的教材画法 graphviz 排不出来），直接用内置布局
+    if key == "er" and not svg:
+        try:
+            svg = drawer(data, "")
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception as exc:                 # noqa: BLE001
+            return json.dumps({"error": f"画图失败：{type(exc).__name__}: {exc}"},
+                              ensure_ascii=False)
+    if not svg and key in ("state", "dataflow"):
         # 这几类退回旧画法会画成完全不同的样式（比如 ER 变成表格），不如直接报错让模型重画
         return json.dumps({
             "error": "graphviz 渲染失败（可能超时），请重新调用一次 draw_diagram；"
