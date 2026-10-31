@@ -802,9 +802,12 @@ class DeckAgent:
                         payload = json.loads(ask_plan.get("arguments") or "{}")
                     except Exception:                 # noqa: BLE001
                         payload = {}
-                    question = str(payload.get("question") or "要我怎么做？").strip()
-                    options = [str(o).strip() for o in (payload.get("options") or [])
-                               if str(o).strip()][:6]
+                    question = re.sub(r"\s*\[sticker:[^\]]*\]", "",
+                                      str(payload.get("question") or "")).strip() \
+                        or "要我怎么做？"
+                    options = [re.sub(r"\s*\[sticker:[^\]]*\]", "", str(o)).strip()
+                               for o in (payload.get("options") or [])]
+                    options = [o for o in options if o][:6]
                     yield {"type": "await_user",
                            "question": question,
                            "options": options,
