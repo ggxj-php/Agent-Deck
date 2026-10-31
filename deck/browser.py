@@ -8,12 +8,11 @@
 - 每个用户一个步骤预算（BROWSER_MAX_STEPS），超了直接拒绝，配合 core 的熔断；
 - 空闲自动关 Context / 关浏览器，避免 2~4G 小机器被吃满。
 """
+import asyncio
 import os
-import queue
 import threading
 import time
 import zipfile
-from concurrent.futures import Future
 from urllib.parse import urlparse
 
 from .config import (
@@ -156,89 +155,87 @@ class _Session:
 
     def __init__(self, ctx):
         self.ctx = ctx
-        self.page = ctx.new_page()
+        self.page = None
         self.last = time.time()
         self.steps = 0
 
-    def close(self):
+    async def close(self):
         try:
-            self.ctx.close()
+            await self.ctx.close()
         except Exception:                      # noqa: BLE001
             pass
 
 
 class BrowserManager:
-    """全局单例：一个 Chromium + 每用户一个 Context + 独立 Playwright 线程。"""
+    """全局单例：一个 Chromium + 每用户一个 Context + 独立 asyncio 事件循环线程。
+
+    用 async API 是因为 FastAPI/uvicorn 环境里可能存在 asyncio loop，
+    sync API 会被拒绝（"Playwright Sync API inside the asyncio loop"）。
+    """
 
     def __init__(self):
-        self._jobs = queue.Queue()
         self._sessions = {}
-        self._lock = threading.Lock()
+        self._loop = asyncio.new_event_loop()
         self._pw = None
         self._browser = None
-        self._worker = threading.Thread(target=self._work, daemon=True, name="browser-worker")
-        self._worker.start()
-        self._sweeper = threading.Thread(target=self._sweep, daemon=True, name="browser-sweeper")
+        self._thread = threading.Thread(target=self._run_loop, daemon=True,
+                                        name="browser-loop")
+        self._thread.start()
+        self._sweeper = threading.Thread(target=self._sweep, daemon=True,
+                                         name="browser-sweeper")
         self._sweeper.start()
 
     # ---------- 线程基础设施 ----------
-    def _work(self):
-        while True:
-            item = self._jobs.get()
-            if item is None:
-                return
-            fn, args, kwargs, fut = item
-            try:
-                fut.set_result(fn(*args, **kwargs))
-            except BaseException as exc:        # noqa: BLE001
-                fut.set_exception(exc)
+    def _run_loop(self):
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
 
-    def _submit(self, fn, *args, timeout=150, **kwargs):
-        fut = Future()
-        self._jobs.put((fn, args, kwargs, fut))
-        return fut.result(timeout)
+    def _call(self, coro_fn, *args, timeout=180):
+        future = asyncio.run_coroutine_threadsafe(coro_fn(*args), self._loop)
+        return future.result(timeout)
 
-    def _ensure(self):
+    async def _ensure(self):
         if self._browser is not None:
             return
-        from patchright.sync_api import sync_playwright
-        self._pw = sync_playwright().start()
+        from patchright.async_api import async_playwright
+        self._pw = await async_playwright().start()
         kwargs = {"headless": True, "args": LAUNCH_ARGS}
         if BROWSER_PROXY:
             kwargs["proxy"] = {"server": BROWSER_PROXY}
-        self._browser = self._pw.chromium.launch(**kwargs)
+        self._browser = await self._pw.chromium.launch(**kwargs)
 
-    def _route(self, route):
+    async def _route(self, route):
         try:
             rtype = route.request.resource_type
             if BROWSER_BLOCK_ASSETS and rtype in ("image", "media", "font"):
-                route.abort()
+                await route.abort()
             else:
-                route.continue_()
+                await route.continue_()
         except Exception:                       # noqa: BLE001
             try:
-                route.continue_()
+                await route.continue_()
             except Exception:                   # noqa: BLE001
                 pass
 
-    def _session(self, owner):
-        self._ensure()
+    async def _session(self, owner):
+        await self._ensure()
         sess = self._sessions.get(owner)
         if sess is not None:
             sess.last = time.time()
             return sess
         if len(self._sessions) >= BROWSER_MAX_CONTEXTS:
             victim_key = min(self._sessions, key=lambda k: self._sessions[k].last)
-            self._sessions.pop(victim_key).close()
-        ctx = self._browser.new_context(
+            await self._sessions.pop(victim_key).close()
+        ctx = await self._browser.new_context(
             viewport={"width": 1280, "height": 800},
             locale="zh-CN",
             timezone_id="Asia/Shanghai",
         )
         ctx.set_default_timeout(BROWSER_TIMEOUT_MS)
         ctx.set_default_navigation_timeout(BROWSER_TIMEOUT_MS)
-        ctx.route("**/*", self._route)
+        await ctx.route("**/*", self._route)
         sess = _Session(ctx)
+        sess.page = await ctx.new_page()
         self._sessions[owner] = sess
         return sess
 
@@ -253,69 +250,69 @@ class BrowserManager:
         while True:
             time.sleep(60)
             try:
-                self._submit(self._sweep_once, timeout=60)
+                self._call(self._sweep_once, timeout=60)
             except Exception:                   # noqa: BLE001
                 pass
 
-    def _sweep_once(self):
+    async def _sweep_once(self):
         now = time.time()
         idle = BROWSER_IDLE_MINUTES * 60
         for owner in list(self._sessions):
             sess = self._sessions[owner]
             if now - sess.last > idle:
-                self._sessions.pop(owner).close()
+                await self._sessions.pop(owner).close()
         if not self._sessions and self._browser is not None:
             try:
-                self._browser.close()
+                await self._browser.close()
             finally:
                 self._browser = None
 
-    # ---------- 对外动作（在工具线程里调用） ----------
+    # ---------- 对外动作（同步，内部提交到 loop 线程） ----------
     def reset_steps(self, owner):
-        def _do():
+        async def _do():
             sess = self._sessions.get(owner)
             if sess is not None:
                 sess.steps = 0
                 sess.last = time.time()
         try:
-            self._submit(_do, timeout=10)
+            self._call(_do, timeout=10)
         except Exception:                       # noqa: BLE001
             pass
 
     def close(self, owner):
-        def _do():
+        async def _do():
             sess = self._sessions.pop(owner, None)
             if sess is not None:
-                sess.close()
+                await sess.close()
             return True
-        return self._submit(_do, timeout=30)
+        return self._call(_do, timeout=30)
 
     def open(self, owner, url):
-        return self._submit(self._open, owner, url)
+        return self._call(self._open, owner, url)
 
     def snapshot(self, owner):
-        return self._submit(self._snapshot, owner)
+        return self._call(self._snapshot, owner)
 
     def click(self, owner, ref):
-        return self._submit(self._click, owner, ref)
+        return self._call(self._click, owner, ref)
 
     def type(self, owner, ref, text):
-        return self._submit(self._type, owner, ref, text)
+        return self._call(self._type, owner, ref, text)
 
     def key(self, owner, key):
-        return self._submit(self._key, owner, key)
+        return self._call(self._key, owner, key)
 
     def scroll(self, owner, dy):
-        return self._submit(self._scroll, owner, dy)
+        return self._call(self._scroll, owner, dy)
 
     def extract(self, owner):
-        return self._submit(self._extract, owner)
+        return self._call(self._extract, owner)
 
     def images(self, owner):
-        return self._submit(self._images, owner, timeout=240)
+        return self._call(self._images, owner, timeout=240)
 
     def screenshot(self, owner):
-        return self._submit(self._screenshot, owner, timeout=120)
+        return self._call(self._screenshot, owner, timeout=120)
 
     # ---------- 具体实现（只在 worker 线程里跑） ----------
     @staticmethod
@@ -329,37 +326,37 @@ class BrowserManager:
             raise RuntimeError("不允许访问本机/内网地址")
         return url
 
-    def _open(self, owner, url):
+    async def _open(self, owner, url):
         url = self._check_url(url)
-        sess = self._session(owner)
+        sess = await self._session(owner)
         self._step(sess)
         try:
-            resp = sess.page.goto(url, wait_until="domcontentloaded",
+            resp = await sess.page.goto(url, wait_until="domcontentloaded",
                                   timeout=BROWSER_TIMEOUT_MS)
         except Exception as exc:                # noqa: BLE001
             # 有些站点（百度这类）一直有后台请求，domcontentloaded 迟迟不触发，
             # 但页面其实已经有内容了：能读到标题/正文就继续，不白等 30 秒。
             try:
-                title = sess.page.title()
-                body = sess.page.evaluate("() => document.body ? document.body.innerText.length : 0")
+                title = await sess.page.title()
+                body = await sess.page.evaluate("() => document.body ? document.body.innerText.length : 0")
             except Exception:                   # noqa: BLE001
                 title, body = "", 0
             if not title and not body:
                 raise RuntimeError(f"打开页面失败（{exc}）。如果一直超时，可能是这个网站"
                                    "在服务器所在地区访问不了，或者被风控拦截。") from exc
         try:
-            sess.page.wait_for_load_state("networkidle", timeout=8000)
+            await sess.page.wait_for_load_state("networkidle", timeout=8000)
         except Exception:                       # noqa: BLE001
             pass
         if sess.page.url.startswith("chrome-error://"):
             raise RuntimeError("页面加载失败（浏览器错误页）。可能是网址打不开、"
                                "被墙、或者被网站风控拦截。")
-        data = self._snapshot_data(sess)
+        data = await self._snapshot_data(sess)
         data["status"] = resp.status if resp else 0
         return data
 
-    def _snapshot_data(self, sess):
-        raw = sess.page.evaluate(_SNAPSHOT_JS)
+    async def _snapshot_data(self, sess):
+        raw = await sess.page.evaluate(_SNAPSHOT_JS)
         items = raw.get("items") or []
         out = []
         for item in items[:120]:
@@ -381,69 +378,69 @@ class BrowserManager:
             "text_head": str(raw.get("text") or "")[:1500],
         }
 
-    def _snapshot(self, owner):
-        sess = self._session(owner)
+    async def _snapshot(self, owner):
+        sess = await self._session(owner)
         self._step(sess)
         return self._snapshot_data(sess)
 
-    def _click(self, owner, ref):
-        sess = self._session(owner)
+    async def _click(self, owner, ref):
+        sess = await self._session(owner)
         self._step(sess)
-        ok = sess.page.evaluate(_CLICK_JS, int(ref))
+        ok = await sess.page.evaluate(_CLICK_JS, int(ref))
         if not ok:
             return {"ok": False, "error": f"页面上没有 ref={ref} 的元素，先 browser_snapshot 重新看一遍"}
         try:
-            sess.page.wait_for_load_state("networkidle", timeout=6000)
+            await sess.page.wait_for_load_state("networkidle", timeout=6000)
         except Exception:                       # noqa: BLE001
             pass
-        data = self._snapshot_data(sess)
+        data = await self._snapshot_data(sess)
         data["ok"] = True
         return data
 
-    def _type(self, owner, ref, text):
-        sess = self._session(owner)
+    async def _type(self, owner, ref, text):
+        sess = await self._session(owner)
         self._step(sess)
-        ok = sess.page.evaluate(_TYPE_JS, [int(ref), str(text)])
+        ok = await sess.page.evaluate(_TYPE_JS, [int(ref), str(text)])
         return {"ok": bool(ok), "ref": int(ref),
                 "error": "" if ok else f"ref={ref} 不是可输入元素"}
 
-    def _key(self, owner, key):
-        sess = self._session(owner)
+    async def _key(self, owner, key):
+        sess = await self._session(owner)
         self._step(sess)
-        sess.page.keyboard.press(str(key))
+        await sess.page.keyboard.press(str(key))
         try:
-            sess.page.wait_for_load_state("networkidle", timeout=6000)
+            await sess.page.wait_for_load_state("networkidle", timeout=6000)
         except Exception:                       # noqa: BLE001
             pass
-        data = self._snapshot_data(sess)
+        data = await self._snapshot_data(sess)
         data["ok"] = True
         return data
 
-    def _scroll(self, owner, dy):
-        sess = self._session(owner)
+    async def _scroll(self, owner, dy):
+        sess = await self._session(owner)
         self._step(sess)
-        sess.page.mouse.wheel(0, int(dy))
+        await sess.page.mouse.wheel(0, int(dy))
         time.sleep(0.4)
-        data = self._snapshot_data(sess)
+        data = await self._snapshot_data(sess)
         data["ok"] = True
         return data
 
-    def _extract(self, owner):
-        sess = self._session(owner)
+    async def _extract(self, owner):
+        sess = await self._session(owner)
         self._step(sess)
-        text = sess.page.evaluate("() => document.body ? document.body.innerText : ''")
+        text = await sess.page.evaluate("() => document.body ? document.body.innerText : ''")
         text = str(text or "")
         text = "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
         truncated = len(text) > MAX_TEXT
-        return {"url": sess.page.url, "title": sess.page.title(),
+        return {"url": sess.page.url, "title": await sess.page.title(),
                 "text": text[:MAX_TEXT], "truncated": truncated,
                 "length": len(text)}
 
-    def _images(self, owner):
-        sess = self._session(owner)
+    async def _images(self, owner):
+        sess = await self._session(owner)
         self._step(sess)
         page = sess.page
-        raw = page.evaluate(_COLLECT_IMAGES_JS) or []
+        raw = await page.evaluate(_COLLECT_IMAGES_JS) or []
         seen = set()
         urls = []
         for item in raw:
@@ -458,13 +455,13 @@ class BrowserManager:
         os.makedirs(outdir, exist_ok=True)
         saved = []
         headers = {"referer": page.url,
-                   "user-agent": page.evaluate("() => navigator.userAgent")}
+                   "user-agent": await page.evaluate("() => navigator.userAgent")}
         for index, url in enumerate(urls, start=1):
             try:
-                resp = page.context.request.get(url, headers=headers, timeout=20000)
+                resp = await page.context.request.get(url, headers=headers, timeout=20000)
                 if not resp.ok:
                     continue
-                body = resp.body()
+                body = await resp.body()
                 if len(body) < 1024:
                     continue
                 ctype = (resp.headers or {}).get("content-type", "")
@@ -489,14 +486,14 @@ class BrowserManager:
                 "files": [os.path.basename(p) for p in saved],
                 "zip_path": zip_path, "page_url": page.url}
 
-    def _screenshot(self, owner):
-        sess = self._session(owner)
+    async def _screenshot(self, owner):
+        sess = await self._session(owner)
         self._step(sess)
         outdir = os.path.join(BROWSER_DIR, str(owner))
         os.makedirs(outdir, exist_ok=True)
         path = os.path.join(outdir, time.strftime("shot-%Y%m%d-%H%M%S.png"))
-        sess.page.screenshot(path=path, full_page=False)
-        return {"ok": True, "path": path, "url": sess.page.url, "title": sess.page.title()}
+        await sess.page.screenshot(path=path, full_page=False)
+        return {"ok": True, "path": path, "url": sess.page.url, "title": await sess.page.title()}
 
 
 _MANAGER = None
