@@ -5,7 +5,7 @@ import time
 
 from openai import OpenAI
 
-from . import settings
+from . import ratelimit, settings
 from . import usage as usage_mod
 from .config import (
     LLM_MAX_RETRIES,
@@ -74,6 +74,10 @@ def complete(messages: list, model: str = "", api_key: str = "", base_url: str =
     if not key:
         raise RuntimeError(_NO_KEY)
     extra = _think_extra(thinking)
+    try:
+        ratelimit.acquire(sum(len(str(m.get("content") or "")) // 2 for m in messages))
+    except Exception:                         # noqa: BLE001
+        pass
     # 先按要求的带参数发；要是不认这个参数（400），去掉它再试一次——
     # 一个小任务不该因为参数不兼容就整条路废掉。
     attempts = ([{"extra_body": extra}, {}] if extra else [{}])
@@ -93,6 +97,12 @@ def complete(messages: list, model: str = "", api_key: str = "", base_url: str =
             last_error = exc
     if reply is None:
         raise last_error
+    try:
+        usage_obj = getattr(reply, "usage", None)
+        if usage_obj:
+            ratelimit.record(getattr(usage_obj, "prompt_tokens", 0) or 0)
+    except Exception:                         # noqa: BLE001
+        pass
     if not reply.choices:
         return ""
     return (reply.choices[0].message.content or "").strip()
@@ -255,6 +265,14 @@ def stream_chat(messages: list, tools: list, model: str = "",
                 delay = _backoff_seconds(attempt, err.retry_after)
                 _log_retry(err.code, attempt, delay, err.detail)
                 attempt += 1
-                time.sleep(delay)
+                if delay >= 5:
+                    yield "notice", f"模型额度限流，等 {delay:.0f} 秒再自动重试（第 {attempt} 次）…"
+                remaining = float(delay)
+                while remaining > 0:
+                    step = min(10.0, remaining)
+                    time.sleep(step)
+                    remaining -= step
+                    if remaining > 0:
+                        yield "notice", f"还在等额度恢复，剩余 {remaining:.0f} 秒…"
                 continue
             raise err

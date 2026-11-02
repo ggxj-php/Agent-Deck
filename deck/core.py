@@ -498,9 +498,13 @@ class DeckAgent:
                 round_usage = {}
                 while True:
                   try:
+                    specs = active_specs(extra=("ask_user",) if self.interactive else ())
                     sent_messages = _sendable(_trim_history(_rehydrate(self.messages)))
-                    # 上游有「每分钟 token 配额」：发之前先排队，别把额度一次打爆
-                    prompt_estimate = context.estimate(sent_messages)
+                    # 上游有「每分钟 token 配额」：发之前先排队，别把额度一次打爆。
+                    # 记账要把工具 schema + 系统提示也算进去（之前漏了，导致实际超支）
+                    overhead = (len(json.dumps(specs, ensure_ascii=False))
+                                + len(settings.system_prompt())) // 4
+                    prompt_estimate = context.estimate(sent_messages) + overhead
                     wait_hint = ratelimit.plan(prompt_estimate, budget=LLM_TPM_BUDGET)
                     if wait_hint >= 3:
                         yield {"type": "notice",
@@ -508,8 +512,7 @@ class DeckAgent:
                     ratelimit.acquire(prompt_estimate, budget=LLM_TPM_BUDGET,
                                       max_wait=LLM_TPM_MAX_WAIT)
                     for kind, payload in stream_chat(
-                        sent_messages,
-                        active_specs(extra=("ask_user",) if self.interactive else ()), model,
+                        sent_messages, specs, model,
                         api_key=api_key, base_url=base_url, thinking=think,
                     ):
                         if kind == "message":
@@ -522,6 +525,8 @@ class DeckAgent:
                             yield {"type": "tool_pending", "name": payload}
                         elif kind == "usage":
                             round_usage = payload
+                        elif kind == "notice":
+                            yield {"type": "notice", "text": payload}
                         else:
                             chunks.append(payload)
                             # 正文里可能夹着 [sticker:mood]，边收边切开

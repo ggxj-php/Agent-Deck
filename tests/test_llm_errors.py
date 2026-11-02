@@ -22,17 +22,26 @@ class FakeAPIError(Exception):
         self.response = FakeResponse(status, self.body, headers)
 
 
-def test_阿里额度错误判成QUOTA():
+def test_阿里分钟配额判成RATE_LIMIT():
     # 用户实际遇到的那条（429 但语义是额度没了，不能当限流重试）
     exc = FakeAPIError(429, {"error": {
         "message": "Allocated quota exceeded, please increase your quota limit. "
                    "For details, see: https://www.alibabacloud.com/help/en/model-studio/error-code#token-limit",
         "type": "insufficient_quota", "code": "insufficient_quota"}})
     err = llm_errors.classify(exc)
+    assert err.code == llm_errors.RATE_LIMIT
+    assert err.code in llm_errors.RETRYABLE
+    assert err.retry_after >= 60
+
+
+def test_真额度不足仍是QUOTA终态():
+    exc = FakeAPIError(429, {"error": {
+        "message": "You exceeded your current quota, insufficient_quota",
+        "type": "insufficient_quota", "code": "insufficient_quota"}})
+    err = llm_errors.classify(exc)
     assert err.code == llm_errors.QUOTA
     assert isinstance(err, llm_errors.QuotaExceeded)
     assert err.code not in llm_errors.RETRYABLE
-    assert "额度" in err.message
 
 
 def test_纯限流判成RATE_LIMIT且可重试():

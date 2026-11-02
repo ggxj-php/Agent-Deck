@@ -109,6 +109,19 @@ def _retry_after(body, exc):
     return 0.0
 
 
+_RATE_QUOTA_RES = (
+    re.compile(r"allocated\s+quota\s+exceeded", re.I),
+    re.compile(r"please\s+increase\s+your\s+quota\s+limit", re.I),
+    re.compile(r"\btoken\s+limit\b.*exceed", re.I),
+    re.compile(r"每分钟|tokens?\s+per\s+minute|\bTPM\b", re.I),
+)
+
+
+def _looks_like_rate_quota(detail):
+    """分钟级配额（等一分钟就恢复）——这是限流，不是余额没了。"""
+    return any(rx.search(detail) for rx in _RATE_QUOTA_RES)
+
+
 def _looks_like_quota(detail):
     return any(rx.search(detail) for rx in _QUOTA_RES)
 
@@ -157,6 +170,13 @@ def classify(exc):
 
     if status in (401, 403) or type_ in ("authentication_error", "permission_error"):
         code = AUTH
+    elif _looks_like_rate_quota(detail) and not re.search(
+            r"balance|credits?|billing|充值", detail, re.I):
+        # 阿里/百炼的 "Allocated quota exceeded, increase your quota limit" 是每分钟配额，
+        # DSH 里这属于 RATE_LIMIT（可重试），不是 QUOTA（终态）
+        code = RATE_LIMIT
+        if retry_after <= 0:
+            retry_after = 62.0
     elif _looks_like_quota(detail) or status == 402:
         # 注意：DSH 也是先判额度再判限流。阿里的 429 insufficient_quota 属于这一档，
         # 重试多少次都没用，直接告诉用户去查配额。
