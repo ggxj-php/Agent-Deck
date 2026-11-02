@@ -111,7 +111,7 @@ def _session_lock(session_id):
 PUBLIC_PREFIXES = (
     "/static/", "/admin", "/api/admin", "/download", "/api/app/latest",
     "/api/auth/login", "/api/auth/register", "/api/auth/captcha",
-    "/api/ping", "/api/stickers", "/api/persona", "/favicon.ico",
+    "/api/ping", "/api/stickers", "/api/persona", "/api/skills", "/favicon.ico",
 )
 PUBLIC_EXACT = {"/login"}
 
@@ -271,6 +271,14 @@ def latest_apk():
         "min_android": "8.0",
         "updated_at": int(os.path.getmtime(path)),
     }
+
+
+@app.get("/api/skills")
+def api_skills():
+    """公开的技能列表（只读：名字 + 描述，普通用户也能看）。"""
+    from ..skills import enabled_skills
+    items = [{"name": i["name"], "description": i["description"]} for i in enabled_skills()]
+    return {"skills": items, "total": len(items)}
 
 
 @app.get("/download", include_in_schema=False)

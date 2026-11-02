@@ -97,12 +97,23 @@ def list_files(path: str = ".") -> str:
     return "（空目录）" if not names else "\n".join(names)
 
 
-def read_file(path: str) -> str:
-    """读取工作区内的文本文件（有大小上限，超了只给前半截）"""
+def read_file(path: str, offset: int = 0, length: int = 0) -> str:
+    """读取工作区内的文本文件：可用 offset/length（字节）自己决定读哪段、读多少。"""
     full = safe_path(path)
     if not os.path.isfile(full):
         return f"错误：文件不存在 {path}"
     size = os.path.getsize(full)
+    try:
+        offset = max(0, int(offset or 0))
+        length = max(0, int(length or 0))
+    except (TypeError, ValueError):
+        offset, length = 0, 0
+    if length or offset:
+        with open(full, "rb") as f:
+            f.seek(offset)
+            data = f.read(length) if length else f.read(200000)
+        note = f"（按字节读取：{offset}~{offset + len(data)} / 共 {size} 字节）\n"
+        return note + data.decode("utf-8", "replace")
     with open(full, "r", encoding="utf-8", errors="replace") as f:
         text = f.read(MAX_READ_BYTES)
     if size > MAX_READ_BYTES:

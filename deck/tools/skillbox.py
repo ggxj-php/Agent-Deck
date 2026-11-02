@@ -43,11 +43,11 @@ def list_skill_files(name: str, subdir: str = "") -> str:
                       ensure_ascii=False)
 
 
-def read_skill_file(name: str, path: str) -> str:
+def read_skill_file(name: str, path: str, offset: int = 0, length: int = 0) -> str:
     """读技能目录里的某个文件（workflow 文档、脚本、模板说明等）。"""
     try:
         _ensure_enabled(name)
-        return skills.read_file(name, path)
+        return skills.read_file(name, path, offset, length)
     except ValueError as exc:
         return f"错误：{exc}"
 
@@ -104,6 +104,8 @@ SPECS = [
                 "properties": {
                     "name": {"type": "string", "description": "技能名"},
                     "path": {"type": "string", "description": "相对技能目录的路径"},
+                    "offset": {"type": "integer", "description": "从第几个字节开始读"},
+                    "length": {"type": "integer", "description": "读多少字节，自己把握"},
                 },
                 "required": ["name", "path"],
             },

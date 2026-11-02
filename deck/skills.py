@@ -138,7 +138,7 @@ def files(name, subdir=""):
     return out
 
 
-def read_file(name, path):
+def read_file(name, path, offset=0, length=0):
     """读技能目录里的某个文件（SKILL.md、workflow 文档、脚本都行）。"""
     folder = find(name)
     if not folder:
@@ -149,6 +149,14 @@ def read_file(name, path):
         raise ValueError("路径越界了，只能读技能目录里的文件")
     if not os.path.isfile(full):
         raise ValueError(f"技能里没有这个文件：{path}。用 list_skill_files 看看有哪些。")
+    if offset or length:
+        offset = max(0, int(offset or 0))
+        length = max(0, int(length or 0))
+        with open(full, "rb") as fp:
+            fp.seek(offset)
+            data = fp.read(length) if length else fp.read(200000)
+        note = f"（按字节读取：{offset}~{offset + len(data)} / 共 {os.path.getsize(full)} 字节）\n"
+        return note + data.decode("utf-8", "replace")
     if os.path.getsize(full) > 5 * 1024 * 1024:
         raise ValueError("这个文件超过 5MB，别整个读，挑需要的部分")
     return _read_text(full)

@@ -2845,3 +2845,54 @@ armLeaveGuard();
   }
   inputEl.focus();
 })();
+
+
+/* ---------- 侧边栏：技能列表（只读） ---------- */
+function ensureSkillsEntry() {
+  if (document.getElementById('side-skills')) return;
+  const foot = document.querySelector('.side-foot');
+  if (!foot) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'side-link side-skills';
+  btn.id = 'side-skills';
+  btn.textContent = '技能';
+  btn.addEventListener('click', showSkillsPanel);
+  const anchor = foot.querySelector('.side-download');
+  if (anchor && anchor.nextSibling) foot.insertBefore(btn, anchor.nextSibling);
+  else foot.prepend(btn);
+}
+
+async function showSkillsPanel() {
+  let mask = document.getElementById('skills-mask');
+  if (mask) { mask.remove(); return; }
+  mask = document.createElement('div');
+  mask.id = 'skills-mask';
+  mask.style.cssText = 'position:fixed;inset:0;background:rgba(20,16,32,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:18px';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:18px;max-width:520px;width:100%;max-height:80vh;overflow:auto;padding:18px 20px;box-shadow:0 18px 60px rgba(0,0,0,.25)';
+  box.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
+    + '<b style="font-size:16px">已安装的技能</b>'
+    + '<button type="button" id="skills-close" style="border:0;background:#f3f0fa;border-radius:999px;padding:6px 14px;font:inherit;cursor:pointer">关闭</button></div>'
+    + '<div id="skills-list" style="font-size:13.5px;line-height:1.6;color:#444">加载中…</div>';
+  mask.appendChild(box);
+  document.body.appendChild(mask);
+  mask.addEventListener('click', (ev) => { if (ev.target === mask) mask.remove(); });
+  box.querySelector('#skills-close').addEventListener('click', () => mask.remove());
+  try {
+    const resp = await fetch('/api/skills', { cache: 'no-store' });
+    const data = await resp.json();
+    const list = document.getElementById('skills-list');
+    if (!data.skills || !data.skills.length) { list.textContent = '还没有安装技能。'; return; }
+    list.innerHTML = data.skills.map((sk) =>
+      '<div style="padding:10px 0;border-bottom:1px solid #f0edf7">'
+      + '<b>' + sk.name.replace(/[&<>]/g, '') + '</b>'
+      + '<div style="color:#777;margin-top:2px">' + (sk.description || '无描述').replace(/[&<>]/g, '') + '</div></div>'
+    ).join('');
+  } catch (err) {
+    document.getElementById('skills-list').textContent = '拉取失败：' + err;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', ensureSkillsEntry);
+setTimeout(ensureSkillsEntry, 800);
