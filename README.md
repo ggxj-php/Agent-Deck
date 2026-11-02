@@ -1007,10 +1007,28 @@ Playwright 跑在单独线程；默认拦图片/字体/媒体渲染省内存（�
 ## 生成文件自动清理
 
 技能/代码生成出来的成品（`.pptx` `.ppt` `.pdf` `.docx` `.xlsx`）和 `workspace/projects/`
-下的项目目录，**默认保留 12 小时**，后台每 5 分钟扫一次，过期自动删（`GENERATED_TTL_HOURS`
+下的项目目录，**默认保留 1 小时**，后台每 5 分钟扫一次，过期自动删（`GENERATED_TTL_HOURS`
 可改）。上传的附件仍是 20 分钟 TTL，两套互不影响。
 
 清理只动 `workspace/` 里的生成物，不碰 `skills/`、`uploads/` 和代码文件。
+
+## 最近新增（2026-11）
+
+- **兜底检索（付费）**：`ultra_search` / `ultra_fetch`，走 DeepSeek 官方 Search/Fetch API。
+  常规 `web_search`/`open_url` 不可靠时启用，一次任务最多 3 次；后台「接口与 Key」页可改 base/key。
+- **技能路由**：提示词规则 41 要求交付物类任务（PPT/文档/写作/海报/图表/前端页面）
+  动手前先 `list_skills`，有对应技能必须先 `load_skill` 按流程执行（优先级高于「少调工具」）。
+- **已装技能**：`ppt-master`、`docx`、`pdf`、`xlsx`、`frontend-design`、`archify`、
+  `humanizer`（英文去 AI 味）、`humanizer-zh`（中文去 AI 味）、`renwei-writing`（人味儿写作）。
+  技能只在服务器 `workspace/skills/` 安装，不进仓库。
+- **技能面板**：网页侧边栏「技能」按钮，只读展示技能列表（中文描述，接口 `GET /api/skills`）。
+- **按字节读文件**：`read_file(path, offset, length)` 可按字节分段读；`read_skill_file` 仍整篇读。
+- **默认身份卡**：仓库内置中性身份卡 `personas/neutral`（默认），刷新时不再闪粉色/塔菲主题；
+  标题统一为项目名 **Agent Deck**。
+- **生成物清理**：`workspace/projects`、`workspace/browser` 与 pptx/pdf/xlsx/docx/mp4/zip 等
+  **默认 1 小时**自动清理（每 5 分钟扫一次），上传附件仍是 20 分钟 TTL。
+- **长任务熔断**：工具预算 150、试错轮 20、重复结果阈值 8；长任务（技能流水线）不会被过早掐断。
+- **模型接入**：支持 one-api 中转站双通道（本地 `127.0.0.1:3000`），两个同名上游账号自动负载均衡。
 
 ## 已知限制
 
