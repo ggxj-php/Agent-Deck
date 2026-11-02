@@ -210,7 +210,7 @@ CONTEXT_OVERFLOW_RETRIES = int(os.environ.get("CONTEXT_OVERFLOW_RETRIES", "1") o
 
 # ---- 工具熔断（防「同一件事反复试错没有进展」）----
 TURN_TOOL_BUDGET = int(os.environ.get("TURN_TOOL_BUDGET", "40") or 40)
-TURN_TRIAL_ROUNDS = int(os.environ.get("TURN_TRIAL_ROUNDS", "6") or 6)
+TURN_TRIAL_ROUNDS = int(os.environ.get("TURN_TRIAL_ROUNDS", "12") or 6)
 
 # ---- 浏览器（Playwright + Chromium）----
 BROWSER_HEADLESS = os.environ.get("BROWSER_HEADLESS", "1") != "0"
