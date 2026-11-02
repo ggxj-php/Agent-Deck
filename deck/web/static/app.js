@@ -2887,7 +2887,7 @@ async function showSkillsPanel() {
     list.innerHTML = data.skills.map((sk) =>
       '<div style="padding:10px 0;border-bottom:1px solid #f0edf7">'
       + '<b>' + sk.name.replace(/[&<>]/g, '') + '</b>'
-      + '<div style="color:#777;margin-top:2px">' + (sk.description || '无描述').replace(/[&<>]/g, '') + '</div></div>'
+      + '<div style="color:#777;margin-top:2px">' + (sk.description_zh || sk.description || '无描述').replace(/[&<>]/g, '') + '</div></div>'
     ).join('');
   } catch (err) {
     document.getElementById('skills-list').textContent = '拉取失败：' + err;

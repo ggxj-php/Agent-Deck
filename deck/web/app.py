@@ -273,11 +273,27 @@ def latest_apk():
     }
 
 
+_ZH_SKILL_DESC = {'ppt-master': 'PPT 生成：按主题做可编辑的演示文稿，支持套模板、加讲稿和动画。', 'docx': 'Word 文档：新建、读取、修改 .docx，支持目录、页码、表格、批注、替换图片。', 'pdf': 'PDF 处理：提取文字/表格、合并拆分、加水印、填表单、加密解密、扫描件 OCR。', 'xlsx': 'Excel 表格：读写 .xlsx/.csv，算公式、做图表、清洗数据、格式美化。', 'frontend-design': '前端设计：给界面定审美方向（字体、配色、布局），避免千篇一律的模板感。', 'archify': '图表生成：把系统/流程/时序/ER/状态/时间线画成可交互的独立网页图表，支持导出。'}
+
+
+def _short_desc(text, limit=140):
+    text = " ".join(str(text or "").replace('"', "").replace("'", " ").split())
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
 @app.get("/api/skills")
 def api_skills():
-    """公开的技能列表（只读：名字 + 描述，普通用户也能看）。"""
+    """公开的技能列表（只读：名字 + 中文描述，普通用户也能看）。"""
     from ..skills import enabled_skills
-    items = [{"name": i["name"], "description": i["description"]} for i in enabled_skills()]
+    items = []
+    for item in enabled_skills():
+        name = item["name"]
+        zh = _ZH_SKILL_DESC.get(name, "")
+        items.append({
+            "name": name,
+            "description_zh": zh or _short_desc(item["description"]),
+            "description": _short_desc(item["description"]),
+        })
     return {"skills": items, "total": len(items)}
 
 
