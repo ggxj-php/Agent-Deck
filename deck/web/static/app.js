@@ -2896,3 +2896,21 @@ async function showSkillsPanel() {
 
 document.addEventListener('DOMContentLoaded', ensureSkillsEntry);
 setTimeout(ensureSkillsEntry, 800);
+
+
+/* ---------- 侧边栏：远程接管浏览器 ---------- */
+function ensureTakeoverEntry() {
+  if (document.getElementById('takeover-entry')) return;
+  const foot = document.querySelector('.side-foot');
+  if (!foot) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'side-link';
+  btn.id = 'takeover-entry';
+  btn.textContent = '接管浏览器';
+  btn.title = '看服务器上的浏览器画面，手动点验证码/按钮';
+  btn.addEventListener('click', () => window.open('/takeover', '_blank'));
+  foot.prepend(btn);
+}
+document.addEventListener('DOMContentLoaded', ensureTakeoverEntry);
+setTimeout(ensureTakeoverEntry, 900);

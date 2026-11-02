@@ -1014,6 +1014,13 @@ Playwright 跑在单独线程；默认拦图片/字体/媒体渲染省内存（�
 
 ## 最近新增（2026-11）
 
+- **浏览器远程接管（noVNC）**：侧边栏「接管浏览器」打开 `/takeover`，实时看到服务器上的
+  Chromium 画面并直接用鼠标/触屏操作（过验证码、点 DOM 抓不到的按钮）。
+  服务端组件：`taffy-display`（Xvfb :99）、`taffy-vnc`（x11vnc 5900）、
+  `taffy-websockify`（noVNC 6080，仅 127.0.0.1）；FastAPI `GET /takeover` +
+  `WS /api/takeover/ws`（cookie 鉴权后隧道到 websockify）。浏览器改为 headed 模式跑在 :99。
+
+
 - **兜底检索（付费）**：`ultra_search` / `ultra_fetch`，走 DeepSeek 官方 Search/Fetch API。
   常规 `web_search`/`open_url` 不可靠时启用，一次任务最多 3 次；后台「接口与 Key」页可改 base/key。
 - **技能路由**：提示词规则 41 要求交付物类任务（PPT/文档/写作/海报/图表/前端页面）

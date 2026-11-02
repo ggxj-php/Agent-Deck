@@ -218,7 +218,7 @@ class BrowserManager:
             return
         from patchright.async_api import async_playwright
         self._pw = await async_playwright().start()
-        kwargs = {"headless": True, "args": LAUNCH_ARGS}
+        kwargs = {"headless": not os.environ.get("DISPLAY"), "args": LAUNCH_ARGS}
         if BROWSER_PROXY:
             kwargs["proxy"] = {"server": BROWSER_PROXY}
         self._browser = await self._pw.chromium.launch(**kwargs)

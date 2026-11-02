@@ -6,6 +6,7 @@
 所有页面和接口默认都要登录，只有下面 PUBLIC_* 里的白名单例外；后台 /admin 走它自己
 那套口令，不跟用户账号混在一起。
 """
+import asyncio
 import base64
 import io
 import json
@@ -15,9 +16,11 @@ import threading
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+import websockets
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import (
     FileResponse,
+    HTMLResponse,
     JSONResponse,
     RedirectResponse,
     Response,
@@ -111,7 +114,7 @@ def _session_lock(session_id):
 PUBLIC_PREFIXES = (
     "/static/", "/admin", "/api/admin", "/download", "/api/app/latest",
     "/api/auth/login", "/api/auth/register", "/api/auth/captcha",
-    "/api/ping", "/api/stickers", "/api/persona", "/api/skills", "/favicon.ico",
+    "/api/ping", "/api/stickers", "/api/persona", "/api/skills", "/novnc", "/takeover", "/favicon.ico",
 )
 PUBLIC_EXACT = {"/login"}
 
@@ -197,6 +200,7 @@ async def lifespan(_app):
 
 app = FastAPI(title="Agent Deck", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/novnc", StaticFiles(directory="/usr/share/novnc", html=True), name="novnc")
 app.include_router(admin_router)
 app.include_router(content_router)
 app.include_router(issues_router)
@@ -758,3 +762,76 @@ def chat(req: ChatRequest, request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ---------- 浏览器远程接管（noVNC） ----------
+
+TAKEOVER_HTML = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>接管浏览器 · Agent Deck</title>
+<style>html,body{margin:0;height:100%;background:#111}
+#v{width:100%;height:100%;border:0;display:block}</style></head><body>
+<iframe id="v" src="/novnc/vnc.html?autoconnect=1&resize=scale&view_only=0&path=api/takeover/ws"></iframe>
+</body></html>"""
+
+
+@app.get("/takeover")
+def takeover_page(request: Request):
+    """登录用户才能打开：把服务器上的浏览器画面投到网页里手动操作。"""
+    if not auth.resolve_token(request.cookies.get(auth.COOKIE_NAME)):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(TAKEOVER_HTML)
+
+
+@app.websocket("/api/takeover/ws")
+async def takeover_ws(ws: WebSocket):
+    """把 noVNC 的 WebSocket 隧道到本机 websockify（只认登录用户）。"""
+    user = auth.resolve_token(ws.cookies.get(auth.COOKIE_NAME))
+    if not user:
+        await ws.accept()
+        await ws.close(code=4401)
+        return
+    sub = (ws.scope.get("subprotocols") or [None])[0]
+    await ws.accept(subprotocol=sub)
+    try:
+        upstream = await websockets.connect(
+            "ws://127.0.0.1:6080/websockify", subprotocols=[sub] if sub else None,
+            max_size=None, ping_interval=None)
+    except Exception:                        # noqa: BLE001
+        await ws.close(code=4500)
+        return
+
+    async def pump_to_up():
+        try:
+            while True:
+                msg = await ws.receive()
+                if msg.get("type") == "websocket.disconnect":
+                    break
+                if msg.get("bytes") is not None:
+                    await upstream.send(msg["bytes"])
+                elif msg.get("text") is not None:
+                    await upstream.send(msg["text"])
+        except Exception:                    # noqa: BLE001
+            pass
+
+    async def pump_to_down():
+        try:
+            async for raw in upstream:
+                if isinstance(raw, bytes):
+                    await ws.send_bytes(raw)
+                else:
+                    await ws.send_text(raw)
+        except Exception:                    # noqa: BLE001
+            pass
+
+    try:
+        await asyncio.gather(pump_to_up(), pump_to_down())
+    finally:
+        try:
+            await upstream.close()
+        except Exception:                    # noqa: BLE001
+            pass
+        try:
+            await ws.close()
+        except Exception:                    # noqa: BLE001
+            pass
