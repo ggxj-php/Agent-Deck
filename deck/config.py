@@ -209,8 +209,8 @@ LLM_TPM_MAX_WAIT = float(os.environ.get("LLM_TPM_MAX_WAIT", "45") or 45)
 CONTEXT_OVERFLOW_RETRIES = int(os.environ.get("CONTEXT_OVERFLOW_RETRIES", "1") or 1)
 
 # ---- 工具熔断（防「同一件事反复试错没有进展」）----
-TURN_TOOL_BUDGET = int(os.environ.get("TURN_TOOL_BUDGET", "40") or 40)
-TURN_TRIAL_ROUNDS = int(os.environ.get("TURN_TRIAL_ROUNDS", "12") or 6)
+TURN_TOOL_BUDGET = int(os.environ.get("TURN_TOOL_BUDGET", "150") or 40)
+TURN_TRIAL_ROUNDS = int(os.environ.get("TURN_TRIAL_ROUNDS", "20") or 6)
 
 # ---- 浏览器（Playwright + Chromium）----
 BROWSER_HEADLESS = os.environ.get("BROWSER_HEADLESS", "1") != "0"
@@ -221,7 +221,7 @@ BROWSER_TIMEOUT_MS = int(os.environ.get("BROWSER_TIMEOUT_MS", "30000") or 30000)
 BROWSER_BLOCK_ASSETS = os.environ.get("BROWSER_BLOCK_ASSETS", "1") != "0"
 # 浏览器出口代理（比如国内家宽/住宅代理）：http://user:pass@host:port 或 socks5://host:port
 BROWSER_PROXY = os.environ.get("BROWSER_PROXY", "").strip()
-SAME_RESULT_LIMIT = int(os.environ.get("SAME_RESULT_LIMIT", "5") or 5)
+SAME_RESULT_LIMIT = int(os.environ.get("SAME_RESULT_LIMIT", "8") or 5)
 
 # 压缩时至少保留最近这么多条消息的原文。工具调用和它的结果不能被拆开，
 # 所以实际断点会往后找一条安全的用户消息对齐（见 context._cut_index）。
@@ -479,6 +479,12 @@ CORE_PROMPT = r"""【共享规矩 · 所有身份卡都适用】
       ③ 先算了
     - 用户选「用代理」但服务器没配代理，就如实说「需要管理员配置 BROWSER_PROXY 后重启服务」；
     - 绝对不要假装看到了被拦掉的内容。
+
+39. 【技能脚本要放对位置】沙箱只对 workspace/skills/ 下的脚本开放系统能力（subprocess/ctypes/读系统文件）：
+    - 跑技能自带脚本：run_code 的 path 写 `skills/<技能名>/scripts/xxx.py`（相对 workspace）；
+    - 自己写的适配脚本/渲染脚本，**先写到 `skills/<技能名>/` 目录下再 run_code**，别写在 workspace 根目录
+      （根目录脚本 subprocess 会被拦，技能脚本 import 到 subprocess 也会报 ImportError）；
+    - archify 这类 node 工具：写 `.mjs` 到 `skills/archify/` 下，再用 run_code 直接执行该文件。
 
 """
 
