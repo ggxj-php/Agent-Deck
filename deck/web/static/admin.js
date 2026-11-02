@@ -2074,7 +2074,7 @@ function resetPersonaForm() {
   const els = personaFormEls();
   Object.values(els).forEach((el) => {
     if (!el) return;
-    el.value = el.type === 'color' ? '#ffb7d5' : '';
+    el.value = el.type === 'color' ? '#5b6b8c' : '';
   });
   if (els.id) els.id.disabled = false;
   document.getElementById('persona-form-title').textContent = '新建身份卡';
@@ -2143,7 +2143,7 @@ async function editPersona(item) {
     els.placeholder.value = detail.placeholder || '';
     els.online.value = detail.status_online || '';
     els.thinking.value = detail.status_thinking || '';
-    if (els.theme) els.theme.value = detail.theme || '#ffb7d5';
+    if (els.theme) els.theme.value = detail.theme || '#5b6b8c';
     const avPrev = document.getElementById('persona-avatar-preview');
     if (avPrev) avPrev.src = detail.avatar ? detail.avatar : '/static/avatar.jpg';
     const icPrev = document.getElementById('persona-icon-preview');

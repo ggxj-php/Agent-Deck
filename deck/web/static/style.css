@@ -1,15 +1,15 @@
 :root {
-  --pink: #ffb7d5;
-  --pink-dark: #ff9ec7;
-  --pink-deep: #e0729f;
+  --pink: #8fa3c8;
+  --pink-dark: #7b8fb5;
+  --pink-deep: #4a5b7d;
   /* 浅色档：前端会按身份卡的主题色动态覆盖 --pink / --pink-dark / --pink-deep /
      --pink-pale / --pink-mist / --bg / --line 这几个 */
-  --pink-pale: #ffd9ec;
-  --pink-mist: #ffeaf5;
-  --bg: #fff5fa;
-  --line: #ffe0ee;
-  --ink: #4a3b43;
-  --ink-soft: #90788a;
+  --pink-pale: #dfe6f2;
+  --pink-mist: #eef2f8;
+  --bg: #f5f7fb;
+  --line: #e3e9f3;
+  --ink: #2f3746;
+  --ink-soft: #6b7688;
   --bubble: #ffffff;
   --radius: 16px;
 }
@@ -792,7 +792,7 @@ body {
 }
 
 /* 小屏手机上顶栏挤了三个按钮（导入 / 保存 / 新会话），把按钮压窄一点，
-   免得把「永雏塔菲 · 在线喵」那一块挤没了 */
+   免得把「塔菲 · 在线喵」那一块挤没了 */
 @media (max-width: 480px) {
   .topbar { gap: 6px; padding-left: 10px; padding-right: 10px; }
   .new-chat { padding: 7px 9px; font-size: 12px; }
@@ -2861,7 +2861,7 @@ body.chat-page .topbar { padding-left: 50px; }
   margin-top: 8px;
   padding: 7px 10px;
   border-radius: 10px;
-  border-left: 3px solid var(--pink, #ffb7d5);
+  border-left: 3px solid var(--pink, #8fa3c8);
   background: var(--pink-mist, #ffeaf5);
   color: #8a5a72;
   font-size: 12.5px;

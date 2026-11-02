@@ -1,0 +1,15 @@
+{
+  "name": "助手",
+  "self_name": "我",
+  "user_name": "你",
+  "avatar": "icon.png",
+  "icon": "icon.png",
+  "welcome": "你好，有什么可以帮你？查资料、写东西、做文档都可以。",
+  "placeholder": "说点什么…",
+  "status_online": "在线",
+  "status_thinking": "正在思考…",
+  "stickers": "",
+  "theme": "#5b6b8c",
+  "prompt": "",
+  "id": "neutral"
+}

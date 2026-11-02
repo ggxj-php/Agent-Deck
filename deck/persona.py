@@ -21,7 +21,7 @@ import shutil
 from .config import PROJECT_ROOT, STICKERS_DIR, SYSTEM_PROMPT
 
 PERSONAS_DIR = os.path.join(PROJECT_ROOT, "personas")
-DEFAULT_ID = "taffy"
+DEFAULT_ID = "neutral"
 STATIC_STICKERS = "@static"          # 指回 deck/web/static/stickers
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,23}$")
@@ -31,8 +31,8 @@ _TEXT_MAX = 500
 
 # persona.json 里允许的字段和默认值（都是给前端/提示词用的展示信息）
 DEFAULTS = {
-    "name": "永雏塔菲",
-    "self_name": "塔菲",
+    "name": "助手",
+    "self_name": "我",
     "user_name": "用户",
     "avatar": "",                    # 空 = 用 static/avatar.jpg
     "welcome": "",                   # 空 = 用内置欢迎语
@@ -41,7 +41,7 @@ DEFAULTS = {
     "status_thinking": "",
     "stickers": STATIC_STICKERS,
     # 主题色（前端按这个调色）；空 = 用默认粉色
-    "theme": "#ffb7d5",
+    "theme": "#5b6b8c",
     # 图标文件；空 = 跟着头像走
     "icon": "",
     "prompt": "",
@@ -371,8 +371,8 @@ def ensure_default():
     if not prompt.strip():
         prompt = SYSTEM_PROMPT
     save(DEFAULT_ID, {
-        "name": "永雏塔菲",
-        "self_name": "塔菲",
+        "name": "助手",
+        "self_name": "我",
         "user_name": "用户",
         "welcome": WELCOME_FALLBACK.format(name="永雏助手"),
         "placeholder": "和助手说点什么…",

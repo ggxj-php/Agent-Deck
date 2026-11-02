@@ -44,7 +44,7 @@ function mixColor(hex, target, ratio) {
 }
 
 function applyTheme(theme) {
-  const color = /^#[0-9a-fA-F]{6}$/.test(theme || '') ? theme : '#ffb7d5';
+  const color = /^#[0-9a-fA-F]{6}$/.test(theme || '') ? theme : '#5b6b8c';
   const root = document.documentElement.style;
   root.setProperty('--pink', mixColor(color, 'white', 0.25));
   root.setProperty('--pink-dark', color);
@@ -2748,7 +2748,7 @@ function welcome() {
   }
   contentChunk(
     turn,
-    '用户来啦～我是永雏助手，有什么想聊的直接说就好。\n\n' +
+    '用户来啦～我是Agent Deck，有什么想聊的直接说就好。\n\n' +
     '算法题、代码、知识库里的资料都可以问我；嵌入式、单片机（STM32 那种）、物联网、' +
     '计算机组成原理、数字取证这些助手也懂。左下角可以发图片给助手看（看完就删，不会留着）；' +
     '左上角 ☰ 是侧边栏，你所有的会话都在里面，随时切回来接着聊；' +
