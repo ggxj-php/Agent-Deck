@@ -89,10 +89,10 @@ def browser_snapshot() -> str:
     return _elements_text(data) + _risk_hint(_elements_text(data))
 
 
-def browser_click(ref: int) -> str:
-    """点击快照里编号为 ref 的元素。"""
+def browser_click(ref: int = 0, text: str = "") -> str:
+    """点击元素：给 ref，或直接给按钮文字（如「开始游戏」）。"""
     try:
-        data = browser.manager().click(_owner(), ref)
+        data = browser.manager().click(_owner(), ref, text)
     except Exception as exc:                 # noqa: BLE001
         return f"错误：{exc}"
     if not data.get("ok"):
@@ -195,6 +195,15 @@ def browser_video() -> str:
     return _dumps(payload)
 
 
+def browser_click_at(x: int, y: int) -> str:
+    """按坐标点击（canvas/游戏/纯图按钮兜底）：先用 browser_screenshot 看清位置再点。"""
+    try:
+        data = browser.manager().click_at(_owner(), x, y)
+    except Exception as exc:                 # noqa: BLE001
+        return f"错误：{exc}"
+    return _elements_text(data)
+
+
 def browser_close() -> str:
     """关掉当前用户的浏览器（释放内存）。"""
     try:
@@ -217,10 +226,12 @@ SPECS = [
         "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {
         "name": "browser_click",
-        "description": "点击快照里编号为 ref 的元素，返回点击后的页面快照。",
+        "description": "点击元素（真实鼠标事件，支持 iframe/Shadow DOM/动态按钮/开新页）：给 ref 或文字 text；"
+                       "点完会检查页面是否真的变了，没变会报错。",
         "parameters": {"type": "object", "properties": {
-            "ref": {"type": "integer", "description": "元素编号（来自 browser_open / browser_snapshot）"}},
-            "required": ["ref"]}}},
+            "ref": {"type": "integer", "description": "元素编号（来自快照）"},
+            "text": {"type": "string", "description": "按钮文字，如「开始游戏」"}},
+            "required": []}}},
     {"type": "function", "function": {
         "name": "browser_type",
         "description": "往编号为 ref 的输入框里填文字（填完可能需要 browser_key 按 Enter）。",
@@ -255,6 +266,13 @@ SPECS = [
         "description": "抓当前页面上的视频直链（mp4/m3u8/webm），能直接下载的 mp4 会顺带存下来给下载链接。"
                        "用户要视频文件/直链时用它；不播放视频也能抓。",
         "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "browser_click_at",
+        "description": "按屏幕坐标点击（canvas/游戏/纯图片按钮兜底）。先 browser_screenshot 看清按钮位置，再报坐标。",
+        "parameters": {"type": "object", "properties": {
+            "x": {"type": "integer", "description": "视口 x 坐标"},
+            "y": {"type": "integer", "description": "视口 y 坐标"}},
+            "required": ["x", "y"]}}},
     {"type": "function", "function": {
         "name": "browser_close",
         "description": "关掉浏览器释放内存（任务做完或长时间不用时调用）。",

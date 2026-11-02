@@ -43,48 +43,47 @@ LAUNCH_ARGS = [
 
 _SNAPSHOT_JS = r"""
 () => {
-  const sel = 'a,button,input,textarea,select,[role=button],[role=link],[role=tab],'
-    + '[role=checkbox],[role=radio],[onclick],[contenteditable=true],h1,h2,h3,li';
-  const seen = new Set();
-  const items = [];
-  const isVisible = (el) => {
+  const roots = [document];
+  for (let i = 0; i < roots.length && i < 12; i++) {
+    for (const el of roots[i].querySelectorAll('*')) {
+      if (el.shadowRoot) roots.push(el.shadowRoot);
+    }
+  }
+  const sel = 'a,button,input,textarea,select,[role],[onclick],[tabindex],[aria-label],'
+    + '[class*=btn],[class*=button],img,canvas';
+  const items = [], seen = new Set();
+  const vis = (el) => {
     const r = el.getBoundingClientRect();
     if (r.width < 2 || r.height < 2) return false;
     const st = getComputedStyle(el);
     return st.display !== 'none' && st.visibility !== 'hidden' && Number(st.opacity) > 0.05;
   };
-  const textOf = (el) => {
-    let t = (el.innerText || el.value || el.getAttribute('aria-label')
-             || el.getAttribute('placeholder') || el.getAttribute('title') || '');
-    return t.replace(/\s+/g, ' ').trim().slice(0, 80);
-  };
+  const textOf = (el) => String(el.innerText || el.value || el.getAttribute('aria-label')
+    || el.getAttribute('title') || el.getAttribute('alt') || '')
+    .replace(/\s+/g, ' ').trim().slice(0, 80);
   let n = 0;
-  for (const el of document.querySelectorAll(sel)) {
-    if (n >= 160) break;
-    if (!isVisible(el)) continue;
-    const tag = el.tagName.toLowerCase();
-    const role = el.getAttribute('role') || '';
-    const text = textOf(el);
-    if (!text && !['input', 'textarea', 'select'].includes(tag)) continue;
-    const key = tag + '|' + text + '|' + Math.round(el.getBoundingClientRect().top / 24);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    n += 1;
-    el.setAttribute('data-dsh-ref', String(n));
-    items.push({
-      ref: n, tag: tag, role: role,
-      text: text,
-      href: tag === 'a' ? (el.getAttribute('href') || '').slice(0, 120) : '',
-      input_type: tag === 'input' ? (el.getAttribute('type') || 'text') : '',
-      value: ['input', 'textarea', 'select'].includes(tag) ? String(el.value || '').slice(0, 40) : '',
-    });
+  for (const root of roots) {
+    for (const el of root.querySelectorAll(sel)) {
+      if (n >= 240) break;
+      if (!vis(el)) continue;
+      const st = getComputedStyle(el);
+      const pointer = st.cursor === 'pointer';
+      const text = textOf(el);
+      const tag = el.tagName.toLowerCase();
+      if (!text && !pointer && !['input','textarea','select','canvas'].includes(tag)) continue;
+      const key = tag + '|' + text + '|' + Math.round(el.getBoundingClientRect().top / 24);
+      if (seen.has(key)) continue;
+      seen.add(key); n += 1;
+      el.setAttribute('data-dsh-ref', String(n));
+      items.push({ref: n, tag: tag, role: el.getAttribute('role') || '', text: text,
+        href: tag === 'a' ? (el.getAttribute('href') || '').slice(0, 120) : '',
+        input_type: tag === 'input' ? (el.getAttribute('type') || 'text') : '',
+        value: ['input','textarea','select'].includes(tag) ? String(el.value || '').slice(0, 40) : '',
+        pointer: pointer ? 1 : 0});
+    }
   }
-  return {
-    url: location.href,
-    title: document.title || '',
-    items: items,
-    text: (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n').slice(0, 6000),
-  };
+  return {url: location.href, title: document.title || '', items: items,
+    text: (document.body ? document.body.innerText : '').replace(/\n{3,}/g, '\n\n').slice(0, 6000)};
 }
 """
 
@@ -325,8 +324,11 @@ class BrowserManager:
     def snapshot(self, owner):
         return self._call(self._snapshot, owner)
 
-    def click(self, owner, ref):
-        return self._call(self._click, owner, ref)
+    def click(self, owner, ref=0, text=""):
+        return self._call(self._click, owner, ref, text)
+
+    def click_at(self, owner, x, y):
+        return self._call(self._click_at, owner, x, y)
 
     def type(self, owner, ref, text):
         return self._call(self._type, owner, ref, text)
@@ -365,6 +367,7 @@ class BrowserManager:
         url = self._check_url(url)
         sess = await self._session(owner)
         self._step(sess)
+        resp = None
         try:
             resp = await sess.page.goto(url, wait_until="domcontentloaded",
                                   timeout=BROWSER_TIMEOUT_MS)
@@ -390,53 +393,191 @@ class BrowserManager:
         data["status"] = resp.status if resp else 0
         return data
 
+    @staticmethod
+    def _frame_ref(ref):
+        ref = int(ref or 0)
+        return ref // 1000, ref % 1000
+
     async def _snapshot_data(self, sess):
-        raw = await sess.page.evaluate(_SNAPSHOT_JS)
-        items = raw.get("items") or []
-        out = []
-        for item in items[:120]:
-            row = {"ref": item.get("ref"), "tag": item.get("tag"),
-                   "text": str(item.get("text") or "")[:80]}
-            if item.get("role"):
-                row["role"] = item["role"]
-            if item.get("href"):
-                row["href"] = item["href"]
-            if item.get("input_type") and item["input_type"] != "text":
-                row["type"] = item["input_type"]
-            if item.get("value"):
-                row["value"] = item["value"]
-            out.append(row)
-        return {
-            "url": raw.get("url") or sess.page.url,
-            "title": raw.get("title") or "",
-            "elements": out,
-            "text_head": str(raw.get("text") or "")[:1500],
-        }
+        items, text = [], ""
+        for fi, frame in enumerate(sess.page.frames):
+            try:
+                raw = await frame.evaluate(_SNAPSHOT_JS) or {}
+            except Exception:                   # noqa: BLE001
+                continue
+            for item in raw.get("items") or []:
+                row = {"ref": fi * 1000 + int(item.get("ref") or 0),
+                       "tag": item.get("tag"), "text": str(item.get("text") or "")[:80]}
+                if item.get("role"):
+                    row["role"] = item["role"]
+                if item.get("href"):
+                    row["href"] = item["href"]
+                if item.get("input_type") and item["input_type"] != "text":
+                    row["type"] = item["input_type"]
+                if item.get("value"):
+                    row["value"] = item["value"]
+                if fi:
+                    row["frame"] = fi
+                items.append(row)
+            if fi == 0:
+                text = str(raw.get("text") or "")
+        try:
+            title = await sess.page.title()
+        except Exception:                       # noqa: BLE001
+            title = ""
+        return {"url": sess.page.url, "title": title, "elements": items[:200],
+                "text_head": text[:1500]}
+
+    async def _page_sig(self, sess):
+        parts = [sess.page.url]
+        for frame in sess.page.frames[:3]:
+            try:
+                parts.append(str(await frame.evaluate(
+                    "() => document.title + '|' + document.querySelectorAll('*').length"
+                    " + '|' + (document.body ? document.body.innerText.length : 0)")))
+            except Exception:                   # noqa: BLE001
+                continue
+        return "|".join(parts)
 
     async def _snapshot(self, owner):
         sess = await self._session(owner)
         self._step(sess)
         return await self._snapshot_data(sess)
 
-    async def _click(self, owner, ref):
+    async def _click(self, owner, ref=0, text=""):
         sess = await self._session(owner)
         self._step(sess)
-        ok = await sess.page.evaluate(_CLICK_JS, int(ref))
-        if not ok:
-            return {"ok": False, "error": f"页面上没有 ref={ref} 的元素，先 browser_snapshot 重新看一遍"}
+        before_pages = len(sess.ctx.pages)
+        before_url = sess.page.url
+        before_sig = await self._page_sig(sess)
+        frames = sess.page.frames
+        loc, frame = None, sess.page.main_frame
+        if ref:
+            fi, local = self._frame_ref(ref)
+            frame = frames[fi] if fi < len(frames) else sess.page.main_frame
+            loc = frame.locator(f'[data-dsh-ref="{local}"]')
+        elif text:
+            locate_js = r'''(text) => {
+              const all = [...document.querySelectorAll(
+                'button,a,[role],input[type=submit],input[type=button],div,span,img')];
+              const vis = (el) => {
+                const r = el.getBoundingClientRect();
+                if (r.width < 2 || r.height < 2) return false;
+                const st = getComputedStyle(el);
+                return st.display !== 'none' && st.visibility !== 'hidden';
+              };
+              let best = null, bestScore = -1;
+              for (const el of all) {
+                if (!vis(el)) continue;
+                const t = String(el.innerText || el.value
+                  || el.getAttribute('aria-label') || el.getAttribute('title')
+                  || el.getAttribute('alt') || '').replace(/\s+/g, ' ').trim();
+                if (!t || !t.includes(text)) continue;
+                const tag = el.tagName.toLowerCase();
+                let score = 1;
+                if (tag === 'button' || tag === 'a') score = 10;
+                else if (tag === 'input' && ['submit', 'button'].includes(el.type)) score = 9;
+                else if (el.getAttribute('role') === 'button') score = 8;
+                else if (getComputedStyle(el).cursor === 'pointer') score = 6;
+                if (score > bestScore) { bestScore = score; best = el; }
+              }
+              if (!best) return false;
+              document.querySelectorAll('[data-dsh-click]').forEach(
+                (el) => el.removeAttribute('data-dsh-click'));
+              best.setAttribute('data-dsh-click', '1');
+              return true;
+            }'''
+            for fr in frames:
+                try:
+                    found = await fr.evaluate(locate_js, text)
+                    if found:
+                        frame = fr
+                        loc = fr.locator('[data-dsh-click="1"]').first
+                        break
+                except Exception:               # noqa: BLE001
+                    continue
+            if loc is None:
+                for fr in frames:
+                    try:
+                        cand = fr.get_by_text(text, exact=False).first
+                        if await cand.count():
+                            frame, loc = fr, cand
+                            break
+                    except Exception:           # noqa: BLE001
+                        continue
+        if loc is None:
+            return {"ok": False, "error": "没找到要点的元素：给 ref 或按钮文字（先 browser_snapshot）"}
+        errs = []
+        for strategy in ("mouse", "force", "js", "at"):
+            try:
+                if strategy != "js":
+                    try:
+                        await loc.scroll_into_view_if_needed(timeout=5000)
+                    except Exception:           # noqa: BLE001
+                        pass
+                if strategy == "mouse":
+                    await loc.hover(timeout=3000)
+                    await loc.click(timeout=8000)
+                elif strategy == "force":
+                    await loc.click(timeout=8000, force=True)
+                elif strategy == "js":
+                    await loc.evaluate("el => el.click()")
+                else:
+                    box = await loc.bounding_box()
+                    if not box:
+                        raise RuntimeError("拿不到元素坐标")
+                    await sess.page.mouse.click(box["x"] + box["width"] / 2,
+                                                box["y"] + box["height"] / 2)
+                errs = []
+                break
+            except Exception as exc:            # noqa: BLE001
+                errs.append(f"{strategy}: {str(exc)[:60]}")
+                continue
         try:
             await sess.page.wait_for_load_state("networkidle", timeout=6000)
         except Exception:                       # noqa: BLE001
             pass
+        if len(sess.ctx.pages) > before_pages:
+            sess.page = sess.ctx.pages[-1]
+            try:
+                await sess.page.wait_for_load_state("domcontentloaded", timeout=10000)
+            except Exception:                   # noqa: BLE001
+                pass
+        after_sig = await self._page_sig(sess)
+        changed = (sess.page.url != before_url or after_sig != before_sig
+                   or len(sess.ctx.pages) > before_pages)
+        data = await self._snapshot_data(sess)
+        data["ok"] = changed
+        data["changed"] = changed
+        if not changed:
+            detail = "；".join(errs[:3]) if errs else "页面无变化（可能需要登录/被遮挡/点了没反应）"
+            data["error"] = f"点击后页面没有变化：{detail}"
+        return data
+
+    async def _click_at(self, owner, x, y):
+        sess = await self._session(owner)
+        self._step(sess)
+        before = sess.page.url
+        await sess.page.mouse.click(float(x), float(y))
+        try:
+            await sess.page.wait_for_load_state("networkidle", timeout=6000)
+        except Exception:                       # noqa: BLE001
+            pass
+        if len(sess.ctx.pages) > 1:
+            sess.page = sess.ctx.pages[-1]
         data = await self._snapshot_data(sess)
         data["ok"] = True
+        data["changed"] = sess.page.url != before
         return data
 
     async def _type(self, owner, ref, text):
         sess = await self._session(owner)
         self._step(sess)
         text = str(text)
-        loc = sess.page.locator(f'[data-dsh-ref="{int(ref)}"]')
+        fi, local = self._frame_ref(ref)
+        frames = sess.page.frames
+        frame = frames[fi] if fi < len(frames) else sess.page.main_frame
+        loc = frame.locator(f'[data-dsh-ref="{local}"]')
         try:
             await loc.fill(text, timeout=8000)
             return {"ok": True, "ref": int(ref), "error": "", "mode": "fill"}
