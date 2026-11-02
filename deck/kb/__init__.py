@@ -1,98 +1,140 @@
-"""知识库：对外是 search() / warmup() / stats()，索引在第一次用到时懒加载。
+"""知识库：对外是 search() / warmup() / stats()。
 
-索引是进程内单例，只建一次。运行中往 knowledge/ 里加了文件不会自动生效，
-重启一下就好。
-
-检索走几路（原查询词匹配 + 英文检索词 + 向量），细节见 index.py。索引在后台线程里建：
-建好之前 search() 拿到的是个半成品；索引本身是同步就绪的，向量那一路算好了下一问就自动用上。
+索引是进程内单例；启动时后台建，运行中每 60 秒检查 knowledge/ 有没有变化，
+有变化自动重建（没变的文件走解析缓存，只重新解析改过的文件）。
+建索引期间 search() 不阻塞，直接返回「正在建索引」。
 """
+import hashlib
+import os
 import threading
+import time
 
-from ..config import KB_TOP_K
+from ..config import KB_TOP_K, KNOWLEDGE_DIR
 from .index import KnowledgeBase
 
 _kb = None
+_kb_fp = ""                       # 当前索引对应的 knowledge/ 指纹
 _lock = threading.Lock()          # 护 _stats 用
-_lock_build = threading.Lock()    # 护「建库」用，跟 _lock 分开，别把建库的长时间持锁拖累 stats
-# 后台页面拿它显示索引进度：还在建吗、向量算了多少、有没有出错、块按多长收口
+_lock_build = threading.Lock()    # 护「建库」用
 _stats = {"building": False, "chunks": 0, "vectors": 0, "error": "",
           "max_tokens": 0, "embed_note": ""}
+_watch_started = False
+
+
+def _fingerprint():
+    """knowledge/ 的轻量指纹：只看路径+大小+修改时间，不读内容，很快。"""
+    try:
+        items = []
+        for root, _dirs, files in os.walk(KNOWLEDGE_DIR):
+            for name in files:
+                full = os.path.join(root, name)
+                try:
+                    st = os.stat(full)
+                except OSError:
+                    continue
+                items.append(f"{os.path.relpath(full, KNOWLEDGE_DIR)}|{st.st_size}|{int(st.st_mtime)}")
+        items.sort()
+        return hashlib.sha1("\n".join(items).encode()).hexdigest()
+    except OSError:
+        return ""
 
 
 def _get():
-    """懒加载索引单例。
-
-    两个线程同时第一次用到知识库时，不加锁会各建一次库（双份向量钱 + 双份内存）；
-    而且必须等 build() 完整跑完才发布 _kb，否则别的线程会拿到「词索引还没组装」的
-    半成品，把「正在建索引」显示成「知识库是空的」。所以这里用双检锁，并且只在建完
-    之后才把 _kb 对外可见。
-    """
-    global _kb
+    """懒加载索引单例（阻塞版，只给后台构建线程用）。"""
+    global _kb, _kb_fp
     kb = _kb
     if kb is not None:
         return kb
     with _lock_build:
         if _kb is None:
+            fp = _fingerprint()
+            started = time.time()
             kb = KnowledgeBase()
-            kb.build()          # 构建期间 _kb 仍是 None，别的线程进不来
-            _kb = kb            # 只在建完之后才发布
+            kb.build()
+            _kb = kb
+            _kb_fp = fp
+            print(f"[kb] 索引构建完成：{len(kb.chunks)} 块，用时 {time.time() - started:.1f}s", flush=True)
     return _kb
 
 
-def warmup():
-    """提前把索引建好，别让第一个提问卡在建索引上。"""
+def _build_bg(reason=""):
+    """在后台建索引；已经在建就不重复起线程。"""
     with _lock:
+        if _stats["building"]:
+            return
         _stats["building"] = True
-    try:
-        kb = _get()
-        with _lock:
-            _stats["chunks"] = len(kb.chunks)
-            _stats["vectors"] = kb.vector_count()
-            _stats["error"] = kb.vector_error
-            _stats["max_tokens"] = kb.max_tokens
-            _stats["embed_note"] = kb.embed_note
-    except Exception as exc:
-        with _lock:
-            _stats["error"] = f"{type(exc).__name__}: {exc}"
-        raise
-    finally:
-        with _lock:
-            _stats["building"] = False
+        _stats["error"] = ""
+    def run():
+        try:
+            print(f"[kb] 开始建索引（{reason or '启动预热'}）", flush=True)
+            _get()
+        except Exception as exc:              # noqa: BLE001
+            with _lock:
+                _stats["error"] = f"{type(exc).__name__}: {exc}"
+            print(f"[kb] 建索引失败：{type(exc).__name__}: {exc}", flush=True)
+        finally:
+            with _lock:
+                _stats["building"] = False
+    threading.Thread(target=run, daemon=True, name="kb-build").start()
+
+
+def _watch():
+    """每 60 秒看一次 knowledge/ 有没有变化，变了就重建。"""
+    global _kb
+    last = _kb_fp
+    while True:
+        time.sleep(60)
+        try:
+            fp = _fingerprint()
+            if fp and fp != last and _kb is not None:
+                print("[kb] 检测到 knowledge/ 有变化，重建索引", flush=True)
+                _kb = None
+                last = fp
+                _build_bg("知识库有更新")
+            elif fp != last:
+                last = fp
+        except Exception:                     # noqa: BLE001
+            pass
+
+
+def warmup():
+    """启动预热：后台建索引；之后再起一个变化监听线程。"""
+    global _watch_started
+    _build_bg("启动预热")
+    if not _watch_started:
+        _watch_started = True
+        threading.Thread(target=_watch, daemon=True, name="kb-watch").start()
 
 
 def stats():
-    """索引状态，给网页后台看的。
-
-    建的过程中还会带上实时进度（建到哪个文件、算了多少块向量、请求多少次、重试多少次），
-    后台那张「向量模型」卡每 5 秒刷一次就能看到它在动。
-    """
     with _lock:
         data = dict(_stats)
     kb = _kb
+    data["fingerprint"] = _kb_fp[:12]
+    data["chunks"] = len(kb.chunks) if kb is not None else data.get("chunks", 0)
+    data["ready"] = kb is not None
     if kb is not None:
-        data["progress"] = kb.progress_snapshot()
-        # 检索时才暴露的向量故障（_rank_vector 现写进 kb.vector_error）也得能到后台：
-        # warmup 建好之后的那一问才出的问题，不在这刷新就永远看不到。
-        if kb.vector_error:
+        try:
+            data["progress"] = kb.progress_snapshot()
+        except Exception:                     # noqa: BLE001
+            pass
+        if getattr(kb, "vector_error", ""):
             data["error"] = kb.vector_error
     return data
 
 
 def search(query, top_k=KB_TOP_K):
     """检索知识库，返回拼好的原文片段（带出处），供模型直接阅读。"""
-    kb = _get()
-
-    if not kb.chunks:
-        return (
-            "知识库是空的。把文档放进项目根目录的 knowledge/ 文件夹再试，"
-            "支持 pdf / docx / html / md / txt。"
-        )
+    kb = _kb
+    if kb is None or not kb.chunks:
+        _build_bg("首次检索")
+        return ("知识库索引正在后台构建（首次启动或知识库刚更新），大约 1 分钟后可用，"
+                "现在先别重复调用 search_knowledge。")
 
     hits = kb.search(query, top_k)
     if not hits:
         return f"知识库里没找到和「{query}」相关的内容。"
 
-    # 不打分数：各路融合后的分数是个很小的名次分，写出来反而会让人误判相关性
     blocks = []
     for _score, chunk in hits:
         page = f" 第 {chunk['page']} 页" if chunk.get("page") else ""
