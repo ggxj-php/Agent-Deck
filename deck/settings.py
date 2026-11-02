@@ -90,6 +90,8 @@ def _load():
                         if isinstance(raw.get("tool_groups"), list) else None),
         "context_limit": raw.get("context_limit") or 0,
         "model_history": [m for m in history if isinstance(m, str)] if isinstance(history, list) else [],
+        "premium_base": str(raw.get("premium_base") or "https://api.deepseek.com").rstrip("/"),
+        "premium_key": str(raw.get("premium_key") or ""),
     }
     return _cache
 
@@ -220,6 +222,25 @@ def update_models(model, vision, translate):
 
 
 # ---------- Key ----------
+
+def premium_base():
+    """DeepSeek 官方付费 Search/Fetch 的 base（后台可改）。"""
+    return _load()["premium_base"] or "https://api.deepseek.com"
+
+
+def premium_key():
+    return _load()["premium_key"]
+
+
+def set_premium(base="", key=""):
+    with _lock:
+        data = _load()
+        if base:
+            data["premium_base"] = base.strip().rstrip("/")
+        if key:
+            data["premium_key"] = key.strip()
+        _write(data)
+
 
 def chat_key():
     """聊天那套的 key：后台配过就用后台的，否则用 .env 里的。"""

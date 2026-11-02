@@ -483,6 +483,11 @@ CORE_PROMPT = r"""【共享规矩 · 所有身份卡都适用】
     - 用户选「用代理」但服务器没配代理，就如实说「需要管理员配置 BROWSER_PROXY 后重启服务」；
     - 绝对不要假装看到了被拦掉的内容。
 
+40. 【究极兜底检索（付费）】常规 web_search / open_url 的结果明显不可靠时（跑题、被墙打不开、
+    内容缺失、明显过时、权威性差），再用 `ultra_search` / `ultra_fetch`（DeepSeek 官方付费接口）：
+    - ultra_search 自带权威度和相关度，结果更准；需要正文时把 need_content 设 true；
+    - ultra_fetch 用来把 open_url 抓不下来的网页转成 Markdown；
+    - 这是付费接口，一次任务最多用 3 次，别拿它当默认搜索。
 39. 【技能脚本要放对位置】沙箱只对 workspace/skills/ 下的脚本开放系统能力（subprocess/ctypes/读系统文件）：
     - 跑技能自带脚本：run_code 的 path 写 `skills/<技能名>/scripts/xxx.py`（相对 workspace）；
     - 自己写的适配脚本/渲染脚本，**先写到 `skills/<技能名>/` 目录下再 run_code**，别写在 workspace 根目录
