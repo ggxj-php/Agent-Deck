@@ -771,7 +771,7 @@ TAKEOVER_HTML = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"
 <title>接管浏览器 · Agent Deck</title>
 <style>html,body{margin:0;height:100%;background:#111}
 #v{width:100%;height:100%;border:0;display:block}</style></head><body>
-<iframe id="v" src="/novnc/vnc.html?autoconnect=1&resize=scale&view_only=0&path=api/takeover/ws"></iframe>
+<iframe id="v" src="/novnc/vnc.html?autoconnect=1&resize=scale&view_only=0&path=%2Fapi%2Ftakeover%2Fws"></iframe>
 </body></html>"""
 
 
