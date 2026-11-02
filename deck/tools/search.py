@@ -16,6 +16,7 @@ import base64
 import html
 import ipaddress
 import json
+import os
 import re
 import socket
 import threading
@@ -769,6 +770,11 @@ def _host_blocked(host: str) -> str:
     if not host:
         return "地址里没有主机名"
     host = host.lower().strip("[]")
+    # 白名单：允许访问自己的站点（用 /etc/hosts 指到本机，绕过机房 IP 的地域限制）
+    allowed = {h.strip().lower() for h in
+               os.environ.get("OPEN_URL_ALLOW_HOSTS", "").split(",") if h.strip()}
+    if host in allowed:
+        return ""
     if host == "localhost" or host.endswith((".local", ".internal", ".localhost")):
         return "指向本机"
     try:
