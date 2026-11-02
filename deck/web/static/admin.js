@@ -52,6 +52,9 @@ const visionStateEl = document.getElementById('vision-state');
 const translateBaseEl = document.getElementById('translate-base');
 const translateKeyEl = document.getElementById('translate-key');
 const translateStateEl = document.getElementById('translate-state');
+const premiumBaseEl = document.getElementById('premium-base');
+const premiumKeyEl = document.getElementById('premium-key');
+const premiumStateEl = document.getElementById('premium-state');
 const saveKeysEl = document.getElementById('save-keys');
 
 const embedModelEl = document.getElementById('embed-model');
@@ -332,6 +335,12 @@ function render(state) {
 
   // 接口地址不是秘密，直接填进去给主人看着改；提交时没动过就不写盘
   chatBaseEl.value = state.chat_base_url;
+  if (premiumBaseEl) premiumBaseEl.value = state.premium_base_url || '';
+  if (premiumStateEl) {
+    premiumStateEl.textContent = state.premium_key_set
+      ? '已配置 Key（不回显），留空提交表示不改动'
+      : '还没配 Key，填一个后点保存';
+  }
   visionBaseEl.value = state.vision_base_url;
   translateBaseEl.value = state.translate_base_url;
   chatStateEl.textContent = state.chat_key_source === 'admin'
@@ -1636,6 +1645,8 @@ saveKeysEl.addEventListener('click', async () => {
     chat_base_url: changed(chatBaseEl, lastState.chat_base_url),
     vision_base_url: changed(visionBaseEl, lastState.vision_base_url),
     translate_base_url: changed(translateBaseEl, lastState.translate_base_url),
+    premium_base_url: changed(premiumBaseEl, lastState.premium_base_url),
+    premium_key: (premiumKeyEl && premiumKeyEl.value.trim()) || '', 
   };
   if (!Object.values(body).some((value) => value)) {
     flash('什么都没改', false);

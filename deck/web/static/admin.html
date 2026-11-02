@@ -625,7 +625,17 @@
           </label>
           <p class="hint" id="translate-state"></p>
 
-          <button type="button" id="save-keys">保存接口设置</button>
+                    <h3 class="sub">兜底检索（DeepSeek 官方付费）</h3>
+          <label>接口地址
+            <input id="premium-base" autocomplete="off">
+          </label>
+          <label>Key
+            <input type="password" id="premium-key" placeholder="留空不改动；填了就覆盖"
+                   autocomplete="new-password">
+          </label>
+          <p class="hint" id="premium-state"></p>
+
+<button type="button" id="save-keys">保存接口设置</button>
           <p class="hint">
             聊天和图片两套互相独立：聊天用 GLM、图片用 DeepSeek 也行，各填各的 key 和地址。
             输入框留空表示「这项不改」，当前生效的值写在上面那行提示里。<br>

@@ -77,6 +77,8 @@ def _state():
         "chat_base_url": settings.chat_base_url(),
         "vision_base_url": settings.vision_base_url(),
         "chat_base_source": settings.base_source(vision=False),
+        "premium_base_url": settings.premium_base(),
+        "premium_key_set": bool(settings.premium_key()),
         "vision_base_source": settings.base_source(vision=True),
         # 检索翻译那一路的连接：留空就跟聊天那套一样，所以键和地址都说清楚它们是哪来的
         "translate_base_url": settings.translate_base_url(),
@@ -147,6 +149,9 @@ class KeysRequest(BaseModel):
     # 检索翻译那一路：默认跟聊天共用，单独填就是让它走另一家（或者本机小模型）
     translate_key: str = ""
     translate_base_url: str = ""
+    # 究极兜底检索（DeepSeek 官方付费 Search/Fetch）
+    premium_key: str = ""
+    premium_base_url: str = ""
 
 
 def _check_base(name, value):
@@ -162,13 +167,18 @@ def save_keys(req: KeysRequest, request: Request):
     chat_base = _check_base("聊天", req.chat_base_url)
     vision_base = _check_base("图片", req.vision_base_url)
     translate_base = _check_base("检索翻译", req.translate_base_url)
+    premium_base = _check_base("兜底检索", req.premium_base_url)
     chat_key = req.chat_key.strip()
     vision_key = req.vision_key.strip()
     translate_key = req.translate_key.strip()
-    if not any((chat_key, vision_key, translate_key, chat_base, vision_base, translate_base)):
+    premium_key = (req.premium_key or "").strip()
+    if not any((chat_key, vision_key, translate_key, chat_base, vision_base, translate_base,
+                premium_key, premium_base)):
         raise HTTPException(status_code=400, detail="一个都没填，那就先不动它")
     settings.update_keys(chat_key, vision_key, chat_base, vision_base,
                          translate_key_new=translate_key, translate_base=translate_base)
+    if premium_key or premium_base:
+        settings.set_premium(premium_base, premium_key)
     return _state()
 
 
