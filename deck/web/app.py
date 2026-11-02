@@ -767,12 +767,33 @@ def chat(req: ChatRequest, request: Request):
 # ---------- 浏览器远程接管（noVNC） ----------
 
 TAKEOVER_HTML = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=yes">
 <title>接管浏览器 · Agent Deck</title>
-<style>html,body{margin:0;height:100%;background:#111}
-#v{width:100%;height:100%;border:0;display:block}</style></head><body>
-<iframe id="v" src="/novnc/vnc.html?autoconnect=1&resize=scale&view_only=0&path=%2Fapi%2Ftakeover%2Fws"></iframe>
-</body></html>"""
+<style>html,body{margin:0;height:100%;background:#111;overflow:hidden;font-family:system-ui}
+#bar{position:fixed;top:0;left:0;right:0;height:46px;display:flex;gap:6px;align-items:center;padding:0 8px;background:#1b1b1f;z-index:9;overflow-x:auto}
+#bar button{flex:0 0 auto;background:#2c2c33;color:#ddd;border:0;border-radius:8px;padding:7px 12px;font-size:13px}
+#bar button.on{background:#4a6cf7;color:#fff}
+#scroller{position:absolute;top:46px;left:0;right:0;bottom:0;overflow:auto;-webkit-overflow-scrolling:touch}
+#wrap{transform-origin:top left;width:1280px;height:800px}
+#v{width:1280px;height:800px;border:0;display:block;background:#000}</style></head><body>
+<div id="bar">
+  <button data-z="fit" class="on">适应</button>
+  <button data-z="0.5">50%</button><button data-z="1">100%</button>
+  <button data-z="1.5">150%</button><button data-z="2">200%</button>
+</div>
+<div id="scroller"><div id="wrap"><iframe id="v" src="/novnc/vnc_lite.html?autoconnect=true&resize=off&path=api/takeover/ws&v=4"></iframe></div></div>
+<script>
+var wrap=document.getElementById('wrap'), sc=document.getElementById('scroller');
+function apply(z){
+  var k = z==='fit' ? Math.min(sc.clientWidth/1280, (window.innerHeight-46)/800) : parseFloat(z);
+  wrap.style.transform='scale('+k+')';
+  wrap.style.width=(1280*k)+'px'; wrap.style.height=(800*k)+'px';
+  document.querySelectorAll('#bar button').forEach(function(b){b.classList.toggle('on', b.dataset.z===z);});
+}
+document.querySelectorAll('#bar button').forEach(function(b){b.onclick=function(){apply(b.dataset.z);};});
+window.addEventListener('resize', function(){var on=document.querySelector('#bar .on'); apply(on?on.dataset.z:'fit');});
+apply('fit');
+</script></body></html>"""
 
 
 @app.get("/takeover")

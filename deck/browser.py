@@ -20,6 +20,7 @@ from .config import (
     BROWSER_BLOCK_ASSETS,
     BROWSER_IDLE_MINUTES,
     BROWSER_MAX_CONTEXTS,
+    BROWSER_MAX_LIFETIME_MINUTES,
     BROWSER_MAX_STEPS,
     BROWSER_PROXY,
     BROWSER_TIMEOUT_MS,
@@ -32,6 +33,8 @@ MAX_IMAGES = 40
 MAX_TEXT = 6000
 LAUNCH_ARGS = [
     "--no-sandbox",
+    "--start-maximized",
+    "--window-size=1280,800",
     "--disable-dev-shm-usage",
     "--disable-gpu",
     "--disable-extensions",
@@ -197,6 +200,7 @@ class BrowserManager:
         self._loop = asyncio.new_event_loop()
         self._pw = None
         self._browser = None
+        self._started = 0.0
         self._thread = threading.Thread(target=self._run_loop, daemon=True,
                                         name="browser-loop")
         self._thread.start()
@@ -222,6 +226,7 @@ class BrowserManager:
         if BROWSER_PROXY:
             kwargs["proxy"] = {"server": BROWSER_PROXY}
         self._browser = await self._pw.chromium.launch(**kwargs)
+        self._started = time.time()
 
     async def _route(self, route):
         try:
@@ -288,6 +293,19 @@ class BrowserManager:
     async def _sweep_once(self):
         now = time.time()
         idle = BROWSER_IDLE_MINUTES * 60
+        if (self._browser is not None and self._started
+                and now - self._started > BROWSER_MAX_LIFETIME_MINUTES * 60):
+            for owner in list(self._sessions):
+                try:
+                    await self._sessions.pop(owner).close()
+                except Exception:               # noqa: BLE001
+                    pass
+            try:
+                await self._browser.close()
+            finally:
+                self._browser = None
+                self._started = 0.0
+            return
         for owner in list(self._sessions):
             sess = self._sessions[owner]
             if now - sess.last > idle:

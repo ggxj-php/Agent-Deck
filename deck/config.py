@@ -215,6 +215,8 @@ TURN_TRIAL_ROUNDS = int(os.environ.get("TURN_TRIAL_ROUNDS", "20") or 6)
 # ---- 浏览器（Playwright + Chromium）----
 BROWSER_HEADLESS = os.environ.get("BROWSER_HEADLESS", "1") != "0"
 BROWSER_IDLE_MINUTES = int(os.environ.get("BROWSER_IDLE_MINUTES", "10") or 10)
+# 浏览器整体最长存活分钟数：到点直接关掉（含窗口），防止挂一整天
+BROWSER_MAX_LIFETIME_MINUTES = int(os.environ.get("BROWSER_MAX_LIFETIME_MINUTES", "30") or 30)
 BROWSER_MAX_CONTEXTS = int(os.environ.get("BROWSER_MAX_CONTEXTS", "2") or 2)
 BROWSER_MAX_STEPS = int(os.environ.get("BROWSER_MAX_STEPS", "60") or 60)
 BROWSER_TIMEOUT_MS = int(os.environ.get("BROWSER_TIMEOUT_MS", "30000") or 30000)
