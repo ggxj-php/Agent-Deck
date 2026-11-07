@@ -773,7 +773,7 @@ TAKEOVER_HTML = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"
 #bar{position:fixed;top:0;left:0;right:0;height:46px;display:flex;gap:6px;align-items:center;padding:0 8px;background:#1b1b1f;z-index:9;overflow-x:auto}
 #bar button{flex:0 0 auto;background:#2c2c33;color:#ddd;border:0;border-radius:8px;padding:7px 12px;font-size:13px}
 #bar button.on{background:#4a6cf7;color:#fff}
-#scroller{position:absolute;top:46px;left:0;right:0;bottom:0;overflow:auto;-webkit-overflow-scrolling:touch}
+#scroller{position:fixed;top:46px;left:0;right:0;bottom:0;overflow:auto;-webkit-overflow-scrolling:touch}
 #wrap{transform-origin:top left;width:1280px;height:800px}
 #v{width:1280px;height:800px;border:0;display:block;background:#000}</style></head><body>
 <div id="bar">
@@ -783,16 +783,37 @@ TAKEOVER_HTML = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"
 </div>
 <div id="scroller"><div id="wrap"><iframe id="v" src="/novnc/vnc_lite.html?autoconnect=true&resize=off&path=api/takeover/ws&v=4"></iframe></div></div>
 <script>
-var wrap=document.getElementById('wrap'), sc=document.getElementById('scroller');
-function apply(z){
-  var k = z==='fit' ? Math.min(sc.clientWidth/1280, (window.innerHeight-46)/800) : parseFloat(z);
-  wrap.style.transform='scale('+k+')';
-  wrap.style.width=(1280*k)+'px'; wrap.style.height=(800*k)+'px';
-  document.querySelectorAll('#bar button').forEach(function(b){b.classList.toggle('on', b.dataset.z===z);});
+var wrap=document.getElementById('wrap'), sc=document.getElementById('scroller'), cur='fit';
+// 可用区域高度自己算：安卓 WebView 里 html/body 的 100% 和 absolute 的 bottom:0 会算成 0，
+// 结果画布被裁成 0 高，屏幕上就只剩一片黑。这里直接按 innerHeight 给像素高度。
+function box(){
+  var vh = window.innerHeight || document.documentElement.clientHeight || 800;
+  var vw = window.innerWidth || document.documentElement.clientWidth || 1280;
+  var h = vh - 46;
+  if (h < 160) h = 160;
+  sc.style.height = h + 'px';
+  return {w: sc.clientWidth || vw, h: h};
 }
-document.querySelectorAll('#bar button').forEach(function(b){b.onclick=function(){apply(b.dataset.z);};});
-window.addEventListener('resize', function(){var on=document.querySelector('#bar .on'); apply(on?on.dataset.z:'fit');});
-apply('fit');
+function apply(z){
+  cur = z;
+  var b = box();
+  var k = z==='fit' ? Math.min(b.w/1280, b.h/800) : parseFloat(z);
+  if (!(k > 0)) k = 1;
+  var dx = Math.max(0, (b.w - 1280*k)/2);
+  var dy = Math.max(0, (b.h - 800*k)/2);
+  wrap.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(' + k + ')';
+  wrap.style.width = (1280*k) + 'px';
+  wrap.style.height = (800*k) + 'px';
+  document.querySelectorAll('#bar button').forEach(function(bt){bt.classList.toggle('on', bt.dataset.z === z);});
+}
+function refit(){ apply(cur); }
+document.querySelectorAll('#bar button').forEach(function(bt){ bt.onclick = function(){ apply(bt.dataset.z); }; });
+window.addEventListener('resize', refit);
+window.addEventListener('orientationchange', function(){ setTimeout(refit, 260); });
+document.getElementById('v').addEventListener('load', refit);
+// 地址栏收放/页面刚出来时 innerHeight 还不准，前 1 秒多补几次
+var n = 0, t = setInterval(function(){ refit(); if (++n > 5) clearInterval(t); }, 200);
+refit();
 </script></body></html>"""
 
 
