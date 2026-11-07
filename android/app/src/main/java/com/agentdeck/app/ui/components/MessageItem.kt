@@ -352,14 +352,14 @@ private fun AssistantMessage(
             message.blocks.forEachIndexed { index, block ->
                 when (block) {
                     is Block.Text -> {
-                        androidx.compose.foundation.text.selection.SelectionContainer {
-                            MarkdownWithStickers(
-                                markdown = block.markdown,
-                                palette = palette,
-                                baseUrl = baseUrl,
-                                onPreview = onPreview,
-                            )
-                        }
+                        // 选择容器下沉到 MarkdownText 内部：下载卡片 / 图片不参与选中，
+                        // 否则「选中过文字」时点卡片按钮只清选区，按钮像坏了一样
+                        MarkdownWithStickers(
+                            markdown = block.markdown,
+                            palette = palette,
+                            baseUrl = baseUrl,
+                            onPreview = onPreview,
+                        )
                     }
 
                     is Block.Thinking -> ThinkingCard(block, palette)

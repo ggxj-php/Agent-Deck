@@ -2,6 +2,7 @@ package com.agentdeck.app.ui.components
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -46,6 +47,21 @@ fun DownloadCard(
 ) {
     val context = LocalContext.current
     val fullUrl = if (path.startsWith("http")) path else baseUrl + path
+    // baseUrl 偶尔是空的（老数据 / 历史消息），拼出来就是 /d/xxx：OkHttp 直接抛异常、
+    // 浏览器也打不开，用户看到的就是「点了没反应」。先认出来，把原因说清楚。
+    val absolute = fullUrl.startsWith("http://") || fullUrl.startsWith("https://")
+    fun toast(text: String) = Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+    fun openInBrowser() {
+        if (!absolute) {
+            toast("下载地址不完整，刷新一下会话再试")
+            return
+        }
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fullUrl))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { context.startActivity(intent) }.isFailure) {
+            toast("没有能打开网页的浏览器")
+        }
+    }
     // /d/<token> 的末段是 token，直接用会把文件名存成哈希；链接文字有扩展名时优先用它
     val fallbackName = label.takeIf { it.contains('.') && it.length <= 80 }
         ?: path.trimEnd('/').substringAfterLast('/').ifBlank { "附件" }
@@ -84,16 +100,15 @@ fun DownloadCard(
                     horizontalArrangement = Arrangement.End,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    TextButton(onClick = { DownloadCenter.start(fullUrl, fallbackName) }) {
+                    TextButton(onClick = {
+                        if (absolute) DownloadCenter.start(fullUrl, fallbackName)
+                        else toast("下载地址不完整，刷新一下会话再试")
+                    }) {
                         Text("App 内下载", fontSize = 12.5.sp, color = palette.accent)
                     }
-                    TextButton(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fullUrl))
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            runCatching { context.startActivity(intent) }
-                        },
-                    ) { Text("用浏览器", fontSize = 12.5.sp, color = palette.inkSoft) }
+                    TextButton(onClick = { openInBrowser() }) {
+                        Text("用浏览器", fontSize = 12.5.sp, color = palette.inkSoft)
+                    }
                 }
 
                 DownloadStatus.RUNNING -> {

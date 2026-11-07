@@ -110,8 +110,15 @@ object DownloadCenter {
         update { it + task }
 
         scope.launch {
-            val request = Request.Builder().url(url).header("Accept", "*/*").build()
-            val call = DeckApp.instance.api.httpClient.newCall(request)
+            // url 不是绝对地址时 Request.Builder().url() 会直接抛异常，放在 try 外面
+            // 会把整个进程带崩，所以构建请求也一起包进来
+            val call = try {
+                val request = Request.Builder().url(url).header("Accept", "*/*").build()
+                DeckApp.instance.api.httpClient.newCall(request)
+            } catch (error: Exception) {
+                fail(id, error.message ?: "下载地址无效")
+                return@launch
+            }
             calls[id] = call
             try {
                 call.execute().use { response ->
