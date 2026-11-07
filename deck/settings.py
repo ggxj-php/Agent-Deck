@@ -92,6 +92,9 @@ def _load():
         "model_history": [m for m in history if isinstance(m, str)] if isinstance(history, list) else [],
         "premium_base": str(raw.get("premium_base") or "https://api.deepseek.com").rstrip("/"),
         "premium_key": str(raw.get("premium_key") or ""),
+        # 自建 OCR（xiaomi-orc-0）：整条接口地址 + token，都在后台改
+        "ocr_url": str(raw.get("ocr_url") or "").rstrip("/"),
+        "ocr_token": str(raw.get("ocr_token") or ""),
     }
     return _cache
 
@@ -239,6 +242,26 @@ def set_premium(base="", key=""):
             data["premium_base"] = base.strip().rstrip("/")
         if key:
             data["premium_key"] = key.strip()
+        _write(data)
+
+
+def ocr_url():
+    """自建 OCR（xiaomi-orc-0）的接口地址，形如 http://1.2.3.4:8765/ocr（后台可改）。"""
+    return _load()["ocr_url"]
+
+
+def ocr_token():
+    """OCR 服务的 token；空的就不带 token 参数（本机服务常见）。"""
+    return _load()["ocr_token"]
+
+
+def set_ocr(url="", token=""):
+    with _lock:
+        data = _load()
+        if url:
+            data["ocr_url"] = url.strip().rstrip("/")
+        if token:
+            data["ocr_token"] = token.strip()
         _write(data)
 
 
