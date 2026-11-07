@@ -29,6 +29,12 @@ class DeckApp : Application() {
         // 装崩溃兜底：出错不闪退，先存日志、开崩溃页，再尝试上报
         CrashReporter.install(this)
         CrashReporter.uploadPending(this)
+
+        // 只有 debug 包开远程调试：接管浏览器用的是 noVNC（跑在 WebView 的 iframe 里），
+        // 黑屏时可以直接 chrome://inspect 连上去看它到底卡在哪一步
+        if (BuildConfig.DEBUG) {
+            android.webkit.WebView.setWebContentsDebuggingEnabled(true)
+        }
     }
 
     companion object {

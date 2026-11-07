@@ -38,7 +38,7 @@ private fun mix(base: Color, target: Color, ratio: Float): Color = Color(
 
 /** 对应网页端：mixColor(theme, 'white'|'black', ratio)。 */
 fun paletteFor(themeHex: String): DeckPalette {
-    val accent = parseHex(themeHex) ?: Color(0xFFFFB7D5)
+    val accent = parseHex(themeHex) ?: Color(0xFF5B6B8C)
     val white = Color.White
     val black = Color.Black
     return DeckPalette(
@@ -67,4 +67,4 @@ private fun parseHex(raw: String): Color? {
     }
 }
 
-val LocalPalette = staticCompositionLocalOf { paletteFor("#ffb7d5") }
+val LocalPalette = staticCompositionLocalOf { paletteFor("#5b6b8c") }

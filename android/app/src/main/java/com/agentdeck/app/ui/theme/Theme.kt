@@ -17,7 +17,7 @@ import androidx.compose.ui.unit.sp
  * 换人设 = 换顶栏渐变、气泡、按钮、背景，和网页端一样。
  */
 @Composable
-fun DeckTheme(accentHex: String = "#ffb7d5", content: @Composable () -> Unit) {
+fun DeckTheme(accentHex: String = "#5b6b8c", content: @Composable () -> Unit) {
     val palette = remember(accentHex) { paletteFor(accentHex) }
     val scheme = lightColorScheme(
         primary = palette.accent,

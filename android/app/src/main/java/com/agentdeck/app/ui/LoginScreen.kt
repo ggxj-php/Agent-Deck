@@ -84,8 +84,8 @@ fun LoginScreen(
 
     val register = state.authMode == AuthMode.REGISTER
     val loading = state.loggingIn
-    // 服务器还是占位地址时，登录按钮没意义——先把地址填上
-    val blocked = state.needsServer && editingServer
+    // 服务器还是占位地址时，登录按钮没意义——先把地址填上（不开源包才有这个输入框）
+    val blocked = BuildConfig.ALLOW_SERVER_SWITCH && state.needsServer && editingServer
 
     Box(
         modifier = Modifier
@@ -136,23 +136,26 @@ fun LoginScreen(
                     textAlign = TextAlign.Center,
                 )
 
-                Spacer(Modifier.height(14.dp))
-                ServerBlock(
-                    value = serverInput,
-                    current = state.serverUrl,
-                    editing = editingServer,
-                    required = state.needsServer,
-                    enabled = !loading,
-                    palette = palette,
-                    onValueChange = { serverInput = it.take(200) },
-                    onToggle = { editingServer = !editingServer },
-                    onConnect = {
-                        if (serverInput.isNotBlank()) {
-                            editingServer = false
-                            onSetServer(serverInput.trim())
-                        }
-                    },
-                )
+                // 上线的私有包把地址写死在包里，不给用户改；只有开源包（自己部署）才显示这一块
+                if (BuildConfig.ALLOW_SERVER_SWITCH) {
+                    Spacer(Modifier.height(14.dp))
+                    ServerBlock(
+                        value = serverInput,
+                        current = state.serverUrl,
+                        editing = editingServer,
+                        required = state.needsServer,
+                        enabled = !loading,
+                        palette = palette,
+                        onValueChange = { serverInput = it.take(200) },
+                        onToggle = { editingServer = !editingServer },
+                        onConnect = {
+                            if (serverInput.isNotBlank()) {
+                                editingServer = false
+                                onSetServer(serverInput.trim())
+                            }
+                        },
+                    )
+                }
 
                 Spacer(Modifier.height(18.dp))
                 AuthTabs(state.authMode, palette, onSwitchMode)

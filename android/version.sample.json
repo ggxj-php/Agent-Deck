@@ -1,6 +1,6 @@
 {
-  "versionCode": 14,
-  "versionName": "1.13",
+  "versionCode": 15,
+  "versionName": "1.14",
   "notes": "把这份文件放到服务器的 /static/app-version.json，App 就会提示更新。\nversionCode 必须大于 App 里的 versionCode。",
   "url": "https://your-server.example/downloads"
 }

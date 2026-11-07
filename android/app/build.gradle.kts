@@ -35,8 +35,8 @@ android {
         applicationId = "com.agentdeck.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 14
-        versionName = "1.13"
+        versionCode = 15
+        versionName = "1.14"
     }
 
     // 品牌覆盖：app/src/local/ 放私有名字和头像图标（该目录已被 gitignore 忽略），
@@ -47,11 +47,15 @@ android {
             dimension = "brand"
             // 开源包：绝不读 local.properties
             buildConfigField("String", "BASE_URL", "\"$openBaseUrl\"")
+            // 开源包是给别人自己部署的，必须能在登录页填服务器
+            buildConfigField("boolean", "ALLOW_SERVER_SWITCH", "true")
         }
         create("local") {
             dimension = "brand"
             // 私有包：本机配置的地址（改 local.properties 或设 DECK_BASE_URL）
             buildConfigField("String", "BASE_URL", "\"$privateBaseUrl\"")
+            // 上线的私有包：地址写死在包里，不提供「切换服务器」
+            buildConfigField("boolean", "ALLOW_SERVER_SWITCH", "false")
         }
     }
 

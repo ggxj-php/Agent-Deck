@@ -11,7 +11,7 @@ data class Persona(
     val placeholder: String = "",
     val statusOnline: String = "",
     val statusThinking: String = "",
-    val theme: String = "#ffb7d5",
+    val theme: String = "#5b6b8c",
 ) {
     /** 头像/图标是相对路径，拼成完整 URL 交给 Coil。 */
     fun avatarUrl(baseUrl: String): String =
@@ -75,6 +75,22 @@ data class HistoryPage(
     val history: List<HistoryItem>,
     val context: ContextUsage,
 )
+
+/**
+ * 一个已安装的技能（`GET /api/skills`）。
+ *
+ * 和网页端侧边栏「技能」同一份数据：只是「有哪些技能可以让我用」的展示，
+ * 安装 / 启停都在后台做，客户端只读。
+ */
+data class SkillInfo(
+    val name: String = "",
+    val descriptionZh: String = "",
+    val description: String = "",
+) {
+    /** 中文说明优先，没有就退回英文原文；都没有就给个占位。 */
+    val summary: String
+        get() = descriptionZh.ifBlank { description }.ifBlank { "暂无说明" }
+}
 
 /** 已上传的附件（服务端只回 id/名字/大小，内容按 id 引用）。 */
 data class UploadedFile(

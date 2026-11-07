@@ -111,11 +111,15 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
     var previewUrl by remember { mutableStateOf<String?>(null) }
     var showDownloads by remember { mutableStateOf(false) }
     var showIssues by remember { mutableStateOf(false) }
+    var showSkills by remember { mutableStateOf(false) }
+    var showTakeover by remember { mutableStateOf(false) }
     var confirmExit by remember { mutableStateOf(false) }
     val activity = LocalContext.current as? android.app.Activity
 
     // 返回键：抽屉开着先收抽屉；否则问一句再退出（和网页端 close 确认一个意思）
-    androidx.activity.compose.BackHandler(enabled = !showDownloads && !showIssues) {
+    androidx.activity.compose.BackHandler(
+        enabled = !showDownloads && !showIssues && !showSkills && !showTakeover,
+    ) {
         if (drawerState.isOpen) {
             scope.launch { drawerState.close() }
         } else {
@@ -161,6 +165,16 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
         return
     }
 
+    if (showSkills) {
+        SkillsScreen(palette) { showSkills = false }
+        return
+    }
+
+    if (showTakeover) {
+        TakeoverScreen(palette) { showTakeover = false }
+        return
+    }
+
     LaunchedEffect(state.toast) {
         state.toast?.let { message ->
             snackbar.showSnackbar(message)
@@ -193,6 +207,8 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                     onChangePassword = { showPasswordDialog = true },
                     onOpenDownloads = { showDownloads = true },
                     onOpenIssues = { showIssues = true },
+                    onOpenSkills = { showSkills = true },
+                    onOpenTakeover = { showTakeover = true },
                     onCheckUpdate = { viewModel.checkForUpdate(manual = true) },
                     onOpenAccount = { showAccount = true },
                 )
@@ -535,46 +551,55 @@ private fun AccountSheet(
 
             AccountInfoRow("注册时间", formatAccountDate(state.account?.createdAt ?: 0.0), palette)
             AccountInfoRow("我的会话", "${state.accountSessions} 条", palette)
-            AccountInfoRow(
-                label = "服务器",
-                value = state.serverUrl.ifBlank { "未配置" },
-                palette = palette,
-                trailing = "切换",
-                onTrailing = {
-                    serverInput = state.serverUrl
-                    editingServer = !editingServer
-                },
-            )
-
-            if (editingServer) {
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = serverInput,
-                    onValueChange = { serverInput = it.take(200) },
-                    singleLine = true,
-                    label = { Text("服务器地址（如 https://你的域名）", fontSize = 11.5.sp) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = palette.accent,
-                        unfocusedBorderColor = palette.line,
-                        focusedLabelColor = palette.accent,
-                        cursorColor = palette.accent,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
+            if (BuildConfig.ALLOW_SERVER_SWITCH) {
+                AccountInfoRow(
+                    label = "服务器",
+                    value = state.serverUrl.ifBlank { "未配置" },
+                    palette = palette,
+                    trailing = "切换",
+                    onTrailing = {
+                        serverInput = state.serverUrl
+                        editingServer = !editingServer
+                    },
                 )
-                Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = {
-                        val url = serverInput.trim()
-                        if (url.isNotEmpty()) {
-                            editingServer = false
-                            onDismiss()
-                            onSetServer(url)
+
+                if (editingServer) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = serverInput,
+                        onValueChange = { serverInput = it.take(200) },
+                        singleLine = true,
+                        label = { Text("服务器地址（如 https://你的域名）", fontSize = 11.5.sp) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = palette.accent,
+                            unfocusedBorderColor = palette.line,
+                            focusedLabelColor = palette.accent,
+                            cursorColor = palette.accent,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = {
+                            val url = serverInput.trim()
+                            if (url.isNotEmpty()) {
+                                editingServer = false
+                                onDismiss()
+                                onSetServer(url)
+                            }
+                        }) { Text("保存并重连", color = palette.accent, fontSize = 13.sp) }
+                        TextButton(onClick = { editingServer = false }) {
+                            Text("取消", color = palette.inkSoft, fontSize = 13.sp)
                         }
-                    }) { Text("保存并重连", color = palette.accent, fontSize = 13.sp) }
-                    TextButton(onClick = { editingServer = false }) {
-                        Text("取消", color = palette.inkSoft, fontSize = 13.sp)
                     }
                 }
+            } else {
+                // 上线的私有包：地址写死，只读展示，没有「切换」
+                AccountInfoRow(
+                    label = "服务器",
+                    value = state.serverUrl.ifBlank { "已内置" },
+                    palette = palette,
+                )
             }
 
             Spacer(Modifier.height(14.dp))
@@ -1053,6 +1078,8 @@ private fun DrawerContent(
     onChangePassword: () -> Unit,
     onOpenDownloads: () -> Unit,
     onOpenIssues: () -> Unit,
+    onOpenSkills: () -> Unit,
+    onOpenTakeover: () -> Unit,
     onCheckUpdate: () -> Unit,
     onOpenAccount: () -> Unit,
 ) {
@@ -1161,11 +1188,21 @@ private fun DrawerContent(
             }
         }
 
+        // 对齐网页端侧边栏这一轮新增的两个入口：技能（只读）、接管浏览器（noVNC 画面）
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 10.dp),
+        ) {
+            DrawerFootButton("技能", palette, onOpenSkills, Modifier.weight(1f))
+            DrawerFootButton("接管浏览器", palette, onOpenTakeover, Modifier.weight(1f))
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
         ) {
             DrawerFootButton("下载管理", palette, onOpenDownloads, Modifier.weight(1f))
             DrawerFootButton("意见反馈", palette, onOpenIssues, Modifier.weight(1f))

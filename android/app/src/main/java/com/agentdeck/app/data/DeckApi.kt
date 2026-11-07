@@ -172,7 +172,7 @@ class DeckApi(context: android.content.Context) {
             placeholder = obj.optString("placeholder"),
             statusOnline = obj.optString("status_online"),
             statusThinking = obj.optString("status_thinking"),
-            theme = obj.optString("theme", "#ffb7d5"),
+            theme = obj.optString("theme", "#5b6b8c"),
         )
     }
 
@@ -314,6 +314,28 @@ class DeckApi(context: android.content.Context) {
         runCatching {
             android.webkit.CookieManager.getInstance().setCookie(baseUrl, cookie)
             android.webkit.CookieManager.getInstance().flush()
+        }
+    }
+
+    // ---------------- 技能 ----------------
+
+    /**
+     * 服务器上已安装的技能（只读）。
+     *
+     * 接口是公开的（网页端侧边栏也直接拉），字段 `description_zh` 是后台维护的中文说明，
+     * 没维护过的老技能只有英文 `description`，前端自己兜底。
+     */
+    suspend fun skills(): List<SkillInfo> {
+        val obj = JSONObject(call("GET", "/api/skills", null))
+        val array = obj.optJSONArray("skills") ?: JSONArray()
+        return (0 until array.length()).mapNotNull { index ->
+            val item = array.optJSONObject(index) ?: return@mapNotNull null
+            val name = item.optString("name")
+            if (name.isBlank()) null else SkillInfo(
+                name = name,
+                descriptionZh = item.optString("description_zh"),
+                description = item.optString("description"),
+            )
         }
     }
 
