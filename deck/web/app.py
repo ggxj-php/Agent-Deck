@@ -40,6 +40,7 @@ from . import stickers
 from .admin import router as admin_router
 from .content import router as content_router
 from .issues import router as issues_router
+from .live import hub, stream_turn
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -718,16 +719,19 @@ def chat(req: ChatRequest, request: Request):
     lock = _session_lock(req.session_id)
     owner_id = user["id"]
 
-    def events():
+    def work(turn):
         # 同一个会话串行处理，避免两条消息交叉写乱历史
         with lock:
             history = store.load_messages(req.session_id, for_model=True)
             agent = DeckAgent(messages=history, cut_off=bool(sess["cut_off"]),
                               owner=owner_id, interactive=interactive)
             is_first = not history
-            artifacts = []
+            seq = 0
             try:
                 for event in agent.ask_stream(req.message, req.image, req.thinking, req.images):
+                    # 用户按了「停止」：跳出循环。agent 的 finally 会把已跑出来的历史落库
+                    if turn.cancelled:
+                        break
                     # 画图工具产物：顺手落库，并把「卡片标记」记下来，
                     # 刷新页面后前端才能把那张图重新渲染出来
                     if isinstance(event, dict) and event.get("type") == "artifact":
@@ -740,25 +744,80 @@ def chat(req: ChatRequest, request: Request):
                                     event.get("title") or item.get("title") or "",
                                     item.get("html") or "",
                                 )
-                                artifacts.append((aid, event.get("title") or ""))
                         except Exception:        # noqa: BLE001
                             pass
-                    yield f"data: {_sse_payload(event)}\n\n"
+                    turn.push(f"id: {seq}\ndata: {_sse_payload(event)}\n\n")
+                    seq += 1
             finally:
-                # 不管正常结束、报错还是浏览器中途断开，都把这次跑出来的历史落库
+                # 不管正常结束、报错还是客户端全断了，都把这次跑出来的历史落库
                 try:
-                    # 产物标记 core 已经写进对应那条 assistant 了（位置才准），这里只落库
                     messages = list(agent.messages[1:])
                     store.save_messages(
                         req.session_id, messages, agent.cut_off,
                         first_user_text=(req.message if is_first else ""),
                     )
                 except Exception:            # noqa: BLE001
-                    pass                     # 落库失败别把已经吐出去的流搞断
-        yield "data: [DONE]\n\n"
+                    pass                     # 落库失败别影响已经吐出去的流
 
+    # 这一轮跑在后台线程里，HTTP 连接只是订阅者：网页关掉、App 切后台都不影响它。
+    current = hub.live(req.session_id)
+    if current is not None and current.state()["running"]:
+        raise HTTPException(status_code=409, detail="上一条还在回，等它说完再发")
+    turn = hub.start(req.session_id, owner_id, work)
+    if turn is None:
+        raise HTTPException(status_code=409, detail="上一条还在回，等它说完再发")
     return StreamingResponse(
-        events(),
+        stream_turn(turn, 0, request),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+class ChatStop(BaseModel):
+    session_id: str
+
+
+@app.post("/api/chat/stop")
+def chat_stop(req: ChatStop, request: Request):
+    """停掉这个会话正在跑的那一轮。
+
+    以前「停止」是靠客户端拔连接、让生成器崩掉实现的；现在生成跑在后台线程里，
+    不看连接，得单独叫一声——不然按了停止它还在闷头烧 token。
+    """
+    user = _user_of(request)
+    turn = hub.live(req.session_id)
+    if not turn or turn.owner_id != user["id"]:
+        return {"ok": False, "reason": "没有在跑的回复"}
+    turn.cancel()
+    return {"ok": True}
+
+
+@app.get("/api/chat/live")
+def chat_live(session_id: str, request: Request):
+    """这个会话现在还在不在跑。App 切回前台时问一句：还在跑就把画面接回去。"""
+    user = _user_of(request)
+    if not store.get(user["id"], session_id):
+        raise HTTPException(status_code=404, detail="会话不存在喵（可能被删了）")
+    turn = hub.live(session_id)
+    if not turn or turn.owner_id != user["id"]:
+        return {"session_id": session_id, "running": False}
+    return {"session_id": session_id, **turn.state()}
+
+
+@app.get("/api/chat/live/stream")
+async def chat_live_stream(session_id: str, request: Request, since: int = 0):
+    """从 since（第几个事件）开始接着收。断线重连走这里，不用重新发问。
+
+    已经跑完但还在残留期内的轮次也能从头重放一遍，客户端错过整轮时靠这个补。
+    """
+    user = _user_of(request)
+    if not store.get(user["id"], session_id):
+        raise HTTPException(status_code=404, detail="会话不存在喵（可能被删了）")
+    turn = hub.live(session_id)
+    if not turn or turn.owner_id != user["id"]:
+        raise HTTPException(status_code=404, detail="没有正在跑的回复")
+    return StreamingResponse(
+        stream_turn(turn, since, request),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
