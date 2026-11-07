@@ -641,9 +641,21 @@ function linkifyDownloads(text) {
   );
 }
 
+/* 表情包占位符 @@sticker:N@@ 是我们自己往正文里塞的。
+   它要是正好贴在 ``` / ## / - / > / | 前面，那一行就不再以块级标记开头了，
+   markdown 会把围栏当普通文字，代码块只剩一片空白、正文跑到卡片外面
+   （2026-11-07 用户截图反馈的就是这条）。渲染前统一补空行。 */
+function normalizeBlockBreaks(text) {
+  return String(text || '')
+    .replace(/(@@sticker:\d+@@)[ \t]*(```|~~~)/g, '$1\n\n$2')
+    .replace(/(@@sticker:\d+@@)[ \t]*(#{1,6}\s)/g, '$1\n\n$2')
+    .replace(/(@@sticker:\d+@@)(?=[-+]\s|\d+[.)]\s|>\s|\|)/g, '$1\n\n');
+}
+
 function renderMarkdown(text) {
   mathBag = [];
-  const html = DOMPurify.sanitize(marked.parse(mathify(linkifyDownloads(text))), SANITIZE_CONFIG);
+  const src = normalizeBlockBreaks(linkifyDownloads(text));
+  const html = DOMPurify.sanitize(marked.parse(mathify(src)), SANITIZE_CONFIG);
   lastMathBag = mathBag;
   mathBag = [];
   return html;
@@ -1333,7 +1345,7 @@ function flushQueuedStickers(turn, force) {
   if (!turn.content) {
     if (!force) return;
     const idx = turn.queuedStickers.splice(0);
-    idx.forEach((i) => contentChunk(turn, `@@sticker:${i}@@`));
+    idx.forEach((i) => contentChunk(turn, `@@sticker:${i}@@\n`));
     return;
   }
   const endsAtBoundary = /[。！？!?…；;\n]\s*$/.test(turn.content.raw);
@@ -1342,7 +1354,10 @@ function flushQueuedStickers(turn, force) {
   const fences = (turn.content.raw.match(/```/g) || []).length;
   if (!force && fences % 2 === 1) return;
   const index = turn.queuedStickers.shift();
-  contentChunk(turn, `@@sticker:${index}@@`);
+  // 占位符必须独占一行：只贴在换行后面的话，下一段正文要是以 ``` 开头就被粘住，
+  // 围栏不再是行首，整个代码块当场塌成普通文字。前后各留一个换行最稳。
+  const lead = /\n$/.test(turn.content.raw) ? '' : '\n';
+  contentChunk(turn, `${lead}@@sticker:${index}@@\n`);
   if (force && turn.queuedStickers.length) flushQueuedStickers(turn, true);
 }
 
