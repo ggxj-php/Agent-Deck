@@ -402,6 +402,62 @@ class DeckApi(context: android.content.Context) {
         }
     }
 
+    // ---------------- 视频任务 ----------------
+
+    /**
+     * 我的视频任务（只列自己的）。
+     *
+     * 生成走对话里的 `generate_video` 工具，App 这边不提交、也不轮询远端渲染服务：
+     * 打开页面时拉一次，有任务在跑时页面自己每 10 秒再拉一次，服务端那边带冷却。
+     */
+    suspend fun videos(): VideoFeed {
+        val obj = JSONObject(call("GET", "/api/videos", null))
+        val array = obj.optJSONArray("items") ?: JSONArray()
+        val items = (0 until array.length()).mapNotNull { index ->
+            array.optJSONObject(index)?.let { parseVideo(it) }
+        }
+        val summary = obj.optJSONObject("summary")
+        return VideoFeed(
+            items = items,
+            active = summary?.optInt("active") ?: items.count { it.active },
+            done = summary?.optInt("done") ?: items.count { it.state == "done" },
+            total = summary?.optInt("total") ?: items.size,
+            configured = obj.optBoolean("configured", true),
+        )
+    }
+
+    /** 取消排队中的任务（已经在渲染的会被服务端拒掉，原因直接给用户看）。 */
+    suspend fun cancelVideo(id: String) {
+        call("POST", "/api/videos/$id/cancel", "{}")
+    }
+
+    /** 从列表里删掉一条记录（只删记录，远端产物不动）。 */
+    suspend fun deleteVideo(id: String) {
+        call("DELETE", "/api/videos/$id", null)
+    }
+
+    /** 成片地址：服务端代理，走登录 cookie，令牌不出服务端。 */
+    fun videoFileUrl(id: String): String = baseUrl.trimEnd('/') + "/api/videos/" + id + "/file"
+
+    private fun parseVideo(item: JSONObject): VideoJob {
+        val position = if (item.isNull("position")) null else item.optInt("position")
+        return VideoJob(
+            id = item.optString("id"),
+            topic = item.optString("topic"),
+            title = item.optString("title"),
+            state = item.optString("state").ifBlank { "queued" },
+            stageText = item.optString("stage_text"),
+            percent = item.optInt("percent"),
+            position = position,
+            error = item.optString("error"),
+            duration = item.optInt("duration"),
+            durationSeconds = item.optDouble("duration_seconds", 0.0),
+            tts = item.optBoolean("tts", true),
+            createdAt = item.optDouble("created_at", 0.0),
+            eta = item.optString("eta"),
+        )
+    }
+
     // ---------------- 用户反馈 ----------------
 
     /** 提一条反馈。图片是 data URL 列表，服务端会自己落盘并按 id 归档。 */

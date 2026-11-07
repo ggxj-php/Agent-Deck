@@ -109,6 +109,7 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showAccount by remember { mutableStateOf(false) }
     var showDownloads by remember { mutableStateOf(false) }
+    var showVideos by remember { mutableStateOf(false) }
     var showIssues by remember { mutableStateOf(false) }
     var showSkills by remember { mutableStateOf(false) }
     var showTakeover by remember { mutableStateOf(false) }
@@ -117,7 +118,7 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
 
     // 返回键：抽屉开着先收抽屉；否则问一句再退出（和网页端 close 确认一个意思）
     androidx.activity.compose.BackHandler(
-        enabled = !showDownloads && !showIssues && !showSkills && !showTakeover,
+        enabled = !showDownloads && !showVideos && !showIssues && !showSkills && !showTakeover,
     ) {
         if (drawerState.isOpen) {
             scope.launch { drawerState.close() }
@@ -156,6 +157,11 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
 
     if (showDownloads) {
         DownloadCenterScreen(palette) { showDownloads = false }
+        return
+    }
+
+    if (showVideos) {
+        VideosScreen(palette) { showVideos = false }
         return
     }
 
@@ -217,6 +223,10 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                     onOpenSkills = {
                         scope.launch { drawerState.close() }
                         showSkills = true
+                    },
+                    onOpenVideos = {
+                        scope.launch { drawerState.close() }
+                        showVideos = true
                     },
                     onOpenTakeover = {
                         scope.launch { drawerState.close() }
@@ -1089,6 +1099,7 @@ private fun DrawerContent(
     onLogout: () -> Unit,
     onChangePassword: () -> Unit,
     onOpenDownloads: () -> Unit,
+    onOpenVideos: () -> Unit,
     onOpenIssues: () -> Unit,
     onOpenSkills: () -> Unit,
     onOpenTakeover: () -> Unit,
@@ -1207,8 +1218,8 @@ private fun DrawerContent(
                 .fillMaxWidth()
                 .padding(top = 10.dp),
         ) {
+            DrawerFootButton("我的视频", palette, onOpenVideos, Modifier.weight(1f))
             DrawerFootButton("技能", palette, onOpenSkills, Modifier.weight(1f))
-            DrawerFootButton("接管浏览器", palette, onOpenTakeover, Modifier.weight(1f))
         }
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1216,7 +1227,15 @@ private fun DrawerContent(
                 .fillMaxWidth()
                 .padding(top = 6.dp),
         ) {
+            DrawerFootButton("接管浏览器", palette, onOpenTakeover, Modifier.weight(1f))
             DrawerFootButton("下载管理", palette, onOpenDownloads, Modifier.weight(1f))
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+        ) {
             DrawerFootButton("意见反馈", palette, onOpenIssues, Modifier.weight(1f))
             DrawerFootButton("检查更新", palette, onCheckUpdate, Modifier.weight(1f))
         }

@@ -255,10 +255,16 @@ internal object DownloadSaver {
         }
         val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val uri = resolver.insert(collection, values) ?: return null
-        input.use { source ->
-            resolver.openOutputStream(uri)?.use { target ->
-                copy(source, target, total, onProgress)
-            } ?: return null
+        // 写失败/超时一定要把这条 pending 记录删掉：否则「下载」目录里会留下一堆
+        // .pending-xxx 的半截文件，用户看不到、也清不掉（视频这种大文件尤其明显）
+        try {
+            input.use { source ->
+                val target = resolver.openOutputStream(uri) ?: error("打不开写入流")
+                target.use { copy(source, it, total, onProgress) }
+            }
+        } catch (error: Throwable) {
+            runCatching { resolver.delete(uri, null, null) }
+            throw error
         }
         values.clear()
         values.put(MediaStore.Downloads.IS_PENDING, 0)

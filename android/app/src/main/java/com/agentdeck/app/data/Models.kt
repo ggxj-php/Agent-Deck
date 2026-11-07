@@ -107,6 +107,44 @@ data class Captcha(
 )
 
 /**
+ * 一条视频生成任务（`GET /api/videos` 里的一项）。
+ *
+ * 服务端只把**自己的**任务给出来，所以这里不需要再判断归属。
+ * state：queued 排队 / running 渲染 / done 出片 / failed / cancelled。
+ * position 只有排队时有值（1 = 下一个），progress 是 0~1。
+ */
+data class VideoJob(
+    val id: String = "",
+    val topic: String = "",
+    val title: String = "",
+    val state: String = "queued",
+    val stageText: String = "",
+    val percent: Int = 0,
+    val position: Int? = null,
+    val error: String = "",
+    val duration: Int = 0,
+    val durationSeconds: Double = 0.0,
+    val tts: Boolean = true,
+    val createdAt: Double = 0.0,
+    val eta: String = "",
+) {
+    val displayName: String get() = title.ifBlank { topic }.ifBlank { "未命名任务" }
+    val active: Boolean get() = state == "queued" || state == "running"
+    val canDownload: Boolean get() = state == "done"
+    val canCancel: Boolean get() = state == "queued"
+    val failed: Boolean get() = state == "failed"
+}
+
+/** 列表 + 顶部那几个数（服务端已经按当前用户统计过）。 */
+data class VideoFeed(
+    val items: List<VideoJob> = emptyList(),
+    val active: Int = 0,
+    val done: Int = 0,
+    val total: Int = 0,
+    val configured: Boolean = true,
+)
+
+/**
  * 一条用户反馈（issue）。
  *
  * status：`pending` 审核中 / `accepted` 已采纳 / `rejected` 已打回。
