@@ -3,6 +3,12 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 回复期间挂前台服务：进程活着、CPU 不睡，切到别的应用也能把这一轮收完 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Android 9 及以下把附件存到公共下载目录才需要 -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
@@ -37,6 +43,13 @@
             android:exported="false"
             android:launchMode="singleTask"
             android:theme="@style/Theme.AgentDeck" />
+
+        <!-- 回复期间常驻：stopWithTask=false，从最近任务里划掉 App 也不打断这一轮 -->
+        <service
+            android:name=".service.ChatService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

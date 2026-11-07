@@ -15,6 +15,7 @@ import com.agentdeck.app.data.Persona
 import com.agentdeck.app.data.SessionSummary
 import com.agentdeck.app.data.UpdateChecker
 import com.agentdeck.app.data.UploadedFile
+import com.agentdeck.app.service.ChatForeground
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,6 +37,9 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
     private var nextId = 1L
     private var stickerLib: Map<String, List<String>> = emptyMap()
     private var sendJob: Job? = null
+
+    /** 用户主动按了停止：流被掐断时不该再画一个「断在半路」的报错。 */
+    private var stopping = false
 
     init {
         boot()
@@ -348,6 +352,8 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                         currentSessionId = id,
                     )
                 }
+                // 这个会话在服务器上可能还挂着一轮（重开 App、切回这个会话都会走到这儿）
+                runCatching { reattachIfRunning() }
             } catch (error: Exception) {
                 report(error)
             }
@@ -394,6 +400,10 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
 
         sendJob = viewModelScope.launch {
             val sessionId = ensureSession() ?: return@launch
+            // 先挂前台服务再发请求：切到别的应用、锁屏都别让这条流断掉
+            ChatForeground.start(DeckApp.instance, sessionId)
+            stopping = false
+            ChatForeground.userStopped = false
             val userId = nextId++
             val assistantId = nextId++
             _state.update { current ->
@@ -429,19 +439,41 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                     files = files.map { it.id },
                 ) { event -> handle(event) }
             } catch (error: Exception) {
-                val reason: String = when (error) {
-                    is DeckException -> error.message ?: "请求失败"
-                    else -> "这条回复断在半路了：${error.message ?: "网络波动"}"
+                if (wasStopped()) {
+                    handle(ChatEvent.Notice("已停止"))
+                } else {
+                    val reason: String = when (error) {
+                        is DeckException -> error.message ?: "请求失败"
+                        else -> "这条回复断在半路了：${error.message ?: "网络波动"}"
+                    }
+                    handle(ChatEvent.Error(reason))
                 }
-                handle(ChatEvent.Error(reason))
             } finally {
                 finishTurn(sessionId)
             }
         }
     }
 
+    /** 是「用户按了停止」而不是网络出问题吗？界面上这两种情况的提示完全不同。 */
+    private fun wasStopped(): Boolean {
+        val stopped = stopping || ChatForeground.userStopped
+        stopping = false
+        ChatForeground.userStopped = false
+        return stopped
+    }
+
     fun stop() {
+        stopping = true
+        // 先把服务器上那一轮叫停（现在它跑在后台线程里，拔连接已经不管用了），
+        // 再掐掉本地这条流
+        val sessionId = _state.value.currentSessionId
+        if (sessionId != null) {
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                api.requestStop(sessionId)
+            }
+        }
         api.cancelChat()
+        ChatForeground.update("正在停止…")
     }
 
     /**
@@ -492,8 +524,10 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
         // 这一轮结束了：先把攒着的正文落盘，再放掉排队的表情包
         flushContent()
         flushStickers(force = true)
-        updateLastAssistant { it.copy(streaming = false) }
+        updateLastAssistant { it.copy(streaming = false, waiting = false) }
         _state.update { it.copy(busy = false) }
+        // 收掉前台服务；人在别的应用里的话补一条「回复完成了」
+        ChatForeground.finished(DeckApp.instance, lastAssistantText().orEmpty())
         viewModelScope.launch {
             runCatching { api.contextUsage(sessionId) }.onSuccess { usage ->
                 _state.update { it.copy(context = usage) }
@@ -532,7 +566,15 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
             }
             msg.copy(blocks = blocks)
         }
+        // 通知栏上跟着显示正在写的内容，切在别的应用里也能瞄一眼
+        ChatForeground.update("正在写：" + tailText(text))
         flushStickers()
+    }
+
+    /** 通知栏只放得下几十个字，取正文尾巴，换行压成空格。 */
+    private fun tailText(text: String, limit: Int = 40): String {
+        val flat = text.replace(Regex("\\s+"), " ").trim()
+        return if (flat.length <= limit) flat else "…" + flat.takeLast(limit)
     }
 
     /**
@@ -634,6 +676,7 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
     private fun setWaiting(label: String) {
         val now = System.currentTimeMillis()
         updateLastAssistant { it.copy(waiting = true, waitingLabel = label, waitingSince = now) }
+        ChatForeground.update(label)
     }
 
     private fun clearWaiting() {
@@ -678,6 +721,7 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
                     blocks.add(Block.Tool(event.name, event.arguments, null, false))
                     msg.copy(blocks = blocks)
                 }
+                ChatForeground.update("正在运行 ${event.name}")
             }
 
             is ChatEvent.ToolEnd -> updateLastAssistant { msg ->
@@ -770,13 +814,90 @@ class ChatViewModel(private val api: DeckApi) : ViewModel() {
      * （网页端 `resume()` 做的是同一件事）。
      */
     fun onAppResume() {
-        if (_state.value.account == null || _state.value.busy) return
+        ChatForeground.inForeground = true
+        if (_state.value.account == null) return
+        // 本地这一轮还在跑：流是活的，不用接
+        if (_state.value.busy) return
         viewModelScope.launch {
+            // 切回来先看看服务器上是不是还挂着一轮（App 被杀掉、或者流断在别处时）
+            runCatching { reattachIfRunning() }
             val ok = api.ping()
             if (!ok) {
                 _state.update { it.copy(toast = "连不上服务器，检查一下网络或服务器地址") }
             }
         }
+    }
+
+    /** 切到后台：跑完要不要弹「回复完成了」，就看这个标记。 */
+    fun onAppBackground() {
+        ChatForeground.inForeground = false
+    }
+
+    /**
+     * 服务器上这个会话还在跑的话，把画面接回去。
+     *
+     * 生成早就跟连接解耦了，App 被杀掉重开、或者中途断网，这一轮其实还在写；
+     * 从 0 重放一遍事件最省事——本地什么都没有时它就是完整的一轮，
+     * 有半截气泡的话先撤掉再重放，也不会重复。
+     */
+    private suspend fun reattachIfRunning() {
+        val sessionId = _state.value.currentSessionId ?: return
+        val live = runCatching { api.liveState(sessionId) }.getOrNull() ?: return
+        if (!live.running) return
+        attachLive(sessionId)
+    }
+
+    private fun attachLive(sessionId: String) {
+        val now = System.currentTimeMillis()
+        val placeholderId = nextId++
+        _state.update { current ->
+            val list = current.messages.toMutableList()
+            val last = list.lastOrNull()
+            // 上一个流断在半路留下的半截气泡先撤掉，重放会把这一轮完整重建出来
+            if (last != null && last.role == Role.ASSISTANT && isCutOff(last)) {
+                list.removeAt(list.size - 1)
+            }
+            list.add(
+                UiMessage(
+                    id = placeholderId,
+                    role = Role.ASSISTANT,
+                    streaming = true,
+                    startedAt = now,
+                    waiting = true,
+                    waitingLabel = "正在接回后台的回复…",
+                    waitingSince = now,
+                ),
+            )
+            current.copy(messages = list, busy = true)
+        }
+        ChatForeground.start(DeckApp.instance, sessionId)
+        stopping = false
+        ChatForeground.userStopped = false
+        sendJob = viewModelScope.launch {
+            try {
+                api.streamLive(sessionId, 0) { handle(it) }
+            } catch (error: Exception) {
+                if (wasStopped()) {
+                    handle(ChatEvent.Notice("已停止"))
+                } else {
+                    val reason = if (error is DeckException) {
+                        error.message ?: "没接上"
+                    } else {
+                        "接回后台的回复失败：${error.message ?: "网络波动"}"
+                    }
+                    handle(ChatEvent.Error(reason))
+                }
+            } finally {
+                finishTurn(sessionId)
+            }
+        }
+    }
+
+    /** 这条助手消息是不是「没说完就断了」——只有这种才该被重放顶掉。 */
+    private fun isCutOff(message: UiMessage): Boolean {
+        if (message.streaming) return true
+        val last = message.blocks.lastOrNull() as? Block.Notice ?: return false
+        return last.isError || last.canContinue
     }
 
     /** 点了提示条下面的「继续」：照常发一条「继续」，让模型接着上一轮说下去。 */

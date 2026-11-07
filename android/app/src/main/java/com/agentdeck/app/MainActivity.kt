@@ -1,14 +1,19 @@
 package com.agentdeck.app
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -25,8 +30,18 @@ import com.agentdeck.app.ui.theme.DeckTheme
  */
 class MainActivity : ComponentActivity() {
 
+    /** 回复期间挂前台服务，通知栏得能显示进度，13 以上要先要点权限。 */
+    private val askNotification =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            runCatching { askNotification.launch(Manifest.permission.POST_NOTIFICATIONS) }
+        }
         setContent {
             val viewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory)
             val state by viewModel.state.collectAsStateWithLifecycle()
@@ -35,7 +50,11 @@ class MainActivity : ComponentActivity() {
             val lifecycleOwner = LocalLifecycleOwner.current
             DisposableEffect(lifecycleOwner) {
                 val observer = LifecycleEventObserver { _, event ->
-                    if (event == Lifecycle.Event.ON_RESUME) viewModel.onAppResume()
+                    when (event) {
+                        Lifecycle.Event.ON_RESUME -> viewModel.onAppResume()
+                        Lifecycle.Event.ON_STOP -> viewModel.onAppBackground()
+                        else -> Unit
+                    }
                 }
                 lifecycleOwner.lifecycle.addObserver(observer)
                 onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }

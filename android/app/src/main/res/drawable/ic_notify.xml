@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 通知栏小图标：实心气泡 + 三个镂空的点（evenOdd 挖洞），纯白才能被系统染色 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M4.4,3h15.2A2.4,2.4 0 0,1 22,5.4v9.2a2.4,2.4 0 0,1 -2.4,2.4h-7.3l-4.9,3.8A0.9,0.9 0 0,1 5.9,20v-3h-1.5A2.4,2.4 0 0,1 2,14.6V5.4A2.4,2.4 0 0,1 4.4,3zM7.5,8.3a1.2,1.2 0 1,0 0,2.4a1.2,1.2 0 1,0 0,-2.4zM12,8.3a1.2,1.2 0 1,0 0,2.4a1.2,1.2 0 1,0 0,-2.4zM16.5,8.3a1.2,1.2 0 1,0 0,2.4a1.2,1.2 0 1,0 0,-2.4z" />
+</vector>

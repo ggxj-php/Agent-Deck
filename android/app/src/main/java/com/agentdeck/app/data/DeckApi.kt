@@ -19,6 +19,9 @@ import java.util.concurrent.TimeUnit
 /** 后端明确返回的错误（带 HTTP 状态码），UI 直接把 message 摆出来就行。 */
 class DeckException(val code: Int, message: String) : IOException(message)
 
+/** 服务器上这个会话现在还有没有一轮在跑（切回前台时问一句）。 */
+data class LiveState(val running: Boolean, val chunks: Int = 0)
+
 /**
  * 与 Agent Deck 后端通信。
  *
@@ -305,6 +308,66 @@ class DeckApi(context: android.content.Context) {
 
     fun cancelChat() {
         chatCall?.cancel()
+    }
+
+    // ---------------- 后台续跑 ----------------
+
+    /**
+     * 这一轮还在不在服务器上跑。
+     *
+     * 生成已经跟 HTTP 连接解耦了（服务端后台线程跑，连接只是订阅者），所以 App 被杀掉
+     * 再打开时，这一轮很可能还在写——切回前台问一句，还在就把画面接回去。
+     */
+    suspend fun liveState(sessionId: String): LiveState {
+        val obj = JSONObject(call("GET", "/api/chat/live?session_id=$sessionId", null))
+        return LiveState(
+            running = obj.optBoolean("running"),
+            chunks = obj.optInt("chunks"),
+        )
+    }
+
+    /** 叫停服务器上这一轮。以前拔连接它就自己停了，现在得单独说一声。 */
+    suspend fun requestStop(sessionId: String) {
+        runCatching {
+            call("POST", "/api/chat/stop", JSONObject().put("session_id", sessionId).toString())
+        }
+    }
+
+    /**
+     * 接着收一轮已经跑了一半的回复（断线重连）。
+     *
+     * [since] 是已经收到的事件条数，服务端从那儿往后发；传 0 就是整轮重放，
+     * 适合「App 被杀掉又打开」——本地什么都没有，重放一遍最省事也最准。
+     */
+    suspend fun streamLive(
+        sessionId: String,
+        since: Int,
+        onEvent: (ChatEvent) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/api/chat/live/stream?session_id=$sessionId&since=$since")
+            .header("Accept", "text/event-stream")
+            .header("User-Agent", USER_AGENT)
+            .get()
+            .build()
+
+        val call = client.newCall(request)
+        chatCall = call
+        try {
+            call.execute().use { response ->
+                if (!response.isSuccessful) throw errorFrom(response)
+                val source = response.body?.source() ?: throw DeckException(500, "服务端没有返回内容")
+                while (true) {
+                    val line = source.readUtf8Line() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val data = line.substring(5).trim()
+                    if (data == "[DONE]") break
+                    parseEvent(data)?.let(onEvent)
+                }
+            }
+        } finally {
+            chatCall = null
+        }
     }
 
     /** 把 SSO cookie 同步给 WebView，让正文里的 /api/uploads/xxx 图片也能加载。 */
