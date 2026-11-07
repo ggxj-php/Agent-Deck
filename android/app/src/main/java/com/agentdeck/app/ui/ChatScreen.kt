@@ -205,11 +205,28 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                     onDeleteSession = { pendingDelete = it },
                     onLogout = viewModel::logout,
                     onChangePassword = { showPasswordDialog = true },
-                    onOpenDownloads = { showDownloads = true },
-                    onOpenIssues = { showIssues = true },
-                    onOpenSkills = { showSkills = true },
-                    onOpenTakeover = { showTakeover = true },
-                    onCheckUpdate = { viewModel.checkForUpdate(manual = true) },
+                    // 这几个都会切到整页，或者弹提示条：抽屉不收起来的话，回来时抽屉还开着，
+                    // 「已是最新版本」这种提示条又会被抽屉压在下面看不见
+                    onOpenDownloads = {
+                        scope.launch { drawerState.close() }
+                        showDownloads = true
+                    },
+                    onOpenIssues = {
+                        scope.launch { drawerState.close() }
+                        showIssues = true
+                    },
+                    onOpenSkills = {
+                        scope.launch { drawerState.close() }
+                        showSkills = true
+                    },
+                    onOpenTakeover = {
+                        scope.launch { drawerState.close() }
+                        showTakeover = true
+                    },
+                    onCheckUpdate = {
+                        scope.launch { drawerState.close() }
+                        viewModel.checkForUpdate(manual = true)
+                    },
                     onOpenAccount = { showAccount = true },
                 )
             }
