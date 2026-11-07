@@ -55,9 +55,6 @@ const translateStateEl = document.getElementById('translate-state');
 const premiumBaseEl = document.getElementById('premium-base');
 const premiumKeyEl = document.getElementById('premium-key');
 const premiumStateEl = document.getElementById('premium-state');
-const ocrUrlEl = document.getElementById('ocr-url');
-const ocrTokenEl = document.getElementById('ocr-token');
-const ocrStateEl = document.getElementById('ocr-state');
 const saveKeysEl = document.getElementById('save-keys');
 
 const embedModelEl = document.getElementById('embed-model');
@@ -343,16 +340,6 @@ function render(state) {
     premiumStateEl.textContent = state.premium_key_set
       ? '已配置 Key（不回显），留空提交表示不改动'
       : '还没配 Key，填一个后点保存';
-  }
-  if (ocrUrlEl) ocrUrlEl.value = state.ocr_url || '';
-  if (ocrStateEl) {
-    if (!state.ocr_url) {
-      ocrStateEl.textContent = '还没配接口地址，填上后保存才会出现在（模型也才会看到 ocr_image 工具）';
-    } else {
-      ocrStateEl.textContent = state.ocr_token_set
-        ? '已配置 Token（不回显），留空提交表示不改动'
-        : '接口地址已配，但还没填 Token（服务端不需要就留空）';
-    }
   }
   visionBaseEl.value = state.vision_base_url;
   translateBaseEl.value = state.translate_base_url;
@@ -1659,9 +1646,7 @@ saveKeysEl.addEventListener('click', async () => {
     vision_base_url: changed(visionBaseEl, lastState.vision_base_url),
     translate_base_url: changed(translateBaseEl, lastState.translate_base_url),
     premium_base_url: changed(premiumBaseEl, lastState.premium_base_url),
-    premium_key: (premiumKeyEl && premiumKeyEl.value.trim()) || '',
-    ocr_url: changed(ocrUrlEl, lastState.ocr_url),
-    ocr_token: (ocrTokenEl && ocrTokenEl.value.trim()) || '',
+    premium_key: (premiumKeyEl && premiumKeyEl.value.trim()) || '', 
   };
   if (!Object.values(body).some((value) => value)) {
     flash('什么都没改', false);
@@ -1673,7 +1658,6 @@ saveKeysEl.addEventListener('click', async () => {
     chatKeyEl.value = '';
     visionKeyEl.value = '';
     translateKeyEl.value = '';
-    if (ocrTokenEl) ocrTokenEl.value = '';
     flash('接口设置存好了，下一条消息就生效', true);
   } catch (err) {
     guard(err);

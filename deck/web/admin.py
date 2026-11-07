@@ -79,9 +79,6 @@ def _state():
         "chat_base_source": settings.base_source(vision=False),
         "premium_base_url": settings.premium_base(),
         "premium_key_set": bool(settings.premium_key()),
-        # 自建 OCR：地址不保密，直接给；token 只回「配没配」
-        "ocr_url": settings.ocr_url(),
-        "ocr_token_set": bool(settings.ocr_token()),
         "vision_base_source": settings.base_source(vision=True),
         # 检索翻译那一路的连接：留空就跟聊天那套一样，所以键和地址都说清楚它们是哪来的
         "translate_base_url": settings.translate_base_url(),
@@ -155,9 +152,6 @@ class KeysRequest(BaseModel):
     # 究极兜底检索（DeepSeek 官方付费 Search/Fetch）
     premium_key: str = ""
     premium_base_url: str = ""
-    # 自建 OCR 服务（xiaomi-orc-0）：整条接口地址 + token
-    ocr_url: str = ""
-    ocr_token: str = ""
 
 
 def _check_base(name, value):
@@ -174,21 +168,17 @@ def save_keys(req: KeysRequest, request: Request):
     vision_base = _check_base("图片", req.vision_base_url)
     translate_base = _check_base("检索翻译", req.translate_base_url)
     premium_base = _check_base("兜底检索", req.premium_base_url)
-    ocr_url = _check_base("文字识别", req.ocr_url)
     chat_key = req.chat_key.strip()
     vision_key = req.vision_key.strip()
     translate_key = req.translate_key.strip()
     premium_key = (req.premium_key or "").strip()
-    ocr_token = (req.ocr_token or "").strip()
     if not any((chat_key, vision_key, translate_key, chat_base, vision_base, translate_base,
-                premium_key, premium_base, ocr_url, ocr_token)):
+                premium_key, premium_base)):
         raise HTTPException(status_code=400, detail="一个都没填，那就先不动它")
     settings.update_keys(chat_key, vision_key, chat_base, vision_base,
                          translate_key_new=translate_key, translate_base=translate_base)
     if premium_key or premium_base:
         settings.set_premium(premium_base, premium_key)
-    if ocr_url or ocr_token:
-        settings.set_ocr(ocr_url, ocr_token)
     return _state()
 
 

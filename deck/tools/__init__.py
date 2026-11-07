@@ -20,7 +20,6 @@ from . import (
     logic,
     mcu,
     numconv,
-    ocr,
     render,
     runner,
     search,
@@ -35,7 +34,7 @@ from . import (
 
 _MODULES = (basics, kb, search, files, docs, download, forensics, runner, sticker, render, diagram,
             asm_sim, asm86, mcu, logic, numconv, calc, text, textstat, skillbox, ask,
-            browser_tools, deepseek_tools, ocr)
+            browser_tools, deepseek_tools)
 
 # 这些工具把「外部内容」带进上下文：网页正文、搜索结果、知识库片段、
 # 文件/文档里的文字、图片里读出来的字、二进制里挖出来的串、甚至文件名。
@@ -46,7 +45,7 @@ UNTRUSTED_TOOLS = frozenset({
     "browser_open", "browser_snapshot",
     "ultra_search", "ultra_fetch", "browser_click", "browser_key",
     "browser_scroll", "browser_extract",
-    "read_file", "read_pdf", "read_doc", "read_img", "ocr_image",
+    "read_file", "read_pdf", "read_doc", "read_img",
     "list_files", "extract_strings", "carve_files",
 })
 
@@ -89,11 +88,6 @@ TOOL_GROUPS = {
         "label": "文档与图片",
         "desc": "读 PDF / Word / 图片（图片会走视觉模型，花钱）",
         "tools": ("read_pdf", "read_doc", "read_img"),
-    },
-    "ocr": {
-        "label": "文字识别",
-        "desc": "整页扫描件 / 票据 / 截图转文字（自建 xiaomi-orc-0，一次 20~30 秒）",
-        "tools": ("ocr_image",),
     },
     "code": {
         "label": "跑代码 / 画图",
