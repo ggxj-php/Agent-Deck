@@ -117,6 +117,7 @@ def _tokenizer_signature():
     blob = "\x00".join(sorted(_STOPWORDS))
     blob += "\x01" + repr(_STEM_RULES)
     blob += "\x02" + str(getattr(jieba, "__version__", ""))
+    blob += "\x03" + "\x00".join(_EXTRA_WORDS)
     return hashlib.md5(blob.encode("utf-8")).hexdigest()
 
 
@@ -157,6 +158,30 @@ def _stem(token):
     return token
 
 
+_EXTRA_WORDS = (
+    "判定表", "判定树", "决策树", "条件项", "行动项", "条件定义", "条件组合",
+    "数据字典", "数据项", "数据结构", "数据流", "数据存储", "数据处理", "数据元素",
+    "数据流图", "需求分析", "需求规格说明书", "可行性研究",
+    "程序流程图", "流程图", "盒图", "N-S图", "PAD", "伪代码", "过程设计语言",
+    "结构化", "模块化", "总体设计", "详细设计", "软件维护", "软件测试",
+    "白盒测试", "黑盒测试", "单元测试", "集成测试", "确认测试", "系统测试",
+    "软件工程", "软件生命周期", "瀑布模型", "快速原型", "面向对象",
+    "用例图", "类图", "状态转换图", "数据流图", "加工", "记录",
+)
+
+_words_added = False
+
+
+def _add_extra_words(jieba):
+    """把教材/课程里的固定术语注册进 jieba，避免被切成更碎的词。"""
+    global _words_added
+    if _words_added:
+        return
+    for word in _EXTRA_WORDS:
+        jieba.add_word(word)
+    _words_added = True
+
+
 def _segment(text):
     """切词：jieba 分词 -> 转小写 -> 丢功能词 -> 英文还原词干。jieba 首次调用要建词典
     缓存，所以延迟导入。
@@ -166,6 +191,7 @@ def _segment(text):
     """
     import jieba
 
+    _add_extra_words(jieba)
     tokens = []
     for piece in jieba.lcut(text):
         token = piece.lower()

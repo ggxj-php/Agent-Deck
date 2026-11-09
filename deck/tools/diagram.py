@@ -71,6 +71,18 @@ def _color_of(raw):
     return PALETTE.get(key, PALETTE["white"])
 
 
+def _para(x, y, w, h, label, color=None):
+    """输入/输出：平行四边形。"""
+    fill, stroke, text_color = _color_of(color)
+    sk = min(w * 0.18, h * 0.55)
+    pts = (f"{x - w / 2:.1f},{y + h / 2:.1f} {x - w / 2 + sk:.1f},{y - h / 2:.1f} "
+           f"{x + w / 2:.1f},{y - h / 2:.1f} {x + w / 2 - sk:.1f},{y + h / 2:.1f}")
+    return (f'<polygon points="{pts}" fill="{fill}" stroke="{stroke}" stroke-width="1.6"/>'
+            f'<text x="{x:.1f}" y="{y + 4.5:.1f}" font-size="{FONT}" fill="{text_color}" '
+            f'text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, '
+            f'PingFang SC, Microsoft YaHei, sans-serif">{_esc(label)}</text>')
+
+
 def _box(x, y, w, h, label, color=None, shape="rect", bold=False):
     """画一个居中的节点，x/y 是中心点。"""
     fill, stroke, text_color = _color_of(color)
@@ -79,6 +91,8 @@ def _box(x, y, w, h, label, color=None, shape="rect", bold=False):
         rx = h / 2
     elif shape == "circle":
         rx = w / 2
+    elif shape in ("square", "sharp"):
+        rx = 0
     parts = [f'<rect x="{x - w / 2:.1f}" y="{y - h / 2:.1f}" width="{w:.1f}" '
              f'height="{h:.1f}" rx="{rx:.1f}" fill="{fill}" stroke="{stroke}" stroke-width="1.6"/>']
     weight = "600" if bold else "400"
@@ -366,9 +380,743 @@ def draw_flow(data, title=""):
                              shape="pill"))
         elif kind in ("decision", "判断", "条件"):
             body.append(_diamond(x, y, w + 34, h + 18, n["label"], n.get("color")))
+        elif kind in ("io", "input", "output", "输入", "输出", "输入输出", "inout"):
+            body.append(_para(x, y, w + 18, h, n["label"], n.get("color")))
         else:
-            body.append(_box(x, y, w, h, n["label"], n.get("color")))
+            # 标准流程图：处理框是直角矩形（开始/结束才用圆角 pill）
+            body.append(_box(x, y, w, h, n["label"], n.get("color"), shape="square"))
     return _canvas(max(width, 300), max(height, 220), "".join(body), title)
+
+
+# ---------------- 2b. 盒图（N-S 图） / PAD（问题分析图） ----------------
+
+NS_HEAD = 64        # 选择 / 分支的条件带高度（F/T 画在带内的左右三角形里）
+NS_ROW = 34         # 多分支的「值」那一行
+NS_COND = 34        # （保留）
+NS_LOOP_PAD = 34    # 循环体旁边留的回路条宽度
+NS_LOOP_COND = 42   # while / until 的条件带高度
+
+PAD_BOX = 34        # PAD 单个处理框高度
+PAD_GAP = 9         # PAD 顺序结构之间的竖向间距
+PAD_HGAP = 30       # PAD 主线和右侧分支之间的距离
+
+
+def _wrap_text(label, per_line=20):
+    """按字数拆行（中文 14px、英文 8px 大致对齐教材的窄框）。"""
+    label = str(label if label is not None else "").strip()
+    if not label:
+        return [""]
+    lines = []
+    for para in label.split("\n"):
+        para = para.strip()
+        if not para:
+            lines.append("")
+            continue
+        for i in range(0, len(para), per_line):
+            lines.append(para[i:i + per_line])
+    return lines or [""]
+
+
+def _lines_w(lines):
+    return max(_label_len(line) for line in lines)
+
+
+def _lines_h(lines):
+    return max(34, len(lines) * 18 + 10)
+
+
+def _fit_text(cx, cy, lines, w, color=INK, bold=False):
+    """居中画多行；单行超宽就用 textLength 压进格子，避免溢出。"""
+    n = len(lines)
+    first = cy - (n - 1) * 9 + 4.5
+    out = []
+    for i, line in enumerate(lines):
+        extra = ""
+        if _label_len(line) > max(20.0, w - 10):
+            extra = (f' textLength="{max(20.0, w - 10):.1f}" '
+                     f'lengthAdjust="spacingAndGlyphs"')
+        weight = "600" if bold else "400"
+        out.append(
+            f'<text x="{cx:.1f}" y="{first + i * 18:.1f}" font-size="{FONT}" '
+            f'font-weight="{weight}" fill="{color}" text-anchor="middle" '
+            f'font-family="system-ui, -apple-system, Segoe UI, PingFang SC, '
+            f'Microsoft YaHei, sans-serif"{extra}>{_esc(line)}</text>')
+    return "".join(out)
+
+
+def _sheet(w, h, body, title, margin=26):
+    top = 46 if title else margin
+    cw, ch = w + margin * 2, top + h + margin
+    return _canvas(cw, ch,
+                   f'<rect x="0" y="0" width="{cw:.0f}" height="{ch:.0f}" '
+                   f'fill="#ffffff"/>'
+                   f'<g transform="translate({margin},{top})">{body}</g>', title)
+
+
+def _ink_rect(x, y, w, h):
+    return (f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" '
+            f'fill="#ffffff" stroke="{INK}" stroke-width="1.5"/>')
+
+
+def _ink_line(x1, y1, x2, y2):
+    return (f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+            f'stroke="{INK}" stroke-width="1.3"/>')
+
+
+def _ink_text(x, y, text, color=INK, bold=False, anchor="start"):
+    weight = "600" if bold else "400"
+    return (f'<text x="{x:.1f}" y="{y:.1f}" font-size="{FONT}" font-weight="{weight}" '
+            f'fill="{color}" text-anchor="{anchor}" font-family="system-ui, sans-serif">'
+            f'{_esc(text)}</text>')
+
+
+# ---------------- 盒图（N-S 图） ----------------
+
+def _ns_steps(data):
+    steps = data.get("steps")
+    if steps is None:
+        steps = data.get("root")
+    return steps or []
+
+
+def _ns_node(step):
+    if isinstance(step, dict):
+        return step
+    return {"kind": "process", "label": str(step)}
+
+
+def _ns_measure_seq(steps):
+    w, h = 0, 0
+    for step in steps or []:
+        sw, sh = _ns_measure(_ns_node(step))
+        w = max(w, sw)
+        h += sh
+    return w, h
+
+
+def _ns_measure(node):
+    kind = str(node.get("kind") or "process").strip().lower()
+    if kind in ("if", "choice", "select", "选择", "判断", "分支"):
+        lw, lh = _ns_measure_seq(node.get("else") or node.get("false") or [])
+        rw, rh = _ns_measure_seq(node.get("then") or node.get("true") or [])
+        bw = max(lw, rw, 100)
+        return max(210, bw * 2), NS_HEAD + max(lh, rh)
+    if kind in ("case", "multi", "多分支"):
+        branches = node.get("branches") or []
+        sizes = [_ns_measure_seq(b.get("body") or []) for b in branches]
+        bw = max([s[0] for s in sizes] + [90])
+        bh = max([s[1] for s in sizes] or [34])
+        return max(230, bw * max(1, len(branches))), NS_HEAD + NS_ROW + bh
+    if kind in ("while", "当型", "当型循环"):
+        cw = max(80, _label_len(node.get("condition") or "") + 24)
+        bw, bh = _ns_measure_seq(node.get("body") or [])
+        return NS_LOOP_PAD + max(bw, cw, 120), NS_LOOP_COND + max(bh, 34)
+    if kind in ("until", "直到型", "直到型循环"):
+        cw = max(80, _label_len(node.get("condition") or "") + 24)
+        bw, bh = _ns_measure_seq(node.get("body") or [])
+        return NS_LOOP_PAD + max(bw, cw, 120), max(bh, 34) + NS_LOOP_COND
+    if kind in ("ref", "nested", "引用", "嵌套", "子图"):
+        return max(90, _label_len(node.get("label") or "") + 40), 42
+    lines = _wrap_text(node.get("label"))
+    return max(100, min(440, _lines_w(lines) + 20)), _lines_h(lines)
+
+def _ns_draw_seq(steps, x, y, w, out):
+    yy = y
+    for step in steps or []:
+        node = _ns_node(step)
+        _, sh = _ns_measure(node)
+        _ns_draw(node, x, yy, w, sh, out)
+        yy += sh
+    return yy - y
+
+
+def _ns_draw(node, x, y, w, h, out):
+    kind = str(node.get("kind") or "process").strip().lower()
+    if kind in ("if", "choice", "select", "选择", "判断", "分支"):
+        out.append(_ink_rect(x, y, w, h))
+        half = w / 2
+        sep = y + NS_HEAD
+        out.append(_ink_line(x, sep, x + w, sep))
+        out.append(f'<polygon points="{x:.1f},{y:.1f} {x + w:.1f},{y:.1f} '
+                   f'{x + half:.1f},{sep:.1f}" fill="none" stroke="{INK}" '
+                   f'stroke-width="1.5"/>')
+        out.append(_fit_text(x + half, y + 22,
+                             _wrap_text(node.get("condition") or "", 24), w - 30))
+        out.append(_fit_text(x + w * 0.16, sep - 14, ["F"], w * 0.30,
+                             color=INK, bold=True))
+        out.append(_fit_text(x + w * 0.84, sep - 14, ["T"], w * 0.30,
+                             color=INK, bold=True))
+        out.append(_ink_line(x + half, sep, x + half, y + h))
+        _ns_draw_seq(node.get("else") or node.get("false") or [], x, sep, half, out)
+        _ns_draw_seq(node.get("then") or node.get("true") or [], x + half, sep, half, out)
+        return
+    if kind in ("case", "multi", "多分支"):
+        branches = node.get("branches") or []
+        out.append(_ink_rect(x, y, w, h))
+        sep = y + NS_HEAD
+        out.append(_ink_line(x, sep, x + w, sep))
+        out.append(f'<polygon points="{x:.1f},{y:.1f} {x + w:.1f},{y:.1f} '
+                   f'{x + 2 * w / 3:.1f},{sep:.1f} {x + w / 3:.1f},{sep:.1f}" '
+                   f'fill="none" stroke="{INK}" stroke-width="1.5"/>')
+        out.append(_fit_text(x + w / 2, y + 22,
+                             _wrap_text(node.get("condition") or "", 24), w - 24))
+        n = max(1, len(branches))
+        col = w / n
+        by = sep + NS_ROW
+        out.append(_ink_line(x, by, x + w, by))
+        for i, branch in enumerate(branches):
+            cx = x + col * i
+            value = str(branch.get("value") or branch.get("label") or (i + 1))
+            out.append(_fit_text(cx + col / 2, sep + NS_ROW / 2, [value], col,
+                                 color=INK, bold=True))
+            if i:
+                out.append(_ink_line(cx, sep, cx, y + h))
+            _ns_draw_seq(branch.get("body") or [], cx, by, col, out)
+        return
+    if kind in ("while", "当型", "当型循环"):
+        m = NS_LOOP_PAD
+        body_top = y + NS_LOOP_COND
+        out.append(_ink_rect(x, y, w, h))
+        out.append(_ink_line(x + m, body_top, x + w, body_top))
+        out.append(_ink_line(x + m, body_top, x + m, y + h))
+        out.append(_fit_text(x + m + (w - m) / 2, y + NS_LOOP_COND / 2,
+                             _wrap_text(node.get("condition") or "", 18), w - m - 12))
+        _ns_draw_seq(node.get("body") or [], x + m, body_top, w - m, out)
+        return
+    if kind in ("until", "直到型", "直到型循环"):
+        m = NS_LOOP_PAD
+        body_bottom = y + h - NS_LOOP_COND
+        x2 = x + w - m
+        out.append(_ink_rect(x, y, w, h))
+        out.append(_ink_line(x2, y, x2, body_bottom))
+        out.append(_ink_line(x, body_bottom, x + w, body_bottom))
+        _ns_draw_seq(node.get("body") or [], x, y, w - m, out)
+        out.append(_fit_text(x + w / 2, body_bottom + NS_LOOP_COND / 2,
+                             _wrap_text(node.get("condition") or "", 18), w - 16))
+        return
+    if kind in ("ref", "nested", "引用", "嵌套", "子图"):
+        out.append(f'<ellipse cx="{x + w / 2:.1f}" cy="{y + h / 2:.1f}" '
+                   f'rx="{w / 2 - 3:.1f}" ry="{h / 2 - 4:.1f}" fill="#ffffff" '
+                   f'stroke="{INK}" stroke-width="1.5"/>')
+        out.append(_fit_text(x + w / 2, y + h / 2,
+                             _wrap_text(node.get("label") or "", 16), w - 16))
+        return
+    lines = _wrap_text(node.get("label"))
+    out.append(_ink_rect(x, y, w, h))
+    out.append(_fit_text(x + w / 2, y + h / 2, lines, w - 10))
+
+def draw_ns(data, title=""):
+    steps = _ns_steps(data)
+    if not steps:
+        raise ValueError("steps 是空的，至少给一个节点")
+    w, h = _ns_measure_seq(steps)
+    w = max(w, 120)
+    out = []
+    _ns_draw_seq(steps, 0, 0, w, out)
+    return _sheet(w, h, "".join(out), title)
+
+
+# ---------------- PAD（问题分析图） ----------------
+
+def _pad_steps(data):
+    steps = data.get("steps")
+    if steps is None:
+        steps = data.get("root")
+    return steps or []
+
+
+def _pad_node(step):
+    if isinstance(step, dict):
+        return step
+    return {"kind": "process", "label": str(step)}
+
+
+def _pad_cond_size(node):
+    lines = _wrap_text(node.get("condition") or "", 18)
+    return max(96, min(300, _lines_w(lines) + 20)), _lines_h(lines)
+
+
+def _pad_measure_seq(steps):
+    w, h = 0, 0
+    first = True
+    for step in steps or []:
+        sw, sh = _pad_measure(_pad_node(step))
+        w = max(w, sw)
+        h = sh if first else h + PAD_GAP + sh
+        first = False
+    return w, max(h, PAD_BOX)
+
+
+def _pad_measure(node):
+    kind = str(node.get("kind") or "process").strip().lower()
+    if kind in ("if", "choice", "select", "选择", "判断", "分支"):
+        tw, th = _pad_measure_seq(node.get("then") or node.get("true") or [])
+        fw, fh = _pad_measure_seq(node.get("else") or node.get("false") or [])
+        cw, ch = _pad_cond_size(node)
+        return cw + PAD_HGAP + max(tw, fw), th + PAD_GAP + ch + PAD_GAP + fh
+    if kind in ("case", "multi", "多分支"):
+        branches = node.get("branches") or []
+        values = [str(b.get("value") or b.get("label") or (i + 1))
+                  for i, b in enumerate(branches)]
+        lw = max([_label_len(v) for v in values] + [24])
+        bx = lw + PAD_HGAP
+        bw, bh = 0, 0
+        first = True
+        for b in branches:
+            sw, sh = _pad_measure_seq(b.get("body") or [])
+            bw = max(bw, sw)
+            bh = sh if first else bh + PAD_GAP + sh
+            first = False
+        return bx + max(bw, 80), max(bh, PAD_BOX)
+    if kind in ("while", "当型", "当型循环", "until", "直到型", "直到型循环"):
+        cw, ch = _pad_cond_size(node)
+        bw, bh = _pad_measure_seq(node.get("body") or [])
+        return cw + PAD_HGAP + bw, max(ch, bh)
+    if kind in ("def", "refine", "细化", "定义"):
+        lines = _wrap_text(node.get("label") or "")
+        aw = max(96, min(300, _lines_w(lines) + 20))
+        bw, bh = _pad_measure_seq(node.get("body") or [])
+        return aw + 44 + bw, max(_lines_h(lines), bh)
+    lines = _wrap_text(node.get("label"))
+    return max(96, min(300, _lines_w(lines) + 20)), _lines_h(lines)
+
+
+def _pad_box(x, y, lines, w=None):
+    if w is None:
+        w = max(96, min(300, _lines_w(lines) + 20))
+    h = _lines_h(lines)
+    return _ink_rect(x, y, w, h) + _fit_text(x + w / 2, y + h / 2, lines, w - 10), w, h
+
+
+def _pad_draw_seq(steps, x, y, out):
+    yy = y
+    w = 0
+    first = True
+    for step in steps or []:
+        if not first:
+            yy += PAD_GAP
+        sw, sh = _pad_draw(_pad_node(step), x, yy, out)
+        w = max(w, sw)
+        yy += sh
+        first = False
+    return w, yy - y
+
+
+def _pad_draw(node, x, y, out):
+    kind = str(node.get("kind") or "process").strip().lower()
+    if kind in ("if", "choice", "select", "选择", "判断", "分支"):
+        tw, th = _pad_measure_seq(node.get("then") or node.get("true") or [])
+        fw, fh = _pad_measure_seq(node.get("else") or node.get("false") or [])
+        cw, ch = _pad_cond_size(node)
+        bx = x + cw + PAD_HGAP
+        _pad_draw_seq(node.get("then") or node.get("true") or [], bx, y, out)
+        cy = y + th + PAD_GAP
+        lines = _wrap_text(node.get("condition") or "", 18)
+        out.append(_ink_rect(x, cy, cw, ch))
+        out.append(_fit_text(x + cw / 2, cy + ch / 2, lines, cw - 10))
+        fy = cy + ch + PAD_GAP
+        _pad_draw_seq(node.get("else") or node.get("false") or [], bx, fy, out)
+        total_h = th + PAD_GAP + ch + PAD_GAP + fh
+        out.append(_ink_line(x, y, x, y + total_h))
+        out.append(_ink_line(x + cw, cy + ch / 2, bx, y + th))
+        out.append(_ink_line(x + cw, cy + ch / 2, bx, fy))
+        out.append(_ink_text(x + cw + PAD_HGAP * 0.4,
+                             (cy + ch / 2 + y + th) / 2 - 5, "T",
+                             color="#555a6b", bold=True, anchor="middle"))
+        out.append(_ink_text(x + cw + PAD_HGAP * 0.4,
+                             (cy + ch / 2 + fy) / 2 + 15, "F",
+                             color="#555a6b", bold=True, anchor="middle"))
+        return cw + PAD_HGAP + max(tw, fw), total_h
+    if kind in ("case", "multi", "多分支"):
+        branches = node.get("branches") or []
+        values = [str(b.get("value") or b.get("label") or (i + 1))
+                  for i, b in enumerate(branches)]
+        lw = max([_label_len(v) for v in values] + [24])
+        bx = x + lw + PAD_HGAP
+        yy = y
+        w = bx
+        for i, b in enumerate(branches):
+            bw, bh = _pad_draw_seq(b.get("body") or [], bx, yy, out)
+            ccy = yy + min(PAD_BOX, bh) / 2
+            out.append(_ink_line(x, ccy, bx, ccy))
+            out.append(_ink_text(x + 4, ccy - 5, values[i]))
+            yy += bh + PAD_GAP
+            w = max(w, bx + bw)
+        total_h = max(PAD_BOX, yy - y - PAD_GAP)
+        out.append(_ink_line(x, y, x, y + total_h))
+        return w, total_h
+    if kind in ("while", "当型", "当型循环", "until", "直到型", "直到型循环"):
+        cw, ch = _pad_cond_size(node)
+        bw, bh = _pad_measure_seq(node.get("body") or [])
+        bx = x + cw + PAD_HGAP
+        _pad_draw_seq(node.get("body") or [], bx, y, out)
+        h = max(ch, bh)
+        cy = y + (h - ch) / 2
+        lines = _wrap_text(node.get("condition") or "", 18)
+        out.append(_ink_rect(x, cy, cw, ch))
+        out.append(_fit_text(x + cw / 2, cy + ch / 2, lines, cw - 10))
+        out.append(_ink_line(x, y, x, y + h))
+        out.append(_ink_line(x + cw, cy + ch / 2, bx, cy + ch / 2))
+        return cw + PAD_HGAP + bw, h
+    if kind in ("def", "refine", "细化", "定义"):
+        lines = _wrap_text(node.get("label") or "")
+        aw = max(96, min(300, _lines_w(lines) + 20))
+        ah = _lines_h(lines)
+        bx = x + aw + 44
+        bw, bh = _pad_draw_seq(node.get("body") or [], bx, y, out)
+        out.append(_ink_rect(x, y, aw, ah))
+        out.append(_fit_text(x + aw / 2, y + ah / 2, lines, aw - 10))
+        out.append(_ink_line(x + aw, y + ah / 2, bx, y + min(PAD_BOX, bh) / 2))
+        out.append(_ink_text(x + aw + 6, y + ah / 2 - 4, "def", color="#555a6b"))
+        return bx + bw, max(ah, bh)
+    lines = _wrap_text(node.get("label"))
+    w = max(96, min(300, _lines_w(lines) + 20))
+    out.append(_ink_rect(x, y, w, _lines_h(lines)))
+    out.append(_fit_text(x + w / 2, y + _lines_h(lines) / 2, lines, w - 10))
+    return w, _lines_h(lines)
+
+
+def draw_pad(data, title=""):
+    steps = _pad_steps(data)
+    if not steps:
+        raise ValueError("steps 是空的，至少给一个节点")
+    w, h = _pad_measure_seq(steps)
+    w = max(w, 140)
+    out = []
+    _pad_draw_seq(steps, 0, 0, out)
+    return _sheet(w, h, "".join(out), title)
+
+
+# ---------------- 2c. 流程图：直角正交排版 ----------------
+
+FLOW_PX = 72.0
+
+
+def _wrap_px(label, max_w):
+    """按像素宽度拆行：英文单词、数字、运算符不拆开，中文按字拆。"""
+    text = str(label if label is not None else "")
+    if not text:
+        return [""]
+    lines = []
+    for para in text.split("\n"):
+        tokens = re.findall(r"[A-Za-z0-9_.]+|[<>!=+\-*/&|^~%]+|[^\x00-\x7f\s]|\s+", para)
+        cur = ""
+        for tok in tokens:
+            if not tok:
+                continue
+            if tok.isspace():
+                if cur:
+                    cur += " "
+                continue
+            if _label_len(cur + tok) > max(24.0, max_w) and cur.strip():
+                lines.append(cur.rstrip())
+                cur = tok
+            else:
+                cur += tok
+        lines.append(cur if cur else "")
+    return lines or [""]
+
+
+def _dot_plain(dot_src, timeout=15):
+    if not _DOT_BIN:
+        return ""
+    try:
+        proc = subprocess.run([_DOT_BIN, "-Tplain"], input=dot_src.encode("utf-8"),
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              timeout=timeout)
+    except Exception:               # noqa: BLE001
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.decode("utf-8", "replace")
+
+
+def _polyline(points, color=LINE):
+    pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in points)
+    return (f'<polyline points="{pts}" fill="none" stroke="{color}" '
+            f'stroke-width="1.4" stroke-linejoin="round"/>')
+
+
+def _arrow_head(x, y, dx, dy, color=LINE):
+    ang = math.atan2(dy, dx)
+    size = 7.0
+    left = (x - size * math.cos(ang - 0.42), y - size * math.sin(ang - 0.42))
+    right = (x - size * math.cos(ang + 0.42), y - size * math.sin(ang + 0.42))
+    return (f'<polygon points="{x:.1f},{y:.1f} {left[0]:.1f},{left[1]:.1f} '
+            f'{right[0]:.1f},{right[1]:.1f}" fill="{color}" stroke="{color}"/>')
+
+
+def _pick_label(lx, ly, text, rects, ignore=()):
+    """标签尽量不压节点：碰撞就往上下/左右挪一点。
+
+    ignore 里的节点（一般是这条边的源节点）不算障碍——T/F 标签本来就贴在
+    决定框旁边，菱形/节点的包围盒比实际形状大，拿它当障碍会把标签顶到别的线上。
+    """
+    w = max(16.0, _label_len(str(text)) + 8)
+    skip = set(ignore)
+    for ddx, ddy in ((0, 0), (0, -16), (0, 16), (-w, 0), (w, 0),
+                     (0, -30), (0, 30), (-w, -16), (w, -16)):
+        x, y = lx + ddx, ly + ddy
+        hit = False
+        for i, (x1, y1, x2, y2) in enumerate(rects):
+            if i in skip:
+                continue
+            if (x + w / 2 > x1 and x - w / 2 < x2
+                    and y + 4 > y1 and y - 12 < y2):
+                hit = True
+                break
+        if not hit:
+            return x, y
+    return lx, ly
+
+
+def _edge_label(x, y, text):
+    w = max(16.0, _label_len(str(text)) + 8)
+    return (f'<rect x="{x - w / 2:.1f}" y="{y - 11:.1f}" width="{w:.1f}" height="16" '
+            f'fill="#ffffff"/>'
+            f'<text x="{x:.1f}" y="{y + 1:.1f}" font-size="12" fill="#5a6480" '
+            f'text-anchor="middle" font-family="system-ui, sans-serif">'
+            f'{_esc(text)}</text>')
+
+
+def _flow_svg(data):
+    """Graphviz 只算节点位置；符号和直角连线自己画（输入输出=平行四边形）。"""
+    dot_src = _dot_flow(data)
+    plain = _dot_plain(dot_src) if dot_src else ""
+    if not plain:
+        return ""
+    rows = plain.splitlines()
+    head = rows[0].split()
+    if len(head) < 4:
+        return ""
+    gw, gh = float(head[2]), float(head[3])
+    raw_nodes = _norm_nodes(data.get("nodes"))
+    raw_edges = _norm_edges(data.get("edges"))
+    idx = {n["id"]: i for i, n in enumerate(raw_nodes)}
+    geo = []
+    for line in rows[1:]:
+        parts = line.split()
+        if parts and parts[0] == "node" and len(parts) >= 6:
+            geo.append({"x": float(parts[2]), "y": float(parts[3]),
+                        "w": float(parts[4]) * FLOW_PX,
+                        "h": float(parts[5]) * FLOW_PX})
+    if len(geo) != len(raw_nodes):
+        return ""
+    for g in geo:
+        # Graphviz 算的框偏紧，留点余量，避免短表达式被挤成两行
+        g["w"] += 16.0
+        g["h"] += 8.0
+    mx, my = 70.0, 40.0
+    cw = gw * FLOW_PX + mx * 2
+    ch = gh * FLOW_PX + my * 2
+    for g in geo:
+        g["cx"] = mx + g["x"] * FLOW_PX
+        g["cy"] = my + (gh - g["y"]) * FLOW_PX
+    rects = [(g["cx"] - g["w"] / 2, g["cy"] - g["h"] / 2,
+              g["cx"] + g["w"] / 2, g["cy"] + g["h"] / 2) for g in geo]
+    out = []
+    for i, n in enumerate(raw_nodes):
+        g = geo[i]
+        cx, cy, w, h = g["cx"], g["cy"], g["w"], g["h"]
+        kind = str(n.get("kind") or "process").strip().lower()
+        if kind in ("start", "end", "起", "止"):
+            fill, stroke, tcolor = PALETTE["green"]
+            out.append(f'<rect x="{cx - w / 2:.1f}" y="{cy - h / 2:.1f}" width="{w:.1f}" '
+                       f'height="{h:.1f}" rx="{h / 2:.1f}" fill="{fill}" stroke="{stroke}" '
+                       f'stroke-width="1.6"/>')
+            tw = w - 12
+        elif kind in ("decision", "判断", "条件"):
+            fill, stroke, tcolor = PALETTE["gold"]
+            out.append(f'<polygon points="{cx:.1f},{cy - h / 2:.1f} {cx + w / 2:.1f},{cy:.1f} '
+                       f'{cx:.1f},{cy + h / 2:.1f} {cx - w / 2:.1f},{cy:.1f}" '
+                       f'fill="{fill}" stroke="{stroke}" stroke-width="1.6"/>')
+            tw = w * 0.72
+        elif kind in ("io", "input", "output", "输入", "输出", "输入输出", "inout"):
+            fill, stroke, tcolor = _color_of(n.get("color"))
+            sk = min(w * 0.20, h * 0.55)
+            out.append(f'<polygon points="{cx - w / 2:.1f},{cy + h / 2:.1f} '
+                       f'{cx - w / 2 + sk:.1f},{cy - h / 2:.1f} {cx + w / 2:.1f},{cy - h / 2:.1f} '
+                       f'{cx + w / 2 - sk:.1f},{cy + h / 2:.1f}" fill="{fill}" stroke="{stroke}" '
+                       f'stroke-width="1.6"/>')
+            tw = w - sk * 2 - 6
+        else:
+            fill, stroke, tcolor = _color_of(n.get("color"))
+            out.append(f'<rect x="{cx - w / 2:.1f}" y="{cy - h / 2:.1f}" width="{w:.1f}" '
+                       f'height="{h:.1f}" fill="{fill}" stroke="{stroke}" stroke-width="1.6"/>')
+            tw = w - 18
+        out.append(_fit_text(cx, cy, _wrap_px(n.get("label"), tw), tw, color=tcolor))
+    right_ch = mx + gw * FLOW_PX + 34
+    left_ch = mx - 34
+
+    def _draw_arrow(pts):
+        out.append(_polyline(pts))
+        dx = pts[-1][0] - pts[-2][0]
+        dy = pts[-1][1] - pts[-2][1]
+        ln = math.hypot(dx, dy) or 1.0
+        out.append(_arrow_head(pts[-1][0], pts[-1][1], dx / ln, dy / ln))
+
+    def _label(lx, ly, txt, ignore=()):
+        if not txt:
+            return
+        px, py = _pick_label(lx, ly, txt, rects, ignore)
+        out.append(_edge_label(px, py, txt))
+
+    def kind_of(i):
+        return str(raw_nodes[i].get("kind") or "process").strip().lower()
+
+    def is_decision(i):
+        return kind_of(i) in ("decision", "判断", "条件")
+
+    def bottom(i):
+        return geo[i]["cy"] + geo[i]["h"] / 2
+
+    def top(i):
+        return geo[i]["cy"] - geo[i]["h"] / 2
+
+    forward_list, back_list, same_list = [], [], []
+    for a, b, label in raw_edges:
+        if a not in idx or b not in idx:
+            continue
+        ia, ib = idx[a], idx[b]
+        ga, gb = geo[ia], geo[ib]
+        if gb["cy"] > ga["cy"] + 2:
+            forward_list.append((ia, ib, label))
+        elif gb["cy"] < ga["cy"] - 2:
+            back_list.append((ia, ib, label))
+        else:
+            same_list.append((ia, ib, label))
+
+    # 每个目标来源的最低底部（回边并线用）
+    sb_max = {}
+    for ia, ib, label in forward_list:
+        sb_max[ib] = max(sb_max.get(ib, 0.0), bottom(ia))
+
+    # ---- 同层直连 ----
+    for ia, ib, label in same_list:
+        ga, gb = geo[ia], geo[ib]
+        if gb["cx"] >= ga["cx"]:
+            p1 = (ga["cx"] + ga["w"] / 2, ga["cy"])
+            p2 = (gb["cx"] - gb["w"] / 2 - 1, gb["cy"])
+            d = (1, 0)
+        else:
+            p1 = (ga["cx"] - ga["w"] / 2, ga["cy"])
+            p2 = (gb["cx"] + gb["w"] / 2 + 1, gb["cy"])
+            d = (-1, 0)
+        out.append(_polyline([p1, p2]))
+        out.append(_arrow_head(p2[0], p2[1], d[0], d[1]))
+        _label((p1[0] + p2[0]) / 2, ga["cy"] - 8, label, (ia,))
+
+    by_src = {}
+    for ia, ib, label in forward_list:
+        by_src.setdefault(ia, []).append((ib, label))
+
+    # ---- 多分支：同一判断 ≥3 条正向边，画横向分叉线 ----
+    fanout = set()
+    for ia, items in by_src.items():
+        if len(items) < 3 or not is_decision(ia):
+            continue
+        ga = geo[ia]
+        tops = [top(ib) for ib, _ in items]
+        bar_y = bottom(ia) + 16
+        if bar_y > min(tops) - 16:
+            continue
+        xs = [geo[ib]["cx"] for ib, _ in items]
+        out.append(_polyline([(ga["cx"], bottom(ia)), (ga["cx"], bar_y)]))
+        out.append(_polyline([(min(xs), bar_y), (max(xs), bar_y)]))
+        for (ib, label), tx in zip(items, xs):
+            ty = top(ib)
+            out.append(_polyline([(tx, bar_y), (tx, ty - 1)]))
+            out.append(_arrow_head(tx, ty - 1, 0, 1))
+            _label(tx + 12, (bar_y + ty) / 2, label, (ia,))
+            fanout.add((ia, ib))
+
+    # ---- 决策两步都朝下时，F/否 改侧出 ----
+    forced_side = set()
+    for ia, items in by_src.items():
+        if len(items) != 2 or not is_decision(ia):
+            continue
+        ga = geo[ia]
+        dxs = [geo[ib]["cx"] - ga["cx"] for ib, _ in items]
+        if all(abs(d) < max(30.0, ga["w"] * 0.45) for d in dxs):
+            pick = None
+            for ib, label in items:
+                if str(label or "").strip().upper() in ("F", "否", "N", "FALSE"):
+                    pick = ib
+            if pick is None:
+                pick = items[1][0]
+            forced_side.add((ia, pick))
+
+    # ---- 正向边：单条 / 汇合主干 ----
+    targets = {}
+    for ia, ib, label in forward_list:
+        if (ia, ib) in fanout:
+            continue
+        targets.setdefault(ib, []).append((ia, label))
+
+    for ib, srcs in targets.items():
+        gb = geo[ib]
+        tb = (gb["cx"], top(ib))
+        if len(srcs) == 1:
+            ia, label = srcs[0]
+            ga = geo[ia]
+            sb = (ga["cx"], bottom(ia))
+            dx = gb["cx"] - ga["cx"]
+            if is_decision(ia) and ((ia, ib) in forced_side
+                                    or abs(dx) > max(30.0, ga["w"] * 0.45)):
+                if (ia, ib) in forced_side and abs(dx) < 30:
+                    sx = ga["cx"] + ga["w"] / 2
+                    jog = sx + 26
+                    pts = [(sx, ga["cy"]), (jog, ga["cy"]),
+                           (jog, tb[1] - 18), (gb["cx"], tb[1] - 18), tb]
+                    _draw_arrow(pts)
+                    _label(sx + 14, ga["cy"] - 9, label, (ia,))
+                else:
+                    side = 1 if dx >= 0 else -1
+                    sx = ga["cx"] + side * ga["w"] / 2
+                    _draw_arrow([(sx, ga["cy"]), (gb["cx"], ga["cy"]), tb])
+                    _label(sx + side * 22, ga["cy"] - 9, label, (ia,))
+            elif abs(dx) < 2:
+                _draw_arrow([sb, tb])
+                _label(ga["cx"] + 14, (sb[1] + tb[1]) / 2, label, (ia,))
+            else:
+                midy = (sb[1] + tb[1]) / 2
+                _draw_arrow([sb, (ga["cx"], midy), (gb["cx"], midy), tb])
+                _label((ga["cx"] + gb["cx"]) / 2, midy - 8, label, (ia,))
+        else:
+            # 汇合：各支先到同一水平线，再并成一条主干、一个箭头
+            sbs = [(geo[ia]["cx"], bottom(ia)) for ia, _ in srcs]
+            low = max(y for _, y in sbs)
+            join_y = low + 16
+            if join_y > tb[1] - 14:
+                join_y = (low + tb[1]) / 2
+            for (ia, label), (sx, sy) in zip(srcs, sbs):
+                out.append(_polyline([(sx, sy), (sx, join_y), (gb["cx"], join_y)]))
+                if label:
+                    _label(sx + 14, (sy + join_y) / 2, label, (ia,))
+            _draw_arrow([(gb["cx"], join_y), tb])
+
+    # ---- 回边：并入目标上方那条入线的中段（教材循环画法）----
+    for ia, ib, label in back_list:
+        ga, gb = geo[ia], geo[ib]
+        t = top(ib)
+        if ib in sb_max:
+            join_y = (sb_max[ib] + t) / 2 + 4
+        else:
+            join_y = t - 24
+        if ga["cx"] >= gb["cx"]:
+            chx = right_ch
+            p1 = (ga["cx"] + ga["w"] / 2, ga["cy"])
+            d = (-1, 0)
+        else:
+            chx = left_ch
+            p1 = (ga["cx"] - ga["w"] / 2, ga["cy"])
+            d = (1, 0)
+        pts = [p1, (chx, ga["cy"]), (chx, join_y), (gb["cx"], join_y)]
+        out.append(_polyline(pts))
+        out.append(_arrow_head(gb["cx"], join_y, d[0], d[1]))
+        _label((p1[0] + chx) / 2, ga["cy"] - 8, label, (ia,))
+
+    return _canvas(cw, ch, "".join(out), "")
 
 
 # ---------------- 3. 通用图（可给坐标，否则环形布局）----------------
@@ -896,8 +1644,9 @@ def _dot_flow(data):
     edges = _norm_edges(data.get("edges"))
     if not nodes:
         return ""
-    lines = [_dot_graph(rankdir="TB", splines="polyline", nodesep=0.5, ranksep=0.75)]
-    for n in nodes:
+    idx = {n["id"]: i for i, n in enumerate(nodes)}
+    lines = [_dot_graph(rankdir="TB", splines="polyline", nodesep=0.5, ranksep=0.62)]
+    for i, n in enumerate(nodes):
         kind = (n.get("kind") or "process").strip().lower()
         attrs = {"label": _dot_label(n["label"])}
         if kind in ("start", "end", "起", "止"):
@@ -908,14 +1657,20 @@ def _dot_flow(data):
             attrs.update({"shape": "diamond", "style": "filled",
                           "fillcolor": "#ffefc9", "color": "#c39327",
                           "fontcolor": "#6b4d08", "margin": "0.04,0.02"})
+        elif kind in ("io", "input", "output", "输入", "输出", "输入输出", "inout"):
+            attrs.update({"shape": "parallelogram", "style": "filled",
+                          "fillcolor": "#ffffff", "color": "#9a9aae",
+                          "fontcolor": "#33333d"})
         else:
             attrs.update(_dot_colors(n.get("color")))
-        lines.append(f'  "n_{_dot_label(n["id"])}" [{_dot_attr(attrs)}];')
+        lines.append(f'  "n{i}" [{_dot_attr(attrs)}];')
     for a, b, label in edges:
+        if a not in idx or b not in idx:
+            continue
         attrs = {"label": _dot_label(label)} if label else {}
         if label:
             attrs.update({"fontsize": "10", "labeldistance": "1.2", "labelangle": "0"})
-        lines.append(f'  "n_{_dot_label(a)}" -> "n_{_dot_label(b)}" [{_dot_attr(attrs)}];')
+        lines.append(f'  "n{idx[a]}" -> "n{idx[b]}" [{_dot_attr(attrs)}];')
     lines.append("}")
     return "\n".join(lines)
 
@@ -1632,6 +2387,9 @@ DRAWERS = {
     "tree": draw_tree,
     "flow": draw_flow,
     "flowchart": draw_flow,
+    "ns": draw_ns,
+    "n-s": draw_ns,
+    "pad": draw_pad,
     "graph": draw_graph,
     "dataflow": draw_dataflow,
     "dfd": draw_dataflow,
@@ -1648,6 +2406,9 @@ DRAWERS = {
 KIND_ALIAS = {
     "树": "tree", "树形": "tree", "tree": "tree",
     "流程图": "flow", "流程": "flow", "flowchart": "flow", "flow": "flow",
+    "盒图": "ns", "ns图": "ns", "n-s图": "ns", "n-s": "ns", "ns": "ns",
+    "nassi": "ns", "nassi-shneiderman": "ns", "nsd": "ns",
+    "pad": "pad", "pad图": "pad", "问题分析图": "pad", "问题分析": "pad",
     "图": "graph", "关系图": "graph", "graph": "graph",
     "数据流图": "dataflow", "数据流": "dataflow", "dfd": "dataflow", "dataflow": "dataflow",
     "架构图": "arch", "架构": "arch", "arch": "arch", "architecture": "arch",
@@ -1676,7 +2437,7 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
     drawer = DRAWERS.get(key)
     if drawer is None:
         return json.dumps({
-            "error": f"不认识的图类型「{kind}」。可选：tree（树）/ flow（流程图）/ graph（关系图）/ "
+            "error": f"不认识的图类型「{kind}」。可选：tree（树）/ flow（流程图）/ ns（盒图）/ pad（问题分析图）/ graph（关系图）/ "
                      f"dataflow（数据流图）/ arch（架构图）/ sequence（时序图）/ chart（图表）/ "
                      f"timeline（时间线）/ er（ER 图）/ state（状态转换图）。要自由创意排版就用 render_html。"
         }, ensure_ascii=False)
@@ -1704,7 +2465,13 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
                 break
     dfd_notation = _dfd_notation(data)
     svg = ""
-    builder = GRAPHVIZ_BUILDERS.get(key)
+    if key in ("flow", "flowchart"):
+        try:
+            svg = _flow_svg(data)
+        except Exception as exc:         # noqa: BLE001
+            print(f"[diagram] flow 正交排版失败：{type(exc).__name__}: {exc}", flush=True)
+            svg = ""
+    builder = GRAPHVIZ_BUILDERS.get(key) if not svg else None
     if builder:
         try:
             dot_src = builder(data)
@@ -1787,15 +2554,28 @@ SPECS = [
             "name": "draw_diagram",
             "description": (
                 "结构化画图：给节点/连线/层级这些数据，服务端生成规范的 SVG 图。"
-                "画**数据结构图（二叉树/红黑树/堆）、流程图、关系图、数据流图(DFD)、"
+                "画**数据结构图（二叉树/红黑树/堆）、流程图、盒图（N-S 图）、PAD（问题分析图）、关系图、数据流图(DFD)、"
                 "架构图、时序图、柱状/折线/饼图、时间线**优先用它——只要几十个 token，"
                 "比 render_html 快一个数量级，而且配色统一。"
                 "别自己手写 SVG！创意海报、界面草图、动画、自由排版才用 render_html。\n"
                 "type 取值与 data 结构：\n"
                 "  tree: {nodes:[{id,label,color?}], edges:[{from,to}], root?}  "
                 "color: red/black/green/blue/gold/gray/white（红黑树就用 red / black）\n"
-                "  flow: {nodes:[{id,label,kind?:start|process|decision|end}], "
+                "  flow: {nodes:[{id,label,kind?:start|process|decision|io|end}], "
                 "edges:[{from,to,label?}], start?}\n"
+                "    程序流程图符号：开始/结束 kind=start/end（圆角），处理框 kind=process（矩形），"
+                "判断 kind=decision（菱形），**输入/输出 kind=io（平行四边形）**；"
+                "连线由工具排成直角正交（横平竖直），不用自己写坐标。\n"
+                "**框里的表达式/伪代码一律用符号写，别写文字**：赋值写 `flag=1`（不要 `flag<-true`、"
+                "`flag←true`）；逻辑与/或写 `flag&p`、`a|b`（不要「且」「或」）；真/假写 `1`/`0`"
+                "（不要 true/false）；条件末尾的问号可留可去。每个框里的式子尽量短。\n"
+                "    **决策分支的连线标签统一用英文 T / F（T=是、F=否），别写「是」「否」。**\n"
+                "  ns: 盒图（N-S 图）：{steps:[...]}，节点 kind 取 "
+                "process{label} / if{condition, then, else} / case{condition, branches:[{value, body}]} / "
+                "while{condition, body} / until{condition, body} / ref{label}；"
+                "if 的 then 画在右边（T）、else 画在左边（F），和教材一致\n"
+                "  pad: 问题分析图（PAD）：{steps:[...]}，节点结构和 ns 一样；"
+                "程序从左边竖线开始从上往下排，分支/循环体画在右侧\n"
                 "  graph: {nodes:[{id,label,color?,x?,y?,kind?:circle}], edges:[{from,to,label?}]}"
                 "（不给坐标就自动环形布局）\n"
                 "  dataflow: {nodes:[{id,label,kind:entity|process|store}], "
@@ -1805,6 +2585,9 @@ SPECS = [
                 "用户选完把结果写进 notation（demarco / gane），不写默认 demarco。"
                 "两种画法的数据存储符号也不同（DeMarco 两条平行横线 / Gane 半开矩形），"
                 "工具按 notation 自动画，你只标 kind=store 就行。\n"
+                "    数据流图一次只画一层：要画多层就分多次调用 draw_diagram，title 写清"
+                "「0 层/1 层/2 层」；2 层加工编号用父号前缀（1 层 1、2、3…，2 层 1.1、1.2…），"
+                "子图的输入输出要和父图里对应加工的输入输出一致。\n"
                 "  arch: {layers:[{name, items:[\"模块\", ...]}]}（从上到下的分层架构）\n"
                 "  sequence: {actors:[\"客户端\",\"服务端\"], messages:[{from,to,text,dashed?}]}\n"
                 "  chart: {kind:bar|line|pie, labels:[...], values:[...]}\n"

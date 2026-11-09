@@ -77,15 +77,15 @@ def ultra_fetch(url: str) -> str:
 SPECS = [
     {"type": "function", "function": {
         "name": "ultra_search",
-        "description": "究极兜底搜索（付费）：常规 web_search 结果跑题/被墙/明显不可靠时再用。返回权威度更高的结果和长摘要。",
+        "description": "究极兜底搜索（付费）：常规 web_search 结果跑题/被墙/明显不可靠时再用。返回权威度更高的结果和长摘要。**搜到结果后别只看摘要，挑最相关的 1~2 条读正文（优先 open_url，打不开/内容不对再用 ultra_fetch）。**",
         "parameters": {"type": "object", "properties": {
             "query": {"type": "string", "description": "搜索词（1~128 字，支持 site: / -site: / 引号）"},
             "count": {"type": "integer", "description": "返回条数，默认 8，最多 20"},
-            "need_content": {"type": "boolean", "description": "是否顺带返回正文（更贵，默认 false）"}},
+            "need_content": {"type": "boolean", "description": "是否顺带返回正文（更贵；设 true 可省一次抓取，默认 false）"}},
             "required": ["query"]}}},
     {"type": "function", "function": {
         "name": "ultra_fetch",
-        "description": "究极兜底抓取（付费）：open_url 抓不到/被拦时，用 DeepSeek 官方抓取把网页转 Markdown。",
+        "description": "究极兜底抓取（付费）：把网页抓成 Markdown 正文。**最后一层兜底**——open_url 打不开/被拦/抓回来内容不对时用它；也可以在 ultra_search 之后用来读结果页正文。",
         "parameters": {"type": "object", "properties": {
             "url": {"type": "string", "description": "http/https 网址"}}, "required": ["url"]}}},
 ]
