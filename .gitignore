@@ -49,3 +49,7 @@ deck/web/static/app-version.json
 # 技能包（只在服务器安装，不进仓库）
 /skills/
 /workspace/skills/
+
+# 安卓工程只存在于 feat/android-app 分支；主分支工作树里偶尔会残留一份构建副本，
+# 里面带 local.properties（本机服务地址）和一堆 APK，一律不进仓库。
+/android/
