@@ -555,6 +555,26 @@ def get_artifact_svg(artifact_id: str):
     )
 
 
+@app.get("/api/artifact/{artifact_id}/png")
+def get_artifact_png(artifact_id: str):
+    """产物栅格化成 PNG 给 App 用（App 端 androidsvg 解析会和网页端不一致）。
+
+    第一次请求现渲（Chromium，和网页端同一个引擎），之后走磁盘缓存。
+    渲染失败就回 404，App 端会退回去取 `/svg`。
+    """
+    item = render_tool.get_artifact(artifact_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="这张图过期或者不存在了")
+    path = render_tool.artifact_png(artifact_id, item.get("html") or "")
+    if not path:
+        raise HTTPException(status_code=404, detail="这张图暂时转不出位图")
+    return FileResponse(
+        path,
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
 class FileUploadRequest(BaseModel):
     name: str = ""
     data_url: str = ""

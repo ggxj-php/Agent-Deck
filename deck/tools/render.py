@@ -187,6 +187,12 @@ def _store(doc: str, title: str) -> str:
         while len(_ORDER) > RENDER_LIMIT:
             old = _ORDER.pop(0)
             _ARTIFACTS.pop(old, None)
+    # 图一画完就把 PNG 渲染好（后台线程）：App 第一次请求就能直接命中缓存，
+    # 不用等 Chromium 冷启动那两三秒，也就不会因为超时退回 SVG
+    if "<svg" in doc:
+        threading.Thread(
+            target=artifact_png, args=(aid, doc), daemon=True, name=f"png-{aid}"
+        ).start()
     return aid
 
 
@@ -231,6 +237,107 @@ def persist_artifact(aid: str, session_id: str, user_id: int, title: str, html: 
         return True
     except Exception:                     # noqa: BLE001
         return False
+
+
+# ---------------- 产物栅格化（给 App 看的 PNG） ----------------
+
+# 网页端是浏览器直接吃 SVG，App 端靠 androidsvg 解析——那套解析器对 `&gt;` / `&lt;`
+# 这类字符实体处理不对，流程图里的 `X>0` 会变成 `X0`，而且 App 保存图片时拿到的是
+# SVG 源码，相册解不出来就是一张白图。所以统一在这儿用 Chromium（跟网页端同一个引擎）
+# 栅格化成 PNG：字形、换行、字体回退全部跟网页一模一样，App 端只当普通位图显示/保存。
+PNG_DIR = os.path.join(PROJECT_ROOT, ".cache", "artifacts-png")
+# 给全屏放大留余量：正常手机屏宽 1080px，2600px 的图放大 6 倍也不虚
+PNG_MAX_WIDTH = 2600
+# 缓存留多久（产物本身有 TTL，这里只防目录无限长）
+PNG_KEEP_SECONDS = 7 * 24 * 3600
+# 同时只允许一个 Chromium 在跑（这台机器 4 核 3.8G，还要留给聊天和接管浏览器）
+_PNG_LOCK = threading.Lock()
+
+_VIEWBOX = re.compile(
+    r'<svg[^>]*?viewBox="\s*(-?[\d.]+)[\s,]+(-?[\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)', re.I)
+
+
+def _svg_box(html_text: str):
+    """从产物 HTML 里抠出 <svg> 的 viewBox；没有就返回 None（不是矢量图）。"""
+    match = _VIEWBOX.search(html_text or "")
+    if not match:
+        return None
+    try:
+        _, _, width, height = (float(g) for g in match.groups())
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return width, height
+
+
+def _png_prune():
+    """顺手清掉过期的 PNG 缓存（7 天），别让 .cache 一直长。"""
+    cutoff = time.time() - PNG_KEEP_SECONDS
+    try:
+        for entry in os.scandir(PNG_DIR):
+            if entry.is_file() and entry.stat().st_mtime < cutoff:
+                try:
+                    os.remove(entry.path)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
+def artifact_png(aid: str, html_text: str):
+    """把产物里的 <svg> 栅格化成 PNG，返回文件路径；失败/不是矢量图返回 None。
+
+    第一次请求时渲染并落盘，之后直接读缓存（产物是不可变的，同一个 id 内容不会变）。
+    """
+    if not aid or not html_text:
+        return None
+    path = os.path.join(PNG_DIR, f"{aid}.png")
+    if os.path.exists(path) and os.path.getsize(path) > 1024:
+        return path
+    box = _svg_box(html_text)
+    if not box:
+        return None
+    width, height = box
+    scale = min(4.0, max(1.5, PNG_MAX_WIDTH / width))
+    view_w = int(min(PNG_MAX_WIDTH, max(600, round(width * scale))))
+    view_h = int(round(height * view_w / width)) + 8
+
+    with _PNG_LOCK:
+        if os.path.exists(path) and os.path.getsize(path) > 1024:
+            return path
+        os.makedirs(PNG_DIR, exist_ok=True)
+        # 临时文件名也必须以 .png 结尾：Playwright 靠扩展名决定截图格式
+        tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp.png"
+        try:
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
+                try:
+                    page = browser.new_page(
+                        viewport={"width": view_w, "height": view_h},
+                        device_scale_factor=1,
+                    )
+                    page.set_content(html_text, wait_until="load")
+                    page.wait_for_timeout(160)          # 等字体/布局稳定
+                    page.locator("svg").first.screenshot(path=tmp)
+                finally:
+                    browser.close()
+            if not os.path.exists(tmp) or os.path.getsize(tmp) < 1024:
+                raise RuntimeError("截图是空的")
+            os.replace(tmp, path)
+        except Exception as exc:                    # noqa: BLE001
+            print(f"[artifact-png] {aid} 渲染失败：{type(exc).__name__}: {exc}", flush=True)
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+            return None
+    _png_prune()
+    print(f"[artifact-png] {aid} 已生成 {view_w}x{view_h}", flush=True)
+    return path
 
 
 # 存进消息正文里的产物标记：[[artifact:16位id|标题]]
