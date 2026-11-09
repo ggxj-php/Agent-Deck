@@ -89,7 +89,7 @@ import com.agentdeck.app.data.SessionSummary
 import com.agentdeck.app.ui.components.Composer
 import com.agentdeck.app.ui.components.DownloadCenterScreen
 import com.agentdeck.app.ui.components.MessageItem
-import com.agentdeck.app.ui.components.ZoomableImageDialog
+import com.agentdeck.app.ui.components.ImagePreview
 import com.agentdeck.app.ui.theme.LocalPalette
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -108,7 +108,6 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
     var pendingDelete by remember { mutableStateOf<SessionSummary?>(null) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showAccount by remember { mutableStateOf(false) }
-    var previewUrl by remember { mutableStateOf<String?>(null) }
     var showDownloads by remember { mutableStateOf(false) }
     var showIssues by remember { mutableStateOf(false) }
     var showSkills by remember { mutableStateOf(false) }
@@ -266,7 +265,7 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                 state = state,
                 palette = palette,
                 modifier = Modifier.padding(padding),
-                onPreview = { previewUrl = it },
+                onPreview = { ImagePreview.show(it) },
                 onAskPick = viewModel::pickAsk,
                 onContinue = viewModel::continueGeneration,
                 onResend = viewModel::resend,
@@ -319,10 +318,6 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
             },
             onSetServer = viewModel::setServerUrl,
         )
-    }
-
-    previewUrl?.let { url ->
-        ZoomableImageDialog(model = url, description = null) { previewUrl = null }
     }
 
     state.update?.let { info ->

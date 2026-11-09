@@ -7,6 +7,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -23,6 +24,7 @@ import com.agentdeck.app.ui.ChatScreen
 import com.agentdeck.app.ui.ChatViewModel
 import com.agentdeck.app.ui.LoginScreen
 import com.agentdeck.app.ui.SplashScreen
+import com.agentdeck.app.ui.components.ImagePreviewHost
 import com.agentdeck.app.ui.theme.DeckTheme
 
 /**
@@ -65,17 +67,22 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    when {
-                        state.booting -> SplashScreen()
-                        state.account == null -> LoginScreen(
-                            state = state,
-                            onLogin = viewModel::login,
-                            onRegister = viewModel::register,
-                            onSwitchMode = viewModel::switchAuthMode,
-                            onRefreshCaptcha = viewModel::refreshCaptcha,
-                            onSetServer = viewModel::setServerUrl,
-                        )
-                        else -> ChatScreen(state, viewModel)
+                    // 全屏看图挂在这里：跟聊天界面同一个 window，insets 一定准，
+                    // 底部按钮不会被某些 ROM 的 Dialog 窗口高度算歪顶到屏幕外
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        when {
+                            state.booting -> SplashScreen()
+                            state.account == null -> LoginScreen(
+                                state = state,
+                                onLogin = viewModel::login,
+                                onRegister = viewModel::register,
+                                onSwitchMode = viewModel::switchAuthMode,
+                                onRefreshCaptcha = viewModel::refreshCaptcha,
+                                onSetServer = viewModel::setServerUrl,
+                            )
+                            else -> ChatScreen(state, viewModel)
+                        }
+                        ImagePreviewHost()
                     }
                 }
             }

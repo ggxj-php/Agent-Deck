@@ -2,9 +2,12 @@ package com.agentdeck.app.ui.components
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.RectF
 import android.util.Base64
 import android.util.Log
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -16,10 +19,9 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -47,16 +49,17 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.agentdeck.app.DeckApp
+import com.caverock.androidsvg.SVG
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Request
+import java.io.ByteArrayInputStream
 import java.io.File
+import kotlin.math.roundToInt
 
 private const val TAG = "AgentDeck"
 
@@ -108,152 +111,167 @@ internal sealed interface SaveOutcome {
 }
 
 /**
+ * 全屏看图的状态槽。
+ *
+ * **为什么不用 Dialog 了**：Dialog 是另一个 window，`decorFitsSystemWindows = false` 之后
+ * 窗口高度在部分 ROM（Android 15/16 的机型上实测）会算多一截，底部按钮被顶到屏幕外面，
+ * 只剩 7/8 露出来。改成挂在 Activity 自己的窗口上（跟聊天界面同一个 window，insets 一定
+ * 准），位置就再也不会算歪；顺带返回键也能正常关闭。
+ */
+object ImagePreview {
+    var current by mutableStateOf<String?>(null)
+        private set
+
+    fun show(url: String?) {
+        if (!url.isNullOrBlank()) current = url
+    }
+
+    fun dismiss() {
+        current = null
+    }
+}
+
+/** 挂在页面最外层（MainActivity 的 Surface 里），有图要看时才铺满整屏。 */
+@Composable
+fun ImagePreviewHost() {
+    val url = ImagePreview.current ?: return
+    ImagePreviewOverlay(url = url, onDismiss = ImagePreview::dismiss)
+}
+
+/**
  * 全屏看图：白底、双指缩放、拖动、双击放大，底部可以把当前图保存到相册。
  *
- * 底部按钮的位置不依赖 dialog 窗口的 insets（实测在部分 ROM / Android 15+ 上恒为 0），
- * 而是「读到的 inset 和固定下限取大」，保证永远离开手势条，不会被系统手势吃掉点击。
+ * 底部按钮用 `safeDrawing` 的内边距——它同时包含手势条、导航栏和刘海，比自己猜
+ * 一个固定值靠谱；图片本身仍然铺满整屏，只有按钮和关闭键让开系统区域。
  */
 @Composable
-fun ZoomableImageDialog(
-    model: Any?,
-    description: String?,
+private fun ImagePreviewOverlay(
+    url: String,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var saving by remember { mutableStateOf(false) }
-    var outcome by remember { mutableStateOf<SaveOutcome?>(null) }
+    var saving by remember(url) { mutableStateOf(false) }
+    var outcome by remember(url) { mutableStateOf<SaveOutcome?>(null) }
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+
+    BackHandler(enabled = true) { onDismiss() }
 
     // data URI 先解成 Bitmap，Coil 不认这种写法
-    val localBitmap = remember(model) {
-        (model as? String)?.takeIf { it.startsWith("data:") }?.let { decodeDataUri(it) }
+    val localBitmap = remember(url) {
+        url.takeIf { it.startsWith("data:") }?.let { decodeDataUri(it) }
     }
     // 预览按高分辨率栅格化：SVG 默认只按屏幕尺寸解一次（1200px 左右），放大就糊了
-    val request = remember(model, localBitmap) {
-        when {
-            localBitmap != null -> localBitmap
-            model is String -> ImageRequest.Builder(context)
-                .data(model)
+    val request = remember(url, localBitmap) {
+        if (localBitmap != null) {
+            localBitmap
+        } else {
+            ImageRequest.Builder(context)
+                .data(url)
                 .size(3072, 3072)
                 .crossfade(false)
                 .build()
-
-            else -> model
         }
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        // decorFitsSystemWindows = false：让 dialog 真正铺满并把 insets 派发给 Compose，
-        // 否则 navigationBars 在 dialog 里读出来是 0，按钮就会压在手势条上
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false,
-        ),
-    ) {
-        var scale by remember { mutableFloatStateOf(1f) }
-        var offset by remember { mutableStateOf(Offset.Zero) }
+    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+        scale = (scale * zoomChange).coerceIn(1f, 6f)
+        offset = if (scale <= 1f) Offset.Zero else offset + panChange
+    }
 
-        val transformState = rememberTransformableState { zoomChange, panChange, _ ->
-            scale = (scale * zoomChange).coerceIn(1f, 6f)
-            offset = if (scale <= 1f) Offset.Zero else offset + panChange
+    val safe = WindowInsets.safeDrawing.asPaddingValues()
+    val bottomGap = safe.calculateBottomPadding() + 14.dp
+    val topGap = safe.calculateTopPadding() + 6.dp
+
+    Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
+        AsyncImage(
+            model = request,
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer(
+                    scaleX = scale,
+                    scaleY = scale,
+                    translationX = offset.x,
+                    translationY = offset.y,
+                )
+                .transformable(transformState)
+                .pointerInput(url) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            if (scale > 1f) {
+                                scale = 1f
+                                offset = Offset.Zero
+                            } else {
+                                scale = 2.5f
+                            }
+                        },
+                    )
+                },
+        )
+
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = topGap, end = 10.dp)
+                .background(Color.White.copy(alpha = 0.85f), CircleShape),
+        ) {
+            Icon(Icons.Rounded.Close, contentDescription = "关闭", tint = Color(0xFF333333))
         }
 
-        val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-        // 双保险：读到 0 时用固定下限兜住
-        val bottomGap = maxOf(navBottom, 22.dp) + 14.dp
-        val topGap = maxOf(statusTop, 18.dp) + 6.dp
-
-        Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
-            AsyncImage(
-                model = request,
-                contentDescription = description,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = scale,
-                        scaleY = scale,
-                        translationX = offset.x,
-                        translationY = offset.y,
-                    )
-                    .transformable(transformState)
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onDoubleTap = {
-                                if (scale > 1f) {
-                                    scale = 1f
-                                    offset = Offset.Zero
-                                } else {
-                                    scale = 2.5f
-                                }
-                            },
-                        )
-                    },
-            )
-
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = topGap, end = 10.dp)
-                    .background(Color.White.copy(alpha = 0.85f), CircleShape),
-            ) {
-                Icon(Icons.Rounded.Close, contentDescription = "关闭", tint = Color(0xFF333333))
-            }
-
-            val failed = outcome as? SaveOutcome.Failed
-            Surface(
-                onClick = {
-                    if (saving || outcome != null) return@Surface
-                    saving = true
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) { saveToGallery(context, model) }
-                        saving = false
-                        outcome = result
-                        val toast = when (result) {
-                            is SaveOutcome.InGallery -> "已保存到系统相册"
-                            is SaveOutcome.InDownloads -> "已保存到「下载/AgentDeck」"
-                            is SaveOutcome.Failed -> "保存失败：${result.reason}"
-                        }
-                        Toast.makeText(context, toast, Toast.LENGTH_SHORT).show()
+        val failed = outcome as? SaveOutcome.Failed
+        Surface(
+            onClick = {
+                if (saving || outcome != null) return@Surface
+                saving = true
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) { saveToGallery(context, url) }
+                    saving = false
+                    outcome = result
+                    val toast = when (result) {
+                        is SaveOutcome.InGallery -> "已保存到系统相册"
+                        is SaveOutcome.InDownloads -> "已保存到「下载/AgentDeck」"
+                        is SaveOutcome.Failed -> "保存失败：${result.reason}"
                     }
-                },
-                shape = RoundedCornerShape(999.dp),
-                color = if (failed != null) Color(0xFFFFF3F3) else Color.White,
-                border = BorderStroke(
-                    width = 1.dp,
-                    color = if (failed != null) Color(0x33E5484D) else Color(0x22000000),
-                ),
-                shadowElevation = 8.dp,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = bottomGap)
-                    .heightIn(min = 48.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 20.dp),
-                ) {
-                    Icon(
-                        imageVector = if (failed != null) Icons.Rounded.ErrorOutline else Icons.Rounded.DownloadDone,
-                        contentDescription = null,
-                        modifier = Modifier.size(17.dp),
-                        tint = if (failed != null) Color(0xFFE5484D) else Color(0xFF444444),
-                    )
-                    Text(
-                        text = "  " + when {
-                            saving -> "保存中…"
-                            outcome is SaveOutcome.InGallery -> "已保存到相册"
-                            outcome is SaveOutcome.InDownloads -> "已保存到「下载」"
-                            failed != null -> "保存失败，点我重试"
-                            else -> "保存图片"
-                        },
-                        fontSize = 14.sp,
-                        color = if (failed != null) Color(0xFFC22F35) else Color(0xFF333333),
-                    )
+                    Toast.makeText(context, toast, Toast.LENGTH_SHORT).show()
                 }
+            },
+            shape = RoundedCornerShape(999.dp),
+            color = if (failed != null) Color(0xFFFFF3F3) else Color.White,
+            border = BorderStroke(
+                width = 1.dp,
+                color = if (failed != null) Color(0x33E5484D) else Color(0x22000000),
+            ),
+            shadowElevation = 8.dp,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = bottomGap)
+                .heightIn(min = 48.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 20.dp),
+            ) {
+                Icon(
+                    imageVector = if (failed != null) Icons.Rounded.ErrorOutline else Icons.Rounded.DownloadDone,
+                    contentDescription = null,
+                    modifier = Modifier.size(17.dp),
+                    tint = if (failed != null) Color(0xFFE5484D) else Color(0xFF444444),
+                )
+                Text(
+                    text = "  " + when {
+                        saving -> "保存中…"
+                        outcome is SaveOutcome.InGallery -> "已保存到相册"
+                        outcome is SaveOutcome.InDownloads -> "已保存到「下载」"
+                        failed != null -> "保存失败，点我重试"
+                        else -> "保存图片"
+                    },
+                    fontSize = 14.sp,
+                    color = if (failed != null) Color(0xFFC22F35) else Color(0xFF333333),
+                )
             }
         }
     }
@@ -321,10 +339,64 @@ private fun absoluteUrl(url: String): String? = when {
     else -> null
 }
 
+/** 产物图是 SVG 时，字节里有 `<svg`（可能是 `<?xml` 开头），按 SVG 处理。 */
+private fun looksLikeSvg(file: File): Boolean = runCatching {
+    val head = ByteArray(1024)
+    val read = file.inputStream().use { it.read(head) }
+    if (read <= 0) return false
+    val text = String(head, 0, read, Charsets.UTF_8).trimStart()
+    text.startsWith("<svg") || (text.startsWith("<?xml") && text.contains("<svg"))
+}.getOrDefault(false)
+
+/** viewBox 里的宽高（`width="100%"` 这种拿不到绝对尺寸时靠它）。 */
+private val VIEWBOX = Regex("""viewBox\s*=\s*"\s*-?[\d.]+[\s,]+-?[\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)""")
+
+/**
+ * SVG 栅格化成 PNG，直接覆盖回同一个文件。
+ *
+ * 相册/相册类 App 都不认 SVG，直接存字节进去就是一张白图——所以保存前先转成位图。
+ * 用 androidsvg（Coil 用的就是它）渲染，尺寸按 2200px 宽出图，够清晰也不至于 OOM。
+ */
+private fun rasterizeSvg(file: File): Boolean = runCatching {
+    val bytes = file.readBytes()
+    val svg = SVG.getFromInputStream(ByteArrayInputStream(bytes))
+    var width = svg.documentWidth
+    var height = svg.documentHeight
+    if (width <= 1f || height <= 1f) {
+        val match = VIEWBOX.find(String(bytes, Charsets.UTF_8)) ?: return false
+        width = match.groupValues[1].toFloatOrNull() ?: return false
+        height = match.groupValues[2].toFloatOrNull() ?: return false
+    }
+    if (width <= 0f || height <= 0f) return false
+
+    val scale = (2200f / width).coerceAtLeast(1f)
+    val outW = (width * scale).roundToInt().coerceIn(64, 4096)
+    val outH = (height * scale).roundToInt().coerceIn(64, 8192)
+    val bitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+    try {
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(android.graphics.Color.WHITE)      // 透明底在图库里会变成黑
+        svg.renderToCanvas(canvas, RectF(0f, 0f, outW.toFloat(), outH.toFloat()))
+        file.outputStream().use { out ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        }
+    } finally {
+        bitmap.recycle()
+    }
+    true
+}.getOrElse { error ->
+    Log.w(TAG, "save image: rasterize svg failed", error)
+    false
+}
+
 private suspend fun saveToGallery(context: Context, model: Any?): SaveOutcome {
     val stamp = System.currentTimeMillis()
-    val fetched = fetchToCache(context, model, stamp)
+    var fetched = fetchToCache(context, model, stamp)
         ?: return SaveOutcome.Failed("没拿到图片数据")
+    // 矢量图存进相册会是空白，先转成 PNG（产物图正常走的是服务端的 /png，这里是兜底）
+    if (looksLikeSvg(fetched.file) && rasterizeSvg(fetched.file)) {
+        fetched = Fetched(fetched.file, "image/png")
+    }
     return try {
         val source = (model as? String)?.takeIf { !it.startsWith("data:") }
         val (name, mime) = galleryFileName(source, fetched.mime, stamp)

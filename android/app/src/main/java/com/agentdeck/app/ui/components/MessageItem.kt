@@ -663,12 +663,21 @@ private fun ArtifactBlock(
     palette: DeckPalette,
     onPreview: (String) -> Unit,
 ) {
-    var failed by remember(block.id) { mutableStateOf(false) }
-    if (failed) {
+    // App 端优先取服务端栅格化好的 PNG：
+    // 1) androidsvg 解析 SVG 时会把 `&gt;` / `&lt;` 吃掉，流程图里的 `X>0` 变成 `X0`；
+    // 2) SVG 源码保存到相册是空白图。
+    // PNG 是服务端用 Chromium 渲的（跟网页端同一个引擎），显示和保存都跟网页一模一样。
+    // 拿不到 PNG（老产物/服务端渲染失败）再退回原来的 SVG，最后才是卡片。
+    var stage by remember(block.id) { mutableStateOf(0) }
+    if (stage >= 2) {
         ArtifactCard(block, baseUrl, palette)
         return
     }
-    val url = "$baseUrl/api/artifact/${block.id}/svg"
+    val url = if (stage == 0) {
+        "$baseUrl/api/artifact/${block.id}/png"
+    } else {
+        "$baseUrl/api/artifact/${block.id}/svg"
+    }
     val context = LocalContext.current
     // 内联按 1600px 栅格化，缩放/小屏看文字都够清楚
     val request = remember(url) {
@@ -683,12 +692,12 @@ private fun ArtifactBlock(
                 modifier = Modifier.padding(bottom = 4.dp),
             )
         }
-        // 产物本来就是 SVG，用 Coil 解码后直接显示；点一下能全屏放大
+        // 产物本来就是图，用 Coil 解码后直接显示；点一下能全屏放大
         AsyncImage(
             model = request,
             contentDescription = block.title.ifBlank { "生成的图" },
             contentScale = ContentScale.Fit,
-            onError = { failed = true },
+            onError = { stage += 1 },
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 60.dp, max = 460.dp)

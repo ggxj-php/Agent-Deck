@@ -35,8 +35,8 @@ android {
         applicationId = "com.agentdeck.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.16"
+        versionCode = 19
+        versionName = "1.18"
     }
 
     // 品牌覆盖：app/src/local/ 放私有名字和头像图标（该目录已被 gitignore 忽略），
@@ -109,6 +109,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.coil.compose)
     implementation(libs.coil.svg)
+    // 保存 SVG 时自己栅格化用（Coil 的 SVG 解码器用的也是它，版本对齐）
+    implementation("com.caverock:androidsvg-aar:1.4")
     implementation(libs.jlatexmath)
 
     testImplementation("junit:junit:4.13.2")

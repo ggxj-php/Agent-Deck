@@ -66,7 +66,7 @@ import coil.compose.AsyncImage
 import com.agentdeck.app.DeckApp
 import com.agentdeck.app.data.DeckException
 import com.agentdeck.app.data.IssueItem
-import com.agentdeck.app.ui.components.ZoomableImageDialog
+import com.agentdeck.app.ui.components.ImagePreview
 import com.agentdeck.app.ui.components.decodeDataUri
 import com.agentdeck.app.ui.components.toDataUrl
 import com.agentdeck.app.ui.theme.DeckPalette
@@ -98,7 +98,6 @@ fun IssueScreen(palette: DeckPalette, onBack: () -> Unit) {
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var composing by remember { mutableStateOf(false) }
-    var previewUrl by remember { mutableStateOf<String?>(null) }
 
     androidx.activity.compose.BackHandler { onBack() }
 
@@ -230,7 +229,7 @@ fun IssueScreen(palette: DeckPalette, onBack: () -> Unit) {
                     IssueCard(
                         issue = issue,
                         palette = palette,
-                        onPreview = { previewUrl = it },
+                        onPreview = { ImagePreview.show(it) },
                     )
                 }
             }
@@ -250,9 +249,6 @@ fun IssueScreen(palette: DeckPalette, onBack: () -> Unit) {
         )
     }
 
-    previewUrl?.let { url ->
-        ZoomableImageDialog(model = url, description = null) { previewUrl = null }
-    }
 }
 
 @Composable
