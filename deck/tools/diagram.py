@@ -2491,13 +2491,17 @@ def _tex_escape(text):
 
 
 def _dtree_latex(data):
-    """教材图 5-8 那种大括号格式的 LaTeX（前端渲染出来和书上一样）。"""
+    """教材图 5-8 那种大括号格式的 LaTeX（前端渲染成书上的大括号样式）。
+
+    分支标签（是/否、T/F）会写进去：动作行是「是 ⇢ 包邮」，条件行是「否 → 偏远地区? {…}」。
+    """
     nodes, edges, root = _dtree_normalize(data)
     if not nodes or not root:
         return ""
     by_id = {n["id"]: n for n in nodes}
     kids = _dtree_children(nodes, edges)
     kinds = _dtree_kinds(nodes, kids, root)
+    labels = {(a, b): str(lab).strip() for a, b, lab in edges if str(lab or "").strip()}
     sep = " \\\\ "
 
     def cell(nid, seen):
@@ -2509,16 +2513,29 @@ def _dtree_latex(data):
         if not children:
             return "\\text{%s}" % label
         cond = [k for k in children if kinds.get(k) != "action"]
-        acts = [k for k in children if kinds.get(k) == "action"]
         if not cond:
-            return sep.join(
-                "\\text{%s}\\ \\dashrightarrow\\ \\text{%s}"
-                % (label, _tex_escape(by_id[k]["label"])) for k in acts)
+            if len(children) == 1:
+                k = children[0]
+                branch = labels.get((nid, k)) or label
+                return "\\text{%s}\\ \\dashrightarrow\\ \\text{%s}" % (
+                    _tex_escape(branch), _tex_escape(by_id[k]["label"]))
+            rows = []
+            for k in children:
+                branch = labels.get((nid, k)) or label
+                rows.append("\\text{%s}\\ \\dashrightarrow\\ \\text{%s}"
+                            % (_tex_escape(branch), _tex_escape(by_id[k]["label"])))
+            return "\\text{%s}\\left\\{\\begin{array}{l}%s\\end{array}\\right." % (
+                label, sep.join(rows))
         rows = []
         for k in children:
+            branch = labels.get((nid, k))
             if kinds.get(k) == "action":
                 rows.append("\\text{%s}\\ \\dashrightarrow\\ \\text{%s}"
-                            % (label, _tex_escape(by_id[k]["label"])))
+                            % (_tex_escape(branch or label),
+                               _tex_escape(by_id[k]["label"])))
+            elif branch:
+                rows.append("\\text{%s}\\ \\rightarrow\\ %s"
+                            % (_tex_escape(branch), cell(k, seen)))
             else:
                 rows.append(cell(k, seen))
         return "\\text{%s}\\left\\{\\begin{array}{l}%s\\end{array}\\right." % (
@@ -2592,6 +2609,11 @@ def draw_dtree(data, title=""):
             f'{x2:.1f},{mid:.1f} {x2:.1f},{y2:.1f}" fill="none" '
             f'stroke="{LINE}" stroke-width="1.5"{dash} stroke-linejoin="round"/>')
         body.append(_arrow_head(x2, y2, 0, 1))
+        if _label:
+            body.append(
+                f'<text x="{(x1 + x2) / 2:.1f}" y="{mid - 5:.1f}" font-size="12" '
+                f'fill="#6b6f80" text-anchor="middle" '
+                f'font-family="system-ui, sans-serif">{_esc(_label)}</text>')
 
     for nid in xpos:
         n, (w, h) = by_id[nid], sizes[nid]
@@ -2778,12 +2800,19 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
         except Exception as exc:                 # noqa: BLE001
             payload["book_format_latex"] = ""
             payload["warning"] = f"判定树 LaTeX 生成失败：{type(exc).__name__}: {exc}"
+        _bad = [n["label"] for n in _dtree_normalize(data)[0]
+                if ("?" in n["label"] or "？" in n["label"] or "是否" in n["label"])]
+        if _bad:
+            payload["warning"] = (
+                "节点标签尽量写实体/属性名词，不要写问句（如「会员?」→「会员」），"
+                "判断结果放到 edges[].label（如「是会员 / 不是会员」）。问题节点："
+                + "、".join(_bad[:3]))
         payload["note"] = (
-            "图已经画好（这是通用树形图，即判定树/决策树的图形表示）。正文里先写一句"
-            "「下面为吴俊杰、张淼《软件工程》教材原文的大括号格式」，再把 book_format_latex "
-            "原样放进独立的 $$ ... $$ 里（前端会渲染成书上的大括号树）；然后说明图片是"
-            "「通用树形图（判定树/决策树的图形表示）」。两种格式都要给用户，图片卡片会自动显示。"
-            "别贴 SVG/HTML。"
+            "图已经画好（这是通用树形图，即判定树/决策树的图形表示）。正文顺序："
+            "① 先说明「上面这张卡片是通用树形图（判定树/决策树的图形表示）」；"
+            "② 再写「下面为教材里的大括号画法（格式参照吴俊杰、张淼《软件工程》，内容按本题场景）」，"
+            "把 book_format_latex 原样放进独立的 $$ ... $$ 里。教材只提供格式，不要说「教材原文」。"
+            "两种格式都要给用户，图片卡片会自动显示。别贴 SVG/HTML。"
         )
     if key == "state":
         transitions = (data.get("transitions") or data.get("edges") or [])
@@ -2827,11 +2856,12 @@ SPECS = [
                 "  graph: {nodes:[{id,label,color?,x?,y?,kind?:circle}], edges:[{from,to,label?}]}"
                 "（不给坐标就自动环形布局）\n"
                 "  dtree: 判定树/决策树：{nodes:[{id,label,kind?:condition|action}], "
-                "edges:[{from,to}], root?}；条件节点省略 kind，动作/结果节点标 action（绿框），"
-                "叶子没写 kind 也会自动当动作。工具会额外返回 book_format_latex——它是吴俊杰、张淼"
-                "《软件工程》教材原文的大括号格式（LaTeX 源码）；图是通用树形图（判定树/决策树的图形表示）。"
-                "正文里先标注「教材原文大括号格式」，把 book_format_latex 放进独立的 $$ ... $$ 渲染，"
-                "再说明图片是「通用树形图」；两种格式都要给用户。\n"
+                "edges:[{from,to,label?}], root?}；节点省略 kind，动作/结果节点标 action（绿框），"
+                "叶子没写 kind 也会自动当动作。**节点写实体/属性名词，不要写问句**（「会员?」写成「会员」）；"
+                "**分支连线 label 写取值**（是会员/不是会员、≥99/<99、管理员/教职工/学生）。"
+                "工具会返回 book_format_latex（格式参照吴俊杰、张淼《软件工程》教材的大括号画法，"
+                "内容按本题场景）；正文先说明上图是通用树形图，再写「下面为教材里的大括号画法」"
+                "并把 book_format_latex 放进 $$ ... $$；教材只提供格式，别说「教材原文」；两种格式都要给。\n"
                 "  dataflow: {nodes:[{id,label,kind:entity|process|store}], "
                 "edges:[{from,to,label?}], notation?:demarco|gane}\n"
                 "    **画数据流图先定画法**：用户没说就先用 ask_user 问一句，"
