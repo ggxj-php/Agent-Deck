@@ -2228,31 +2228,64 @@ async function refreshContext() {
 
 /* ---------------- SSE ---------------- */
 
-/* 手机切后台、信号抖动的时候，这条流可能悄无声息地断掉：不报错也不结束，
-   reader.read() 就那么挂着，界面永远停在「正在思考…」、发送按钮也一直锁着，
-   看起来就跟没网了一样（刷新才恢复）。所以每收到一块数据就重置一次计时器，
-   静默太久就自己掐掉，把状态放出来。 */
+/* 手机切后台、信号抖动的时候，这条流可能悄无声息地断掉：
+   服务端那一轮本来就在后台线程里跑，断线只是少一个订阅者。所以这里不急着报错——
+   先把断点（progress.since = 第几个事件）记下来，挂起；回前台/联网后调
+   /api/chat/live/stream?since= 从断点接着收，画面就能接上。 */
 const STREAM_IDLE_MS = 60000;
 
-async function streamChat(id, message, onEvent, images, files) {
+/* 解析一条 SSE 流；progress.since 记录「已处理到第几个事件」，重连时用它续传。
+   touch 每读到一块数据就调一次，用来喂外面的静默看门狗。 */
+async function readSSE(body, onEvent, progress, touch) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let doneEvents = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (touch) touch();
+    buffer += decoder.decode(value, { stream: true });
+    let cut;
+    while ((cut = buffer.indexOf('\n\n')) >= 0) {
+      const chunk = buffer.slice(0, cut);
+      buffer = buffer.slice(cut + 2);
+      if (doneEvents) continue;
+      const idLine = chunk.split('\n').find((l) => l.startsWith('id:'));
+      if (idLine) {
+        const seq = Number(idLine.slice(3).trim());
+        if (Number.isFinite(seq)) progress.since = seq + 1;
+      }
+      const line = chunk.split('\n').find((l) => l.startsWith('data:'));
+      if (!line) continue;             // 心跳注释行
+      const payload = line.slice(5).trim();
+      if (payload === '[DONE]') { doneEvents = true; continue; }
+      let event;
+      try {
+        event = JSON.parse(payload);
+      } catch (err) {
+        continue;                      // 半截 JSON，忽略
+      }
+      onEvent(event);                  // 渲染异常让它冒出去
+    }
+  }
+}
+
+async function streamChat(id, message, onEvent, images, files, progress) {
   const body = { session_id: id, message, thinking: thinkingOn() };
   if (images && images.length) body.images = images;
   if (files && files.length) body.files = files;
 
   const controller = new AbortController();
-  let idleTimer = null;
   let stalled = false;
-  const keepAlive = () => {
-    clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => {
+  let last = Date.now();
+  const watchdog = setInterval(() => {
+    if (Date.now() - last > STREAM_IDLE_MS) {
       stalled = true;
       controller.abort();
-    }, STREAM_IDLE_MS);
-  };
+    }
+  }, 3000);
 
-  // 看门狗在 fetch 之前就挂上：响应头回来之前（后端还卡在 LLM 调用）也要能超时，
-  // 否则 fetch 一直挂着，busy 永远为 true、发送键锁死，只能刷新页面。
-  keepAlive();
   try {
     const resp = await fetch('/api/chat', {
       method: 'POST',
@@ -2261,46 +2294,56 @@ async function streamChat(id, message, onEvent, images, files) {
       signal: controller.signal,
     });
     if (!resp.ok || !resp.body) throw new Error(`服务返回 ${resp.status}`);
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let done_events = false; // 收到 [DONE] 后就只把剩余字节读完，不再解析
-
-    keepAlive();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      keepAlive();
-      buffer += decoder.decode(value, { stream: true });
-
-      let cut;
-      while ((cut = buffer.indexOf('\n\n')) >= 0) {
-        const chunk = buffer.slice(0, cut);
-        buffer = buffer.slice(cut + 2);
-        if (done_events) continue;
-        const line = chunk.split('\n').find((l) => l.startsWith('data:'));
-        if (!line) continue;
-        const payload = line.slice(5).trim();
-        if (payload === '[DONE]') {
-          done_events = true;
-          continue;
-        }
-        let event;
-        try {
-          event = JSON.parse(payload);
-        } catch (err) {
-          continue;   // 半截 JSON，忽略
-        }
-        onEvent(event);   // 渲染异常让它冒出去，别再当成半截 JSON 一起吞掉
-      }
-    }
+    progress.started = true;
+    await readSSE(resp.body, onEvent, progress, () => { last = Date.now(); });
   } catch (err) {
-    if (stalled) throw new Error('这条回复断在半路了（网络波动），再发一次就好');
+    if (stalled) throw new Error('这条回复断在半路了（网络波动）');
     throw err;
   } finally {
-    clearTimeout(idleTimer);
+    clearInterval(watchdog);
   }
+}
+
+/* 挂起的这一轮：{sessionId, progress, onEvent, turn} */
+let pendingTurn = null;
+
+/* 把挂起的那一轮接回来。返回 {state, turn}：
+   done    = 已经接完（调用方负责收尾清理）
+   failed  = 接不回来（调用方报错）
+   deferred= 仍在后台/离线，先留着，回到前台再试 */
+async function resumePendingTurn() {
+  const job = pendingTurn;
+  if (!job) return { state: 'done' };
+  let resp;
+  try {
+    resp = await fetch(`/api/chat/live/stream?session_id=${encodeURIComponent(job.sessionId)}&since=${job.progress.since}`, { cache: 'no-store' });
+  } catch (err) {
+    if (document.visibilityState === 'visible' && navigator.onLine !== false) {
+      return { state: 'failed' };
+    }
+    return { state: 'deferred' };
+  }
+  if (!resp.ok || !resp.body) {
+    // 服务端已经没有这一轮的残留（超过 5 分钟）：直接重拉会话历史，答案已经落库
+    pendingTurn = null;
+    try {
+      await switchSession(job.sessionId);
+    } catch (err) {
+      /* 拉历史也失败就按失败处理 */
+      return { state: 'failed' };
+    }
+    return { state: 'done', turn: job.turn };
+  }
+  try {
+    await readSSE(resp.body, job.onEvent, job.progress);
+  } catch (err) {
+    if (document.visibilityState === 'visible' && navigator.onLine !== false) {
+      return { state: 'failed' };
+    }
+    return { state: 'deferred' };
+  }
+  pendingTurn = null;
+  return { state: 'done', turn: job.turn };
 }
 
 function handleEvent(turn, event) {
@@ -2438,6 +2481,17 @@ async function reachable() {
 
 async function resume() {
   if (document.visibilityState !== 'visible') return;
+  if (pendingTurn) {
+    const result = await resumePendingTurn();
+    if (result.state === 'done') {
+      finishTurnCleanup(result.turn);
+    } else if (result.state === 'failed') {
+      const job = pendingTurn;
+      pendingTurn = null;
+      if (job) errorBubble(job.turn, '网络中断，这条回复没接回来，刷新一下页面看结果', true);
+    }
+    return;
+  }
   for (let i = 0; i < RECONNECT_TRIES; i += 1) {
     try {
       if (await reachable()) {
@@ -2459,6 +2513,20 @@ window.addEventListener('online', resume);
 window.addEventListener('pageshow', (e) => { if (e.persisted) resume(); });
 
 /* ---------------- 发送 ---------------- */
+
+function finishTurnCleanup(turn) {
+  clearLoading(turn);
+  flushQueuedStickers(turn, true);
+  settleThinking(turn);
+  if (turn.content) scheduleRender(turn.content);
+  busy = false;
+  sendEl.disabled = false;
+  pickPlusEl.disabled = false;
+  statusEl.textContent = onlineText();
+  refreshContext();     // 这一轮又添了几条，顺便把上下文占用刷新一下
+  loadSessions();       // 首句聊完，标题会从「新会话」变成那句话
+  inputEl.focus();
+}
 
 async function send(text, images, options) {
   if (busy) return;
@@ -2482,23 +2550,34 @@ async function send(text, images, options) {
 
   const turn = addAgent();
   showLoading(turn);            // 首字回来之前先显示「正在想…」
+  const progress = { since: 0, started: false };
+  let sessionId = null;
   try {
-    const id = await ensureSession();
-    await streamChat(id, text, (event) => handleEvent(turn, event), images, filesToSend);
+    sessionId = await ensureSession();
+    await streamChat(sessionId, text, (event) => handleEvent(turn, event), images, filesToSend, progress);
   } catch (err) {
-    errorBubble(turn, err && err.message ? err.message : String(err), true);
+    // 只在「请求已经发出去过」时才尝试接回；没发出去（比如 409）就照常报错
+    if (sessionId && progress.started) {
+      pendingTurn = {
+        sessionId,
+        progress,
+        onEvent: (event) => handleEvent(turn, event),
+        turn,
+      };
+      statusEl.textContent = '网络断了，后台仍在继续生成，回到页面会自动接上…';
+      const result = await resumePendingTurn();
+      if (result.state === 'failed') {
+        pendingTurn = null;
+        errorBubble(turn, err && err.message ? err.message : String(err), true);
+      }
+      // done：交给 finally 收尾；deferred：保持 busy，等回前台再接
+    } else {
+      errorBubble(turn, err && err.message ? err.message : String(err), true);
+    }
   } finally {
-    clearLoading(turn);
-    flushQueuedStickers(turn, true);
-    settleThinking(turn);
-    if (turn.content) scheduleRender(turn.content);
-    busy = false;
-    sendEl.disabled = false;
-    pickPlusEl.disabled = false;
-    statusEl.textContent = onlineText();
-    refreshContext();     // 这一轮又添了几条，顺便把上下文占用刷新一下
-    loadSessions();       // 首句聊完，标题会从「新会话」变成那句话
-    inputEl.focus();
+    if (!(pendingTurn && pendingTurn.turn === turn)) {
+      finishTurnCleanup(turn);
+    }
   }
 }
 
