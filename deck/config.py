@@ -204,7 +204,7 @@ LLM_RETRY_JITTER = float(os.environ.get("LLM_RETRY_JITTER", "0.1") or 0.1)
 # 实测这个 key 每分钟约 24 万 tokens，留 20% 余量；设 0 关闭限速。
 LLM_TPM_BUDGET = int(os.environ.get("LLM_TPM_BUDGET", "200000") or 0)
 # 一次最多排队等多久（秒）；等太久就先发出去赌一把，别让用户干等
-LLM_TPM_MAX_WAIT = float(os.environ.get("LLM_TPM_MAX_WAIT", "45") or 45)
+LLM_TPM_MAX_WAIT = float(os.environ.get("LLM_TPM_MAX_WAIT", "180") or 180)
 # 上下文溢出后，最多再压缩重试几次（DSH 默认 1）
 CONTEXT_OVERFLOW_RETRIES = int(os.environ.get("CONTEXT_OVERFLOW_RETRIES", "1") or 1)
 

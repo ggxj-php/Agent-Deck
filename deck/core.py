@@ -509,8 +509,25 @@ class DeckAgent:
                     if wait_hint >= 3:
                         yield {"type": "notice",
                                "text": f"模型每分钟额度用得快满了，等 {wait_hint:.0f} 秒再继续…"}
-                    ratelimit.acquire(prompt_estimate, budget=LLM_TPM_BUDGET,
-                                      max_wait=LLM_TPM_MAX_WAIT)
+                    # 超预算时不再「等满上限就硬发」——那样只会把上游 429 打出来，
+                    # 而且这一轮会卡在重试里，新消息全被 409 挡住。这里分小段等，
+                    # 每段发一条提示让用户看到进度；等太久就结束这一轮（历史已经落库）。
+                    waited_total = 0.0
+                    while True:
+                        slept = ratelimit.acquire(prompt_estimate, budget=LLM_TPM_BUDGET,
+                                                  max_wait=15.0)
+                        waited_total += slept
+                        if slept < 15.0:
+                            break
+                        if waited_total >= LLM_TPM_MAX_WAIT:
+                            yield {"type": "error",
+                                   "message": "模型每分钟额度已经打满，排队等了 "
+                                              f"{waited_total:.0f} 秒还没腾出来。"
+                                              "这一轮已经保存，过一两分钟再发一次就好。"}
+                            return
+                        yield {"type": "notice",
+                               "text": "模型额度排队中，已等 "
+                                       f"{waited_total:.0f} 秒，继续等…"}
                     for kind, payload in stream_chat(
                         sent_messages, specs, model,
                         api_key=api_key, base_url=base_url, thinking=think,

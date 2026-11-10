@@ -743,9 +743,20 @@ def chat(req: ChatRequest, request: Request):
         # 同一个会话串行处理，避免两条消息交叉写乱历史
         with lock:
             history = store.load_messages(req.session_id, for_model=True)
+            is_first = not history
+            # 先把用户这句写进库：额度排队/限流时这一轮可能跑很久，
+            # 以前要等整轮跑完才落库，刷新页面就「什么都没了」。
+            try:
+                store.save_messages(
+                    req.session_id,
+                    history + [{"role": "user", "content": req.message}],
+                    bool(sess["cut_off"]),
+                    first_user_text=(req.message if is_first else ""),
+                )
+            except Exception:            # noqa: BLE001
+                pass                     # 落库失败别挡住这一轮
             agent = DeckAgent(messages=history, cut_off=bool(sess["cut_off"]),
                               owner=owner_id, interactive=interactive)
-            is_first = not history
             seq = 0
             try:
                 for event in agent.ask_stream(req.message, req.image, req.thinking, req.images):

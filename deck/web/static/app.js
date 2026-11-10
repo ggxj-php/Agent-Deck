@@ -1698,6 +1698,39 @@ function renderSessionList() {
   });
 }
 
+/* 刷新页面 / 切回某个会话时：如果这一轮还在后台跑，把直播流接回来。
+   历史里至少存着用户那句（开始处理时就落库了），不会一片空白。 */
+let attachingLive = null;
+async function maybeAttachLive(id) {
+  if (!id || busy || attachingLive === id) return;
+  attachingLive = id;
+  try {
+    const resp = await fetch(`/api/chat/live?session_id=${encodeURIComponent(id)}`, { cache: 'no-store' });
+    if (!resp.ok) return;
+    const info = await resp.json();
+    if (!info || !info.running) return;
+    const turn = addAgent();
+    showLoading(turn, '后台还在生成，正在接回…');
+    busy = true;
+    sendEl.disabled = true;
+    pickPlusEl.disabled = true;
+    const progress = { since: 0 };
+    try {
+      const stream = await fetch(`/api/chat/live/stream?session_id=${encodeURIComponent(id)}&since=0`, { cache: 'no-store' });
+      if (stream.ok && stream.body) {
+        await readSSE(stream.body, (ev) => handleEvent(turn, ev), progress);
+      }
+    } catch (err) {
+      /* 接不回来就先这样，历史还在，刷新还能看到 */
+    }
+    finishTurnCleanup(turn);
+  } catch (err) {
+    /* 探测失败不影响正常聊天 */
+  } finally {
+    if (attachingLive === id) attachingLive = null;
+  }
+}
+
 async function switchSession(id) {
   // 助手正在回话的时候切会话会让两段流搅在一起，先拦一下并说明原因
   if (busy) {
@@ -1751,6 +1784,7 @@ async function switchSession(id) {
     renderSessionList();
     pinToBottom();            // 切会话后稳稳吸底
     statusEl.textContent = onlineText();
+    maybeAttachLive(id);      // 这一轮要是还在后台跑，把直播流接回来
   } catch (err) {
     statusEl.textContent = t('switchFailedReason', { reason: (err && err.message) || t('unknownReason') });
   }
@@ -2293,7 +2327,12 @@ async function streamChat(id, message, onEvent, images, files, progress) {
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-    if (!resp.ok || !resp.body) throw new Error(`服务返回 ${resp.status}`);
+    if (!resp.ok || !resp.body) {
+      // 409「上一条还在回」这种带上服务端的说明，别只显示状态码
+      let detail = '';
+      try { detail = (await resp.json()).detail || ''; } catch (err) { /* 不是 JSON 就算了 */ }
+      throw new Error(detail || `服务返回 ${resp.status}`);
+    }
     progress.started = true;
     await readSSE(resp.body, onEvent, progress, () => { last = Date.now(); });
   } catch (err) {
@@ -2926,6 +2965,7 @@ armLeaveGuard();
         }
         paintContext(data.context);
         pinToBottom();          // 历史渲染完稳稳吸底
+        maybeAttachLive(latest); // 这一轮要是还在后台跑，把直播流接回来（刷新页面不丢任务）
       }
     }
     if (!sessionId) {
