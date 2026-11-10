@@ -2480,6 +2480,53 @@ def _dtree_text(data):
     return "\n".join(lines)
 
 
+def _tex_escape(text):
+    """标签里可能破坏 LaTeX 的字符先转义。"""
+    special = {
+        "\\": "\\textbackslash{}", "&": "\\&", "%": "\\%", "$": "\\$",
+        "#": "\\#", "_": "\\_", "{": "\\{", "}": "\\}",
+        "~": "\\textasciitilde{}", "^": "\\textasciicircum{}",
+    }
+    return "".join(special.get(ch, ch) for ch in str(text or ""))
+
+
+def _dtree_latex(data):
+    """教材图 5-8 那种大括号格式的 LaTeX（前端渲染出来和书上一样）。"""
+    nodes, edges, root = _dtree_normalize(data)
+    if not nodes or not root:
+        return ""
+    by_id = {n["id"]: n for n in nodes}
+    kids = _dtree_children(nodes, edges)
+    kinds = _dtree_kinds(nodes, kids, root)
+    sep = " \\\\ "
+
+    def cell(nid, seen):
+        if nid not in by_id or nid in seen:
+            return ""
+        seen = seen | {nid}
+        label = _tex_escape(by_id[nid]["label"])
+        children = [k for k in kids.get(nid, []) if k in by_id and k not in seen]
+        if not children:
+            return "\\text{%s}" % label
+        cond = [k for k in children if kinds.get(k) != "action"]
+        acts = [k for k in children if kinds.get(k) == "action"]
+        if not cond:
+            return sep.join(
+                "\\text{%s}\\ \\dashrightarrow\\ \\text{%s}"
+                % (label, _tex_escape(by_id[k]["label"])) for k in acts)
+        rows = []
+        for k in children:
+            if kinds.get(k) == "action":
+                rows.append("\\text{%s}\\ \\dashrightarrow\\ \\text{%s}"
+                            % (label, _tex_escape(by_id[k]["label"])))
+            else:
+                rows.append(cell(k, seen))
+        return "\\text{%s}\\left\\{\\begin{array}{l}%s\\end{array}\\right." % (
+            label, sep.join(rows))
+
+    return cell(root, set())
+
+
 def draw_dtree(data, title=""):
     """判定树/决策树：条件白框 + 动作绿框，层级排布，动作连线用虚线。"""
     nodes, edges, root = _dtree_normalize(data)
@@ -2727,15 +2774,16 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
     }
     if key == "dtree":
         try:
-            payload["book_format"] = _dtree_text(data)
+            payload["book_format_latex"] = _dtree_latex(data)
         except Exception as exc:                 # noqa: BLE001
-            payload["book_format"] = ""
-            payload["warning"] = f"判定树文本生成失败：{type(exc).__name__}: {exc}"
+            payload["book_format_latex"] = ""
+            payload["warning"] = f"判定树 LaTeX 生成失败：{type(exc).__name__}: {exc}"
         payload["note"] = (
             "图已经画好（这是通用树形图，即判定树/决策树的图形表示）。正文里先写一句"
-            "「下面为吴俊杰、张淼《软件工程》教材原文的大括号格式」，再把 book_format 原样贴进代码块；"
-            "并说明图片是「通用树形图（判定树/决策树的图形表示）」。两种格式都要给用户，"
-            "图片卡片会自动显示。别贴 SVG/HTML。"
+            "「下面为吴俊杰、张淼《软件工程》教材原文的大括号格式」，再把 book_format_latex "
+            "原样放进独立的 $$ ... $$ 里（前端会渲染成书上的大括号树）；然后说明图片是"
+            "「通用树形图（判定树/决策树的图形表示）」。两种格式都要给用户，图片卡片会自动显示。"
+            "别贴 SVG/HTML。"
         )
     if key == "state":
         transitions = (data.get("transitions") or data.get("edges") or [])
@@ -2780,10 +2828,10 @@ SPECS = [
                 "（不给坐标就自动环形布局）\n"
                 "  dtree: 判定树/决策树：{nodes:[{id,label,kind?:condition|action}], "
                 "edges:[{from,to}], root?}；条件节点省略 kind，动作/结果节点标 action（绿框），"
-                "叶子没写 kind 也会自动当动作。工具会额外返回 book_format——它是吴俊杰、张淼"
-                "《软件工程》教材原文的大括号格式；图是通用树形图（判定树/决策树的图形表示）。"
-                "正文里先标注「教材原文大括号格式」，贴 book_format，再说明图片是「通用树形图」；"
-                "两种格式都要给用户。\n"
+                "叶子没写 kind 也会自动当动作。工具会额外返回 book_format_latex——它是吴俊杰、张淼"
+                "《软件工程》教材原文的大括号格式（LaTeX 源码）；图是通用树形图（判定树/决策树的图形表示）。"
+                "正文里先标注「教材原文大括号格式」，把 book_format_latex 放进独立的 $$ ... $$ 渲染，"
+                "再说明图片是「通用树形图」；两种格式都要给用户。\n"
                 "  dataflow: {nodes:[{id,label,kind:entity|process|store}], "
                 "edges:[{from,to,label?}], notation?:demarco|gane}\n"
                 "    **画数据流图先定画法**：用户没说就先用 ask_user 问一句，"
