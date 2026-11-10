@@ -2373,6 +2373,190 @@ def _dot_arch(data):
     return "\n".join(lines)
 
 
+# ---------------- 判定树 / 决策树 ----------------
+DTREE_ACTION_KINDS = {"action", "动作", "结果", "leaf", "result", "操作", "输出", "行为"}
+
+
+def _dtree_is_action(node):
+    return str(node.get("kind") or "").strip().lower() in DTREE_ACTION_KINDS
+
+
+def _dtree_normalize(data):
+    """把两种入参都归一成 (nodes, edges, root)：
+
+    1) 扁平：{nodes:[{id,label,kind?}], edges:[{from,to}], root?}
+    2) 嵌套：{root:{label, children:[...], action?: "..."}}
+    """
+    root_spec = data.get("root")
+    if isinstance(root_spec, dict):
+        nodes, edges = [], []
+
+        def walk(obj, parent=None):
+            nid = "n%d" % len(nodes)
+            label = str(obj.get("label") or obj.get("name") or "").strip()
+            kind = "action" if _dtree_is_action(obj) else "condition"
+            nodes.append({"id": nid, "label": label, "kind": kind})
+            if parent is not None:
+                edges.append((parent, nid, ""))
+            for ch in obj.get("children") or []:
+                walk(ch if isinstance(ch, dict) else {"label": str(ch)}, nid)
+            act = obj.get("action")
+            if isinstance(act, str) and act.strip():
+                walk({"label": act.strip(), "kind": "action"}, nid)
+            return nid
+
+        root = walk(root_spec)
+        return nodes, edges, root
+
+    nodes = _norm_nodes(data.get("nodes"))
+    edges = _norm_edges(data.get("edges"))
+    for n in nodes:
+        n["kind"] = "action" if _dtree_is_action(n) else "condition"
+    ids = {n["id"] for n in nodes}
+    incoming = {b for _, b, _ in edges}
+    root = str(data.get("root") or "")
+    if not root or root not in ids:
+        root = next((n["id"] for n in nodes if n["id"] not in incoming),
+                    nodes[0]["id"] if nodes else "")
+    return nodes, edges, root
+
+
+def _dtree_children(nodes, edges):
+    kids = {n["id"]: [] for n in nodes}
+    for a, b, _label in edges:
+        if a in kids and b in kids:
+            kids[a].append(b)
+    return kids
+
+
+def _dtree_kinds(nodes, kids, root):
+    """节点类型：显式 action 或没孩子的非根节点都算动作（判定树叶子=动作）。"""
+    out = {}
+    for n in nodes:
+        nid = n["id"]
+        if n.get("kind") in DTREE_ACTION_KINDS:
+            out[nid] = "action"
+        elif nid != root and not kids.get(nid):
+            out[nid] = "action"
+        else:
+            out[nid] = "condition"
+    return out
+
+
+def _dtree_text(data):
+    """教材图 5-8 那种大括号格式的纯文本。"""
+    nodes, edges, root = _dtree_normalize(data)
+    if not nodes or not root:
+        return ""
+    by_id = {n["id"]: n for n in nodes}
+    kids = _dtree_children(nodes, edges)
+    kinds = _dtree_kinds(nodes, kids, root)
+    lines = []
+
+    def walk(nid, depth, seen):
+        if nid not in by_id or nid in seen:
+            return
+        seen = seen | {nid}
+        label = by_id[nid]["label"]
+        children = [k for k in kids.get(nid, []) if k in by_id and k not in seen]
+        if not children:
+            lines.append("  " * depth + label)
+            return
+        cond = [k for k in children if kinds.get(k) != "action"]
+        acts = [k for k in children if kinds.get(k) == "action"]
+        if not cond:
+            for k in acts:
+                lines.append("  " * depth + label + " ┈ " + by_id[k]["label"])
+            return
+        lines.append("  " * depth + label + " {")
+        for k in children:
+            if kinds.get(k) == "action":
+                lines.append("  " * (depth + 1) + label + " ┈ " + by_id[k]["label"])
+            else:
+                walk(k, depth + 1, seen)
+        lines.append("  " * depth + "}")
+
+    walk(root, 0, set())
+    return "\n".join(lines)
+
+
+def draw_dtree(data, title=""):
+    """判定树/决策树：条件白框 + 动作绿框，层级排布，动作连线用虚线。"""
+    nodes, edges, root = _dtree_normalize(data)
+    if not nodes:
+        raise ValueError("nodes 是空的，至少给一个根节点")
+    by_id = {n["id"]: n for n in nodes}
+    kids = _dtree_children(nodes, edges)
+    kinds = _dtree_kinds(nodes, kids, root)
+
+    order, depth = [], {}
+    seen = set()
+
+    def collect(nid, d):
+        if nid in seen or nid not in by_id:
+            return
+        seen.add(nid)
+        depth[nid] = d
+        ch = [k for k in kids.get(nid, []) if k in by_id]
+        if not ch:
+            order.append(nid)
+        for k in ch:
+            collect(k, d + 1)
+
+    collect(root, 0)
+    if not order:
+        return _canvas(360, 150, "", title)
+
+    sizes = {n["id"]: (max(96.0, _label_len(n["label"]) + 34), 40.0) for n in nodes}
+    xpos, cursor = {}, 34.0
+    for nid in order:
+        w, _h = sizes[nid]
+        xpos[nid] = cursor + w / 2
+        cursor += w + 26
+
+    def place(nid):
+        nonlocal cursor
+        if nid in xpos:
+            return xpos[nid]
+        ch = [k for k in kids.get(nid, []) if k in by_id and k in depth]
+        if not ch:
+            w, _h = sizes[nid]
+            xpos[nid] = cursor + w / 2
+            cursor += w + 26
+        else:
+            xs = [place(k) for k in ch]
+            xpos[nid] = sum(xs) / len(xs)
+        return xpos[nid]
+
+    place(root)
+    base_y = 66.0 if title else 42.0
+    ypos = {nid: base_y + depth.get(nid, 0) * 102.0 for nid in xpos}
+
+    body = []
+    for a, b, _label in edges:
+        if a not in xpos or b not in ypos:
+            continue
+        x1, y1 = xpos[a], ypos[a] + 20
+        x2, y2 = xpos[b], ypos[b] - 20
+        mid = (y1 + y2) / 2
+        dash = ' stroke-dasharray="5 4"' if kinds.get(b) == "action" else ""
+        body.append(
+            f'<polyline points="{x1:.1f},{y1:.1f} {x1:.1f},{mid:.1f} '
+            f'{x2:.1f},{mid:.1f} {x2:.1f},{y2:.1f}" fill="none" '
+            f'stroke="{LINE}" stroke-width="1.5"{dash} stroke-linejoin="round"/>')
+        body.append(_arrow_head(x2, y2, 0, 1))
+
+    for nid in xpos:
+        n, (w, h) = by_id[nid], sizes[nid]
+        color = "green" if kinds.get(nid) == "action" else "white"
+        body.append(_box(xpos[nid], ypos[nid], w, h, n["label"],
+                         color=color, bold=(nid == root)))
+
+    width = max(xpos[nid] + sizes[nid][0] / 2 for nid in xpos) + 34
+    height = max(ypos[nid] + 20 for nid in xpos) + 30
+    return _canvas(width, height, "".join(body), title)
+
+
 GRAPHVIZ_BUILDERS = {
     "tree": _dot_tree,
     "flow": _dot_flow,
@@ -2391,6 +2575,7 @@ DRAWERS = {
     "n-s": draw_ns,
     "pad": draw_pad,
     "graph": draw_graph,
+    "dtree": draw_dtree,
     "dataflow": draw_dataflow,
     "dfd": draw_dataflow,
     "arch": draw_arch,
@@ -2410,6 +2595,9 @@ KIND_ALIAS = {
     "nassi": "ns", "nassi-shneiderman": "ns", "nsd": "ns",
     "pad": "pad", "pad图": "pad", "问题分析图": "pad", "问题分析": "pad",
     "图": "graph", "关系图": "graph", "graph": "graph",
+    "dtree": "dtree", "decision_tree": "dtree", "decisiontree": "dtree",
+    "decision tree": "dtree", "判定树": "dtree", "决策树": "dtree",
+    "判定树图": "dtree", "决策树图": "dtree", "dt": "dtree",
     "数据流图": "dataflow", "数据流": "dataflow", "dfd": "dataflow", "dataflow": "dataflow",
     "架构图": "arch", "架构": "arch", "arch": "arch", "architecture": "arch",
     "时序图": "sequence", "时序": "sequence", "sequence": "sequence",
@@ -2537,6 +2725,17 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
         "title": str(title or ""),
         "note": "已经画成卡片给用户看了，正文里一两句话说明画的是什么就行，别再贴任何 SVG/HTML。",
     }
+    if key == "dtree":
+        try:
+            payload["book_format"] = _dtree_text(data)
+        except Exception as exc:                 # noqa: BLE001
+            payload["book_format"] = ""
+            payload["warning"] = f"判定树文本生成失败：{type(exc).__name__}: {exc}"
+        payload["note"] = (
+            "图已经画好。正文里把 book_format 原样贴进代码块（教材大括号格式），"
+            "再用一两句话说明；图片卡片会自动显示。两种格式都要给用户：大括号文本 + 图片。"
+            "别贴 SVG/HTML。"
+        )
     if key == "state":
         transitions = (data.get("transitions") or data.get("edges") or [])
         if not transitions:
@@ -2578,6 +2777,11 @@ SPECS = [
                 "程序从左边竖线开始从上往下排，分支/循环体画在右侧\n"
                 "  graph: {nodes:[{id,label,color?,x?,y?,kind?:circle}], edges:[{from,to,label?}]}"
                 "（不给坐标就自动环形布局）\n"
+                "  dtree: 判定树/决策树：{nodes:[{id,label,kind?:condition|action}], "
+                "edges:[{from,to}], root?}；条件节点省略 kind，动作/结果节点标 action（绿框），"
+                "叶子没写 kind 也会自动当动作。工具会额外返回 book_format（教材图 5-8 那种"
+                "大括号文本）；正文里把 book_format 原样贴进代码块，同时图片会作为卡片显示——"
+                "两种格式都要给用户。\n"
                 "  dataflow: {nodes:[{id,label,kind:entity|process|store}], "
                 "edges:[{from,to,label?}], notation?:demarco|gane}\n"
                 "    **画数据流图先定画法**：用户没说就先用 ask_user 问一句，"

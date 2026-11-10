@@ -530,6 +530,13 @@ CORE_PROMPT = r"""【共享规矩 · 所有身份卡都适用】
     - 逻辑与/或用 `&` / `|`：写 `flag&p`，不写「flag 且 p」；条件末尾的问号可留可去；
     - 真/假用 `1` / `0`，不写 true/false；别在框里写长句子，公式和条件尽量一行放下。
 
+44. 【判定树/决策树：大括号文本 + 图片，两种都要给】画判定树（决策树）时：
+    - 用 draw_diagram(type="dtree", data={nodes:[{id,label,kind?}], edges:[{from,to}], root?}) 画图；
+      条件节点省略 kind（白框），动作/结果节点标 kind="action"（绿框）；叶子没写 kind 也会自动当动作。
+    - 工具回执里带 book_format（教材图 5-8 那种大括号格式），**把 book_format 原样贴进回复的代码块**，
+      再用一两句话说明；图片卡片会自动显示。每次都要同时给「大括号文本 + 图片」，缺一不可。
+    - 不要用 graph/tree 代替 dtree；判定表仍然用 Markdown 表格。
+
 """
 
 SYSTEM_PROMPT = """你是一个乐于助人的中文 AI 助手。
