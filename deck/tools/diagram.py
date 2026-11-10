@@ -2732,9 +2732,10 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
             payload["book_format"] = ""
             payload["warning"] = f"判定树文本生成失败：{type(exc).__name__}: {exc}"
         payload["note"] = (
-            "图已经画好。正文里把 book_format 原样贴进代码块（教材大括号格式），"
-            "再用一两句话说明；图片卡片会自动显示。两种格式都要给用户：大括号文本 + 图片。"
-            "别贴 SVG/HTML。"
+            "图已经画好（这是通用树形图，即判定树/决策树的图形表示）。正文里先写一句"
+            "「下面为吴俊杰、张淼《软件工程》教材原文的大括号格式」，再把 book_format 原样贴进代码块；"
+            "并说明图片是「通用树形图（判定树/决策树的图形表示）」。两种格式都要给用户，"
+            "图片卡片会自动显示。别贴 SVG/HTML。"
         )
     if key == "state":
         transitions = (data.get("transitions") or data.get("edges") or [])
@@ -2779,8 +2780,9 @@ SPECS = [
                 "（不给坐标就自动环形布局）\n"
                 "  dtree: 判定树/决策树：{nodes:[{id,label,kind?:condition|action}], "
                 "edges:[{from,to}], root?}；条件节点省略 kind，动作/结果节点标 action（绿框），"
-                "叶子没写 kind 也会自动当动作。工具会额外返回 book_format（教材图 5-8 那种"
-                "大括号文本）；正文里把 book_format 原样贴进代码块，同时图片会作为卡片显示——"
+                "叶子没写 kind 也会自动当动作。工具会额外返回 book_format——它是吴俊杰、张淼"
+                "《软件工程》教材原文的大括号格式；图是通用树形图（判定树/决策树的图形表示）。"
+                "正文里先标注「教材原文大括号格式」，贴 book_format，再说明图片是「通用树形图」；"
                 "两种格式都要给用户。\n"
                 "  dataflow: {nodes:[{id,label,kind:entity|process|store}], "
                 "edges:[{from,to,label?}], notation?:demarco|gane}\n"
