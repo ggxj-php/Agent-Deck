@@ -2502,6 +2502,9 @@ def _dtree_latex(data):
     kids = _dtree_children(nodes, edges)
     kinds = _dtree_kinds(nodes, kids, root)
     labels = {(a, b): str(lab).strip() for a, b, lab in edges if str(lab or "").strip()}
+    # 分类分支（合法用户 / 管理员…）的 label 和子节点名一样时是重复的，去掉；
+    # 条件分支（正确用户名密码 / 错误用户名密码、是/否、≥99）保留。
+    labels = {k: v for k, v in labels.items() if v and v != by_id[k[1]]["label"]}
     sep = " \\\\ "
 
     def cell(nid, seen):
@@ -2609,7 +2612,7 @@ def draw_dtree(data, title=""):
             f'{x2:.1f},{mid:.1f} {x2:.1f},{y2:.1f}" fill="none" '
             f'stroke="{LINE}" stroke-width="1.5"{dash} stroke-linejoin="round"/>')
         body.append(_arrow_head(x2, y2, 0, 1))
-        if _label:
+        if _label and _label != by_id[b]["label"]:
             body.append(
                 f'<text x="{(x1 + x2) / 2:.1f}" y="{mid - 5:.1f}" font-size="12" '
                 f'fill="#6b6f80" text-anchor="middle" '
@@ -2859,6 +2862,9 @@ SPECS = [
                 "edges:[{from,to,label?}], root?}；节点省略 kind，动作/结果节点标 action（绿框），"
                 "叶子没写 kind 也会自动当动作。**节点写实体/属性名词，不要写问句**（「会员?」写成「会员」）；"
                 "**分支连线 label 写取值**（是会员/不是会员、≥99/<99、管理员/教职工/学生）。"
+                "**分层顺序按教材：先大类（合法/非法用户）→ 子类（管理员/会员/普通用户）→ "
+                "条件（正确/错误用户名密码）→ 动作**；别把条件提到最前面、也别把用户组塞在条件下面；"
+                "条件值直接写成分支 label（正确用户名密码/错误用户名密码），别再插一层「用户名密码」节点。\n"
                 "工具会返回 book_format_latex（格式参照吴俊杰、张淼《软件工程》教材的大括号画法，"
                 "内容按本题场景）；正文先说明上图是通用树形图，再写「下面为教材里的大括号画法」"
                 "并把 book_format_latex 放进 $$ ... $$；教材只提供格式，别说「教材原文」；两种格式都要给。\n"
