@@ -2547,6 +2547,163 @@ def _dtree_latex(data):
     return cell(root, set())
 
 
+_BT_FS = 15
+_BT_LH = 24
+_BT_GAP = 6
+_BT_ARROW = 32
+_BT_BRACE = 12
+_BT_PAD = 8
+_BT_TGAP = 4
+
+
+def _bt_w(text):
+    total = 0.0
+    for ch in str(text or ""):
+        total += _BT_FS if ord(ch) > 0x2E80 else _BT_FS * 0.56
+    return total
+
+
+def _dtree_brace_svg(data):
+    """教材图 5-8 那种大括号格式的 SVG（网页和 App 都当图片显示）。"""
+    nodes, edges, root = _dtree_normalize(data)
+    if not nodes or not root:
+        return ""
+    by_id = {n["id"]: n for n in nodes}
+    kids = _dtree_children(nodes, edges)
+    kinds = _dtree_kinds(nodes, kids, root)
+    labels = {(a, b): str(lab).strip() for a, b, lab in edges if str(lab or "").strip()}
+    labels = {k: v for k, v in labels.items() if v and v != by_id[k[1]]["label"]}
+
+    def row_w(k, branch):
+        return _bt_w(branch) + _BT_ARROW + _BT_TGAP + _bt_w(by_id[k]["label"])
+
+    def rows_of(nid):
+        out = []
+        for k in [x for x in kids.get(nid, []) if x in by_id]:
+            branch = labels.get((nid, k))
+            if kinds.get(k) == "action":
+                out.append((k, branch, True))
+            else:
+                out.append((k, branch, False))
+        return out
+
+    def size(nid, seen):
+        if nid not in by_id or nid in seen:
+            return 0.0, _BT_LH
+        seen = seen | {nid}
+        label = by_id[nid]["label"]
+        rows = [r for r in rows_of(nid) if r[0] not in seen]
+        if not rows:
+            return _bt_w(label), _BT_LH
+        if not [r for r in rows if not r[2]]:
+            if len(rows) == 1 and not rows[0][1]:
+                k = rows[0][0]
+                return _bt_w(label) + _BT_ARROW + _BT_TGAP + _bt_w(by_id[k]["label"]), _BT_LH
+            rw = max(row_w(r[0], r[1] or label) for r in rows)
+            bh = len(rows) * _BT_LH + (len(rows) - 1) * _BT_GAP
+            return _bt_w(label) + _BT_PAD + _BT_BRACE + _BT_PAD + rw, bh
+        bw = 0.0
+        bh = 0.0
+        for i, (k, branch, action) in enumerate(rows):
+            if action:
+                cw, ch = row_w(k, branch), _BT_LH
+            elif not branch:
+                cw, ch = size(k, seen)
+            else:
+                iw, ih = size(k, seen)
+                cw, ch = _bt_w(branch) + _BT_ARROW + _BT_TGAP + iw, ih
+            bw = max(bw, cw)
+            bh += ch + (_BT_GAP if i else 0)
+        return _bt_w(label) + _BT_PAD + _BT_BRACE + _BT_PAD + bw, max(_BT_LH, bh)
+
+    parts = []
+
+    def ink(x, cy, s, color="#2b2f3a", weight="400"):
+        parts.append(f'<text x="{x:.1f}" y="{cy + 5.2:.1f}" font-size="{_BT_FS}" '
+                     f'fill="{color}" font-weight="{weight}">{_esc(s)}</text>')
+
+    def arrow(x1, cy):
+        x2 = x1 + _BT_ARROW
+        parts.append(f'<line x1="{x1:.1f}" y1="{cy:.1f}" x2="{x2 - 6:.1f}" y2="{cy:.1f}" '
+                     f'stroke="#6b6f80" stroke-width="1.3" stroke-dasharray="5 4"/>')
+        parts.append(f'<path d="M {x2:.1f},{cy:.1f} l -7,-3.2 l 0,6.4 z" fill="#6b6f80"/>')
+
+    def brace(bx, top, bh):
+        mid = top + bh / 2.0
+        parts.append(
+            f'<path d="M {bx + 7:.1f},{top:.1f} Q {bx:.1f},{top:.1f} {bx:.1f},{top + 7:.1f} '
+            f'L {bx:.1f},{mid - 6:.1f} Q {bx:.1f},{mid:.1f} {bx - 6:.1f},{mid:.1f} '
+            f'Q {bx:.1f},{mid:.1f} {bx:.1f},{mid + 6:.1f} L {bx:.1f},{top + bh - 7:.1f} '
+            f'Q {bx:.1f},{top + bh:.1f} {bx + 7:.1f},{top + bh:.1f}" fill="none" '
+            f'stroke="#2b2f3a" stroke-width="1.4"/>')
+
+    def row(k, branch, action, x, ry):
+        ink(x, ry, branch, "#4a4f5c")
+        arrow(x + _bt_w(branch) + 3, ry)
+        ink(x + _bt_w(branch) + _BT_ARROW + _BT_TGAP, ry,
+            by_id[k]["label"], "#1f7a45" if action else "#2b2f3a")
+
+    def draw(nid, x, cy, seen):
+        if nid not in by_id or nid in seen:
+            return
+        seen = seen | {nid}
+        label = by_id[nid]["label"]
+        rows = [r for r in rows_of(nid) if r[0] not in seen]
+        if not rows:
+            return ink(x, cy, label)
+        if not [r for r in rows if not r[2]]:
+            if len(rows) == 1 and not rows[0][1]:
+                k = rows[0][0]
+                ink(x, cy, label)
+                arrow(x + _bt_w(label) + 3, cy)
+                ink(x + _bt_w(label) + _BT_ARROW + _BT_TGAP, cy,
+                    by_id[k]["label"], "#1f7a45")
+                return
+            ink(x, cy, label)
+            bh = len(rows) * _BT_LH + (len(rows) - 1) * _BT_GAP
+            top = cy - bh / 2.0
+            bx = x + _bt_w(label) + _BT_PAD
+            brace(bx, top, bh)
+            cx = bx + _BT_BRACE + _BT_PAD
+            for i, (k, branch, _action) in enumerate(rows):
+                ry = top + i * (_BT_LH + _BT_GAP) + _BT_LH / 2.0
+                row(k, branch or label, True, cx, ry)
+            return
+        ink(x, cy, label)
+        heights = []
+        bh = 0.0
+        for i, (k, branch, action) in enumerate(rows):
+            ch = _BT_LH if action else size(k, seen)[1]
+            heights.append(ch)
+            bh += ch + (_BT_GAP if i else 0)
+        top = cy - bh / 2.0
+        bx = x + _bt_w(label) + _BT_PAD
+        brace(bx, top, bh)
+        cx = bx + _BT_BRACE + _BT_PAD
+        cur = top
+        for (k, branch, action), ch in zip(rows, heights):
+            ry = cur + ch / 2.0
+            if action:
+                row(k, branch or label, True, cx, ry)
+            elif not branch:
+                draw(k, cx, ry, seen)
+            else:
+                ink(cx, ry, branch, "#4a4f5c")
+                arrow(cx + _bt_w(branch) + 3, ry)
+                draw(k, cx + _bt_w(branch) + _BT_ARROW + _BT_TGAP, ry, seen)
+            cur += ch + _BT_GAP
+
+    w, h = size(root, set())
+    W = int(w + 24)
+    H = int(h + 24)
+    parts.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
+                 f'viewBox="0 0 {W} {H}">')
+    parts.append('<g font-family="system-ui,-apple-system,\'PingFang SC\',\'Microsoft YaHei\',sans-serif">')
+    draw(root, 12, 12 + h / 2.0, set())
+    parts.append('</g></svg>')
+    return "".join(parts)
+
+
 def draw_dtree(data, title=""):
     """判定树/决策树：条件白框 + 动作绿框，层级排布，动作连线用虚线。"""
     nodes, edges, root = _dtree_normalize(data)
@@ -2803,6 +2960,19 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
         except Exception as exc:                 # noqa: BLE001
             payload["book_format_latex"] = ""
             payload["warning"] = f"判定树 LaTeX 生成失败：{type(exc).__name__}: {exc}"
+        try:
+            brace = _dtree_brace_svg(data)
+            if brace:
+                head = ('<!doctype html><html><head><meta charset="utf-8"><style>'
+                        'html,body{margin:0;padding:0;background:transparent;}'
+                        'svg{display:block;margin:0 auto;max-width:100%;height:auto;}'
+                        '</style></head><body>')
+                bid = render._store(head + brace + "</body></html>", "教材大括号格式")
+                _remember_svg(bid, brace)
+                payload["book_artifact_id"] = bid
+                payload["book_title"] = "教材大括号格式（参照吴俊杰、张淼《软件工程》）"
+        except Exception:                    # noqa: BLE001
+            payload["book_artifact_id"] = ""
         _bad = [n["label"] for n in _dtree_normalize(data)[0]
                 if ("?" in n["label"] or "？" in n["label"] or "是否" in n["label"])]
         if _bad:
@@ -2811,11 +2981,11 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
                 "判断结果放到 edges[].label（如「是会员 / 不是会员」）。问题节点："
                 + "、".join(_bad[:3]))
         payload["note"] = (
-            "图已经画好（这是通用树形图，即判定树/决策树的图形表示）。正文顺序："
-            "① 先说明「上面这张卡片是通用树形图（判定树/决策树的图形表示）」；"
-            "② 再写「下面为教材里的大括号画法（格式参照吴俊杰、张淼《软件工程》，内容按本题场景）」，"
-            "把 book_format_latex 原样放进独立的 $$ ... $$ 里。教材只提供格式，不要说「教材原文」。"
-            "两种格式都要给用户，图片卡片会自动显示。别贴 SVG/HTML。"
+            "已经画好两张卡片：通用树形图 + 教材大括号格式（都是图片，网页和 App 都能正常显示）。"
+            "正文顺序：① 先说明「上面这张卡片是通用树形图（判定树/决策树的图形表示）」；"
+            "② 再说明「下面这张是教材里的大括号格式（格式参照吴俊杰、张淼《软件工程》，内容按本题场景）」。"
+            "**不要再贴 LaTeX、SVG、HTML，也不要自己写 $$ ... $$**；两张卡片会自动显示。"
+            "教材只提供格式，不要说「教材原文」。"
         )
     if key == "state":
         transitions = (data.get("transitions") or data.get("edges") or [])
@@ -2868,9 +3038,9 @@ SPECS = [
                 "**不要「域名状态/保留名单/归属/用户组」这类概括中间节点**，直接把下一层分类值写成子节点或分支。"
                 "域名例：域名注册→格式合法/格式不合法；格式合法→未注册/已注册；未注册→保留域名/非保留域名；"
                 "已注册→本人所有/他人所有；不要再套「域名格式/域名状态/保留名单/归属」节点。\n"
-                "工具会返回 book_format_latex（格式参照吴俊杰、张淼《软件工程》教材的大括号画法，"
-                "内容按本题场景）；正文先说明上图是通用树形图，再写「下面为教材里的大括号画法」"
-                "并把 book_format_latex 放进 $$ ... $$；教材只提供格式，别说「教材原文」；两种格式都要给。\n"
+                "工具会生成**两张图片卡片**：通用树形图 + 教材大括号格式（格式参照吴俊杰、张淼"
+                "《软件工程》，内容按本题场景；网页和 App 都能显示）；正文先说明上图是通用树形图，"
+                "再说明下面是教材大括号格式；**别再贴 LaTeX/SVG/HTML**；教材只提供格式，别说「教材原文」；两种格式都要给。\n"
                 "  dataflow: {nodes:[{id,label,kind:entity|process|store}], "
                 "edges:[{from,to,label?}], notation?:demarco|gane}\n"
                 "    **画数据流图先定画法**：用户没说就先用 ask_user 问一句，"

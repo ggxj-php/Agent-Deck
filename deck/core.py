@@ -768,6 +768,21 @@ class DeckAgent:
                                     item["content"] = append_marks(
                                         item.get("content") or "", [(aid, title)])
                                     break
+                        if payload.get("book_artifact_id"):
+                            bid = payload["book_artifact_id"]
+                            btitle = payload.get("book_title") or ""
+                            if bid:
+                                bevent = {"type": "artifact", "id": bid, "title": btitle}
+                                if name == "draw_diagram":
+                                    bsvg = diagram_tool.svg_of(bid)
+                                    if bsvg:
+                                        bevent["svg"] = bsvg
+                                yield bevent
+                                for item in reversed(self.messages):
+                                    if item.get("role") == "assistant":
+                                        item["content"] = append_marks(
+                                            item.get("content") or "", [(bid, btitle)])
+                                        break
 
                     if name == "send_sticker":
                         moods = _sticker_moods(args)
