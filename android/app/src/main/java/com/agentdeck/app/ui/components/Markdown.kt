@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,8 +35,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -301,13 +308,13 @@ fun parseMarkdown(source: String): List<MdBlock> {
             continue
         }
 
-        // 表格
-        if (trimmed.startsWith("|") && index + 1 < lines.size && TABLE_DIVIDER.matches(lines[index + 1].trim())) {
+        // 表格：首行带竖线、下一行是对齐行。首尾的竖线可以省（和 GFM 一致）
+        if (trimmed.contains("|") && index + 1 < lines.size && TABLE_DIVIDER.matches(lines[index + 1].trim())) {
             flushParagraph(paragraph)
             val header = splitRow(trimmed)
             val rows = mutableListOf<List<String>>()
             index += 2
-            while (index < lines.size && lines[index].trim().startsWith("|")) {
+            while (index < lines.size && lines[index].trim().contains("|") && !lines[index].isBlank()) {
                 rows += splitRow(lines[index].trim())
                 index++
             }
@@ -360,8 +367,50 @@ fun parseMarkdown(source: String): List<MdBlock> {
     return blocks
 }
 
-private fun splitRow(line: String): List<String> =
-    line.trim().trim('|').split('|').map { it.trim() }
+/**
+ * 按 `|` 切单元格。`\|` 是转义的竖线；行内代码 `` `a|b` `` 和公式 `$|x|$` 里的竖线
+ * 也不算分隔符，否则一出现代码或绝对值符号整张表就错位。
+ */
+private fun splitRow(line: String): List<String> {
+    var text = line.trim()
+    if (text.startsWith("|")) text = text.substring(1)
+    if (text.endsWith("|") && !text.endsWith("\\|")) text = text.dropLast(1)
+
+    val mathRanges = Regex("""\$[^$\n]+\$""").findAll(text).map { it.range }.toList()
+    val cells = mutableListOf<String>()
+    val current = StringBuilder()
+    var inCode = false
+    var i = 0
+    while (i < text.length) {
+        val ch = text[i]
+        val inMath = mathRanges.any { i >= it.first && i <= it.last }
+        when {
+            ch == '\\' && i + 1 < text.length && text[i + 1] == '|' -> {
+                current.append('|')
+                i += 2
+            }
+
+            ch == '`' && !inMath -> {
+                inCode = !inCode
+                current.append(ch)
+                i++
+            }
+
+            ch == '|' && !inCode && !inMath -> {
+                cells += current.toString()
+                current.clear()
+                i++
+            }
+
+            else -> {
+                current.append(ch)
+                i++
+            }
+        }
+    }
+    cells += current.toString()
+    return cells.map { it.trim() }
+}
 
 @Composable
 fun MarkdownText(
@@ -488,19 +537,7 @@ private fun MdBlockView(
             }
         }
 
-        is MdBlock.Table -> {
-            val columns = maxOf(block.header.size, block.rows.maxOfOrNull { it.size } ?: 0)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 5.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .border(1.dp, palette.line, RoundedCornerShape(8.dp)),
-            ) {
-                TableRow(block.header, columns, palette, header = true)
-                block.rows.forEach { row -> TableRow(row, columns, palette, header = false) }
-            }
-        }
+        is MdBlock.Table -> TableBlock(block, palette)
 
         MdBlock.Rule -> Box(
             modifier = Modifier
@@ -696,6 +733,12 @@ private fun highlightCode(code: String, lang: String): AnnotatedString {
  * 早先的写法是「按公式把段落切段、每段单独解析」，于是 `**加粗**` 只要被公式劈开，
  * 两半各自都找不到配对的星号，屏幕上就露出 `**` 了——截图里第一处正是这个原因。
  */
+/** 整段加粗：表头用。行内已经解析好的样式原样保留，只补一层字重。 */
+private fun AnnotatedString.bolded(): AnnotatedString = buildAnnotatedString {
+    append(this@bolded)
+    addStyle(SpanStyle(fontWeight = FontWeight.W900), 0, length)
+}
+
 @Composable
 private fun MathText(
     text: String,
@@ -704,6 +747,7 @@ private fun MathText(
     fontSize: androidx.compose.ui.unit.TextUnit = 15.sp,
     lineHeight: androidx.compose.ui.unit.TextUnit = 22.sp,
     color: androidx.compose.ui.graphics.Color = palette.ink,
+    bold: Boolean = false,
 ) {
     // 打开字体合成，保证没有粗体字面的中文字体也能「加粗」
     val style = androidx.compose.ui.text.TextStyle(fontSynthesis = FontSynthesis.All)
@@ -711,7 +755,9 @@ private fun MathText(
 
     if (split.formulas.isEmpty()) {
         Text(
-            text = remember(text, palette.accent) { inline(demath(text), palette) },
+            text = remember(text, palette.accent, bold) {
+                inline(demath(text), palette).let { if (bold) it.bolded() else it }
+            },
             style = style,
             fontSize = fontSize,
             lineHeight = lineHeight,
@@ -722,7 +768,11 @@ private fun MathText(
     }
 
     // 整段先解析一遍：此时公式已换成占位符，加粗/斜体/行内代码都能正常配对
-    val chunks = remember(split.text, palette.accent) { inlineAndSplit(split.text, palette) }
+    val chunks = remember(split.text, palette.accent, bold) {
+        inlineAndSplit(split.text, palette).map {
+            if (bold && it is InlineChunk.Text) InlineChunk.Text(it.annotated.bolded()) else it
+        }
+    }
 
     androidx.compose.foundation.layout.FlowRow(
         modifier = modifier,
@@ -782,35 +832,183 @@ internal fun inlineAndSplit(text: String, palette: DeckPalette): List<InlineChun
     return out
 }
 
+/* ---------------- 表格 ---------------- */
+
+private val TABLE_PAD_H = 8.dp
+private val TABLE_PAD_V = 6.dp
+private val TABLE_COLUMN_MIN = 52.dp
+private val TABLE_COLUMN_MAX = 216.dp
+
+/**
+ * 表格按内容分配列宽，不再「所有列一样宽」。
+ *
+ * 原来每列都是 weight(1f)：8 列的判定表在手机上每列只剩 90dp，`T（$c_1$T,$c_2$T）`
+ * 这种单元格会被压成一条高瘦柱子，行内公式又各自是一张位图，叠在一起完全看不清。
+ * 这里的做法和网页端 `table{width:100%}` + `overflow-x:auto` 对齐：
+ * 先按内容量出每列的期望宽度（封顶 216dp，超出就折行），装得下就按比例撑满屏宽，
+ * 装不下就让整张表横向滚动，绝不压缩列。
+ */
 @Composable
-private fun TableRow(    cells: List<String>,
-    columns: Int,
-    palette: DeckPalette,
-    header: Boolean,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(if (header) palette.softFill else Color.Transparent)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-    ) {
-        for (column in 0 until columns) {
-            val raw = cells.getOrElse(column) { "" }
-            // 表格里也常有 $0$、$1/3$ 这种公式，和段落一样处理
-            Box(modifier = Modifier.weight(1f)) {
-                MathText(
-                    text = raw,
-                    palette = palette,
-                    fontSize = 12.5.sp,
-                    lineHeight = 18.sp,
-                    color = palette.ink,
+private fun TableBlock(block: MdBlock.Table, palette: DeckPalette) {
+    val columns = maxOf(block.header.size, block.rows.maxOfOrNull { it.size } ?: 0)
+    if (columns <= 0) return
+    val rows = remember(block) { listOf(block.header) + block.rows }
+    val measurer = rememberTextMeasurer(cacheSize = 512)
+    val density = LocalDensity.current
+    val cellStyle = remember {
+        TextStyle(fontSize = 12.5.sp, lineHeight = 18.sp, fontSynthesis = FontSynthesis.All)
+    }
+    val padPx = with(density) { (TABLE_PAD_H * 2).toPx() }
+    val minPx = with(density) { TABLE_COLUMN_MIN.toPx() }
+    val maxPx = with(density) { TABLE_COLUMN_MAX.toPx() }
+
+    // 每列量一次最宽单元格：短列不会被旁边的长列拉宽，长文本到上限后自己折行
+    val natural = remember(block, cellStyle) {
+        List(columns) { column ->
+            rows.maxOfOrNull { row ->
+                val measured = measurer.measure(
+                    text = AnnotatedString(tableMeasureText(row.getOrElse(column) { "" })),
+                    style = cellStyle,
+                    constraints = Constraints(maxWidth = (maxPx - padPx).toInt().coerceAtLeast(1)),
                 )
+                measured.size.width + padPx
+            } ?: 0f
+        }
+    }
+
+    /*
+     * 纵向上「并入上一格」的位置。
+     *
+     * Markdown 表格没有 rowspan，`| D₁ | c₁ |` 下一行 `| | c₂ |` 在第一列就是个空单元格，
+     * 渲染出来会多一个空框，看着像画错了。这里只做视觉合并：某格为空、且正上方
+     * 同一列有内容时，把它和上一格之间的横线去掉，剩下的左右竖线天然就是合并格的样子。
+     */
+    val merged = remember(block) {
+        rows.indices.map { r ->
+            BooleanArray(columns) { c ->
+                if (r == 0 || rows[r].getOrElse(c) { "" }.isNotBlank()) {
+                    false
+                } else {
+                    (r - 1 downTo 0).any { up -> rows[up].getOrElse(c) { "" }.isNotBlank() }
+                }
             }
         }
     }
-    if (header) {
-        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(palette.line))
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp),
+    ) {
+        val availablePx = with(density) { maxWidth.toPx() }
+        // 每列之间的竖线占 1dp，列数 - 1 条，外侧还有 1dp 边框
+        val gridPx = with(density) { columns.dp.toPx() }
+        val widths = remember(natural, availablePx) {
+            val base = natural.map { it.coerceIn(minPx, maxPx) }
+            val content = base.sum()
+            val room = availablePx - gridPx
+            if (content <= 0f || content >= room) base
+            else base.map { it + (room - content) * (it / content) }
+        }
+        val totalPx = widths.sum() + gridPx
+        val scrollable = totalPx > availablePx + 0.5f
+        val scroll = rememberScrollState()
+        val lineColor = palette.line
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .border(1.dp, lineColor, RoundedCornerShape(8.dp)),
+        ) {
+            Box(modifier = if (scrollable) Modifier.horizontalScroll(scroll) else Modifier) {
+                Column(
+                    modifier = Modifier
+                        .width(with(density) { totalPx.toDp() })
+                        // 竖线画在内容之上：表头有底色，画在下层会被盖住
+                        .drawWithContent {
+                            drawContent()
+                            val stroke = 1.dp.toPx()
+                            var x = 0f
+                            for (c in 0 until columns - 1) {
+                                x += widths[c]
+                                drawRect(
+                                    color = lineColor,
+                                    topLeft = Offset(x - stroke / 2f, 0f),
+                                    size = Size(stroke, size.height),
+                                )
+                            }
+                        },
+                ) {
+                    rows.forEachIndexed { rowIndex, row ->
+                        val header = rowIndex == 0
+                        val lastRow = rowIndex == rows.lastIndex
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .width(with(density) { totalPx.toDp() })
+                                .background(if (header) palette.softFill else Color.Transparent)
+                                // 行线画在整行上而不是单元格上：含行内公式的格子会被位图撑高，
+                                // 各格自己画底线就会参差不齐；合并格那一段跳过不画
+                                .drawWithContent {
+                                    drawContent()
+                                    if (!lastRow) {
+                                        // 这条线分隔的是 rowIndex 和 rowIndex+1，合并标记看下一行
+                                        val below = merged[rowIndex + 1]
+                                        val stroke = 1.dp.toPx()
+                                        var x = 0f
+                                        for (c in 0 until columns) {
+                                            if (!below[c]) {
+                                                drawRect(
+                                                    color = lineColor,
+                                                    topLeft = Offset(x, size.height - stroke),
+                                                    size = Size(widths[c], stroke),
+                                                )
+                                            }
+                                            x += widths[c]
+                                        }
+                                    }
+                                },
+                        ) {
+                            for (c in 0 until columns) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(with(density) { widths[c].toDp() })
+                                        .padding(horizontal = TABLE_PAD_H, vertical = TABLE_PAD_V),
+                                ) {
+                                    // 表格里常有 $0$、$A>2$ 这种行内公式，和段落一样处理
+                                    MathText(
+                                        text = rows[rowIndex].getOrElse(c) { "" },
+                                        palette = palette,
+                                        fontSize = 12.5.sp,
+                                        lineHeight = 18.sp,
+                                        color = palette.ink,
+                                        bold = header,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+/**
+ * 量列宽用的近似文本：只保留肉眼看到的字。
+ * `**`、`~~`、反引号、`$` 和 LaTeX 命令本身不占版面，算进去会把列量得虚宽。
+ */
+private fun tableMeasureText(cell: String): String {
+    val text = cell
+        .replace("**", "")
+        .replace("~~", "")
+        .replace("`", "")
+        .replace("$", "")
+        .replace(Regex("""\\[A-Za-z]+"""), "x")
+        .replace(Regex("""[{}]"""), "")
+        .trim()
+    return text.ifEmpty { " " }
 }
 
 /* ---------------- 行内格式 ---------------- */
