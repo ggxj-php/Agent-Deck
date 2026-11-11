@@ -351,12 +351,283 @@ def draw_tree(data, title=""):
 
 
 # ---------------- 2. 流程图 ----------------
+FLOW_VGAP = 46       # 主流程上下节点的间距
+FLOW_BGAP = 16       # 两侧分支链节点之间的间距
+FLOW_HGAP = 34       # 菱形顶点到两侧分支框的水平距离
+FLOW_IO_EXTRA = 18   # 输入输出矩形比普通处理框稍宽一点
+
+
+def _flow_kind(n):
+    return (n.get("kind") or "process").strip().lower()
+
+
+def _flow_io(kind):
+    return kind in ("io", "input", "output", "输入", "输出", "输入输出", "inout")
+
+
+def _flow_node_width(n):
+    w, _h = _node_size(n["label"])
+    if _flow_io(_flow_kind(n)):
+        w += FLOW_IO_EXTRA
+    if _flow_kind(n) in ("decision", "判断", "条件"):
+        w += 34
+    return w
+
+
+def _flow_structure(nodes, edges, start):
+    """把「一条主脊 + 菱形左右两分支 + 汇合点」的结构抽出来；形状不符就返回 None。"""
+    by_id = {n["id"]: n for n in nodes}
+    ids = [n["id"] for n in nodes]
+    succ = {nid: [] for nid in ids}
+    pred = {nid: [] for nid in ids}
+    elabel = {}
+    for a, b, label in edges:
+        if a in by_id and b in by_id:
+            succ[a].append(b)
+            pred[b].append(a)
+            elabel[(a, b)] = label
+
+    root = str(start) if start and str(start) in by_id else None
+    if root is None:
+        roots = [nid for nid in ids if not pred[nid]] or [ids[0]]
+        if len(roots) != 1:
+            return None
+        root = roots[0]
+
+    spine = []
+    decisions = {}
+    seen = set()
+    cur = root
+    guard = 0
+    while cur is not None:
+        guard += 1
+        if guard > len(ids) + 1 or cur in seen:
+            return None
+        seen.add(cur)
+        spine.append(cur)
+        outs = succ.get(cur, [])
+        if not outs:
+            break
+        if len(outs) == 1:
+            cur = outs[0]
+            continue
+        if len(outs) != 2:
+            return None
+
+        # 菱形：两条分支各是一条直链，且终点必须是同一个汇合点（pred>=2 的节点）。
+        info = []
+        for child in outs:
+            node = child
+            chain = []
+            local = set()
+            ok = True
+            while node is not None:
+                if node in local or node in seen:
+                    ok = False
+                    break
+                local.add(node)
+                if len(pred[node]) >= 2:
+                    break
+                chain.append(node)
+                outs2 = succ.get(node, [])
+                if len(outs2) != 1:
+                    node = None
+                    break
+                node = outs2[0]
+            if not ok:
+                return None
+            info.append({"child": child, "label": elabel.get((cur, child)) or "",
+                         "chain": chain, "merge": node})
+
+        if info[0]["merge"] is None or info[0]["merge"] != info[1]["merge"]:
+            return None
+        merge = info[0]["merge"]
+        if merge in seen:
+            return None
+
+        # 黑板上：F 在左、T 在右；模型要是给了「否/是」也按这个摆。
+        def side(label):
+            s = str(label or "").strip().lower()
+            if s in ("f", "n", "否", "no", "0", "假", "false"):
+                return "left"
+            if s in ("t", "y", "是", "yes", "1", "真", "true"):
+                return "right"
+            return ""
+
+        left, right = info[1], info[0]
+        if side(left["label"]) == "right" and side(right["label"]) == "left":
+            left, right = right, left
+        decisions[cur] = {"left": left, "right": right, "merge": merge}
+        cur = merge
+    return {"by_id": by_id, "spine": spine, "decisions": decisions}
+
+
+def _flow_side_svg(nodes, edges, start, has_title):
+    """两侧分支布局；返回 (body, width, height) 或 None。"""
+    st = _flow_structure(nodes, edges, start)
+    if not st:
+        return None
+    by_id = st["by_id"]
+    spine = st["spine"]
+    decisions = st["decisions"]
+
+    def w_of(nid):
+        return _flow_node_width(by_id[nid])
+
+    def h_of(nid):
+        return _node_size(by_id[nid]["label"])[1]
+
+    def draw_node(nid, x, y):
+        n = by_id[nid]
+        kind = _flow_kind(n)
+        w, h = _node_size(n["label"])
+        color = n.get("color")
+        if kind in ("start", "end", "起", "止"):
+            return _box(x, y, w + 16, h, n["label"], color or "green", shape="pill")
+        if kind in ("decision", "判断", "条件"):
+            return _diamond(x, y, w + 34, h + 18, n["label"], color)
+        if _flow_io(kind):
+            # 输入/输出：矩形（不用平行四边形）
+            return _box(x, y, w + FLOW_IO_EXTRA, h, n["label"], color, shape="square")
+        return _box(x, y, w, h, n["label"], color, shape="square")
+
+    top = 50 if has_title else 12
+    cursor = float(top)
+    ypos = {}
+    branch_pos = {}
+    geoms = {}
+    max_ext = 0.0
+
+    for nid in spine:
+        if nid in decisions:
+            w, h = _node_size(by_id[nid]["label"])
+            dw, dh = w + 34, h + 18
+            cy = cursor + dh / 2
+            ypos[nid] = cy
+            dec = decisions[nid]
+            left, right = dec["left"], dec["right"]
+
+            def col_width(chain):
+                return max([w_of(c) for c in chain] or [0])
+
+            cw_l, cw_r = col_width(left["chain"]), col_width(right["chain"])
+            branch_top = cy + dh / 2 + 22
+
+            def place_chain(chain, sign, cw):
+                if not chain or not cw:
+                    return None
+                col = sign * (dw / 2 + FLOW_HGAP + cw / 2)
+                yy = branch_top
+                for c in chain:
+                    ch = h_of(c)
+                    branch_pos[c] = (col, yy + ch / 2)
+                    yy += ch + FLOW_BGAP
+                return yy - FLOW_BGAP
+
+            bottom_l = place_chain(left["chain"], -1, cw_l)
+            bottom_r = place_chain(right["chain"], 1, cw_r)
+            bottoms = [b for b in (bottom_l, bottom_r) if b is not None]
+            bottom = max(bottoms + [cy + dh / 2])
+            junction_y = bottom + FLOW_VGAP
+            cursor = junction_y + FLOW_VGAP
+
+            max_ext = max(max_ext, dw / 2)
+            for chain, sign, cw in ((left["chain"], -1, cw_l), (right["chain"], 1, cw_r)):
+                if cw:
+                    max_ext = max(max_ext, dw / 2 + FLOW_HGAP + cw)
+            geoms[nid] = {"cy": cy, "dw": dw, "dh": dh, "cw_l": cw_l, "cw_r": cw_r,
+                          "branch_top": branch_top, "junction_y": junction_y}
+        else:
+            w, h = _node_size(by_id[nid]["label"])
+            cy = cursor + h / 2
+            ypos[nid] = cy
+            cursor = cy + h / 2 + FLOW_VGAP
+            max_ext = max(max_ext, w / 2)
+
+    body = []
+
+    def hline(x1, x2, y):
+        body.append(f'<line x1="{x1:.1f}" y1="{y:.1f}" x2="{x2:.1f}" y2="{y:.1f}" '
+                    f'stroke="{LINE}" stroke-width="1.5"/>')
+
+    # 主脊连线
+    for i, nid in enumerate(spine[:-1]):
+        nxt = spine[i + 1]
+        if nxt not in ypos:
+            continue
+        y2 = ypos[nxt] - (geoms[nxt]["dh"] / 2 if nxt in geoms else h_of(nxt) / 2)
+        if nid in geoms:
+            y1 = geoms[nid]["junction_y"]
+        else:
+            y1 = ypos[nid] + h_of(nid) / 2
+        body.append(_arrow(0, y1, 0, y2))
+
+    # 菱形两边的分支
+    for nid, dec in decisions.items():
+        g = geoms[nid]
+        cy, dw, dh = g["cy"], g["dw"], g["dh"]
+        junction_y = g["junction_y"]
+        for side_name, sign in (("left", -1), ("right", 1)):
+            info = dec[side_name]
+            label = info["label"]
+            # F/T 标签：写在菱形顶点两侧
+            if label:
+                lx = sign * (dw / 2 + 8)
+                body.append(
+                    f'<text x="{lx:.1f}" y="{cy - 10:.1f}" font-size="12" fill="#5a6480" '
+                    f'text-anchor="{"end" if sign < 0 else "start"}" '
+                    f'font-family="system-ui, sans-serif">{_esc(label)}</text>')
+            chain = info["chain"]
+            sx = sign * dw / 2
+            if not chain:
+                # 空分支：从菱形侧面绕出去再回来，汇合到下方节点
+                x_side = sign * (dw / 2 + FLOW_HGAP)
+                hline(sx, x_side, cy)
+                body.append(f'<line x1="{x_side:.1f}" y1="{cy:.1f}" x2="{x_side:.1f}" '
+                            f'y2="{junction_y:.1f}" stroke="{LINE}" stroke-width="1.5"/>')
+                hline(x_side, 0, junction_y)
+                continue
+            cw = g["cw_l"] if sign < 0 else g["cw_r"]
+            col = sign * (dw / 2 + FLOW_HGAP + cw / 2)
+            first = chain[0]
+            first_top = branch_pos[first][1] - h_of(first) / 2
+            hline(sx, col, cy)
+            body.append(_arrow(col, cy, col, first_top))
+            for a, b in zip(chain, chain[1:]):
+                ay = branch_pos[a][1] + h_of(a) / 2
+                by = branch_pos[b][1] - h_of(b) / 2
+                body.append(_arrow(col, ay, col, by))
+            last = chain[-1]
+            last_bottom = branch_pos[last][1] + h_of(last) / 2
+            body.append(f'<line x1="{col:.1f}" y1="{last_bottom:.1f}" x2="{col:.1f}" '
+                        f'y2="{junction_y:.1f}" stroke="{LINE}" stroke-width="1.5"/>')
+            hline(col, 0, junction_y)
+        # 汇合点小圆点
+        body.append(f'<circle cx="0" cy="{junction_y:.1f}" r="3" fill="{INK}"/>')
+
+    for nid in spine:
+        x, y = 0, ypos[nid]
+        body.append(draw_node(nid, x, y))
+    for c, (x, y) in branch_pos.items():
+        body.append(draw_node(c, x, y))
+
+    width = max(300.0, 2 * max_ext + 48)
+    height = cursor + 24
+    # 坐标是以主轴 x=0 为中心的，画布得整体平移到正区间，否则左侧会被裁掉
+    shift = max_ext + 24
+    return (f'<g transform="translate({shift:.1f},0)">' + "".join(body) + '</g>'), width, height
+
+
 def draw_flow(data, title=""):
     nodes = _norm_nodes(data.get("nodes"))
     edges = _norm_edges(data.get("edges"))
     if not nodes:
         raise ValueError("nodes 是空的，至少给一个节点")
 
+    side = _flow_side_svg(nodes, edges, data.get("start"), bool(title))
+    if side is not None:
+        sbody, sw, sh = side
+        return _canvas(max(sw, 300), max(sh, 220), sbody, title)
     pos, sizes, width, height = _layered_positions(nodes, edges, data.get("start"))
     body = []
     geom = []
@@ -381,7 +652,9 @@ def draw_flow(data, title=""):
         elif kind in ("decision", "判断", "条件"):
             body.append(_diamond(x, y, w + 34, h + 18, n["label"], n.get("color")))
         elif kind in ("io", "input", "output", "输入", "输出", "输入输出", "inout"):
-            body.append(_para(x, y, w + 18, h, n["label"], n.get("color")))
+            # 输入/输出：矩形（不再画平行四边形）
+            body.append(_box(x, y, w + 18, h, n["label"], n.get("color"),
+                            shape="square"))
         else:
             # 标准流程图：处理框是直角矩形（开始/结束才用圆角 pill）
             body.append(_box(x, y, w, h, n["label"], n.get("color"), shape="square"))
@@ -3014,11 +3287,15 @@ SPECS = [
                 "  flow: {nodes:[{id,label,kind?:start|process|decision|io|end}], "
                 "edges:[{from,to,label?}], start?}\n"
                 "    程序流程图符号：开始/结束 kind=start/end（圆角），处理框 kind=process（矩形），"
-                "判断 kind=decision（菱形），**输入/输出 kind=io（平行四边形）**；"
+                "判断 kind=decision（菱形），**输入/输出 kind=io 也用矩形（不要平行四边形）**；"
                 "连线由工具排成直角正交（横平竖直），不用自己写坐标。\n"
-                "**框里的表达式/伪代码一律用符号写，别写文字**：赋值写 `flag=1`（不要 `flag<-true`、"
-                "`flag←true`）；逻辑与/或写 `flag&p`、`a|b`（不要「且」「或」）；真/假写 `1`/`0`"
-                "（不要 true/false）；条件末尾的问号可留可去。每个框里的式子尽量短。\n"
+                "    **判断框的分支画在菱形左右两侧**：按黑板样式 T 在右、F 在左，"
+                "两支的框放在菱形两侧，各自向下走，在下方汇合点汇合后再继续往下；"
+                "不会把两条分支都挤在正下方。\n"
+                "**框里的式子照题目给的伪代码写**：题目写了 `Integer X=0`、`AND`/`OR`，"
+                "就原样抄（别缩成 `X=0`、别改成 `&`/`|`/「且」「或」）；题目没给伪代码时才用短符号："
+                "赋值 `flag=1`、逻辑与/或 `&`/`|`、真/假 `1`/`0`，条件末尾问号可留可去。"
+                "每个框里的式子尽量短。\n"
                 "    **决策分支的连线标签统一用英文 T / F（T=是、F=否），别写「是」「否」。**\n"
                 "  ns: 盒图（N-S 图）：{steps:[...]}，节点 kind 取 "
                 "process{label} / if{condition, then, else} / case{condition, branches:[{value, body}]} / "
