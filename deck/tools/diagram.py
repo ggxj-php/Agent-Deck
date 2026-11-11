@@ -1206,12 +1206,10 @@ def _flow_svg(data):
             tw = w * 0.72
         elif kind in ("io", "input", "output", "输入", "输出", "输入输出", "inout"):
             fill, stroke, tcolor = _color_of(n.get("color"))
-            sk = min(w * 0.20, h * 0.55)
-            out.append(f'<polygon points="{cx - w / 2:.1f},{cy + h / 2:.1f} '
-                       f'{cx - w / 2 + sk:.1f},{cy - h / 2:.1f} {cx + w / 2:.1f},{cy - h / 2:.1f} '
-                       f'{cx + w / 2 - sk:.1f},{cy + h / 2:.1f}" fill="{fill}" stroke="{stroke}" '
-                       f'stroke-width="1.6"/>')
-            tw = w - sk * 2 - 6
+            # 输入/输出：矩形（不再画平行四边形）
+            out.append(f'<rect x="{cx - w / 2:.1f}" y="{cy - h / 2:.1f}" width="{w:.1f}" '
+                       f'height="{h:.1f}" fill="{fill}" stroke="{stroke}" stroke-width="1.6"/>')
+            tw = w - 18
         else:
             fill, stroke, tcolor = _color_of(n.get("color"))
             out.append(f'<rect x="{cx - w / 2:.1f}" y="{cy - h / 2:.1f}" width="{w:.1f}" '
@@ -1931,7 +1929,7 @@ def _dot_flow(data):
                           "fillcolor": "#ffefc9", "color": "#c39327",
                           "fontcolor": "#6b4d08", "margin": "0.04,0.02"})
         elif kind in ("io", "input", "output", "输入", "输出", "输入输出", "inout"):
-            attrs.update({"shape": "parallelogram", "style": "filled",
+            attrs.update({"shape": "box", "style": "filled",
                           "fillcolor": "#ffffff", "color": "#9a9aae",
                           "fontcolor": "#33333d"})
         else:
@@ -3156,11 +3154,23 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
     dfd_notation = _dfd_notation(data)
     svg = ""
     if key in ("flow", "flowchart"):
+        # 先试「主轴 + 菱形左右分支 + 汇合点」的黑板布局；结构不符合再退回 graphviz
         try:
-            svg = _flow_svg(data)
+            _fn = _norm_nodes(data.get("nodes"))
+            _fe = _norm_edges(data.get("edges"))
+            _side = _flow_side_svg(_fn, _fe, data.get("start"), bool(title))
+            if _side:
+                _sb, _sw, _sh = _side
+                svg = _canvas(max(_sw, 300), max(_sh, 220), _sb, title)
         except Exception as exc:         # noqa: BLE001
-            print(f"[diagram] flow 正交排版失败：{type(exc).__name__}: {exc}", flush=True)
+            print(f"[diagram] flow 两侧布局失败：{type(exc).__name__}: {exc}", flush=True)
             svg = ""
+        if not svg:
+            try:
+                svg = _flow_svg(data)
+            except Exception as exc:         # noqa: BLE001
+                print(f"[diagram] flow 正交排版失败：{type(exc).__name__}: {exc}", flush=True)
+                svg = ""
     builder = GRAPHVIZ_BUILDERS.get(key) if not svg else None
     if builder:
         try:
@@ -3292,8 +3302,9 @@ SPECS = [
                 "    **判断框的分支画在菱形左右两侧**：按黑板样式 T 在右、F 在左，"
                 "两支的框放在菱形两侧，各自向下走，在下方汇合点汇合后再继续往下；"
                 "不会把两条分支都挤在正下方。\n"
-                "**框里的式子照题目给的伪代码写**：题目写了 `Integer X=0`、`AND`/`OR`，"
-                "就原样抄（别缩成 `X=0`、别改成 `&`/`|`/「且」「或」）；题目没给伪代码时才用短符号："
+                "**框里的式子照题目给的伪代码写**：题目写了 `Integer X=0`、`AND`/`OR`、"
+                "`>=`/`<=`、`ZPUT(A,B,C)`、`Print X`，就原样抄（别缩成 `X=0`、别把 `>=` 改成 `>`、"
+                "别把 `AND`/`OR` 改成 `&`/`|`/「且」「或」、别翻译函数名）；题目没给伪代码时才用短符号："
                 "赋值 `flag=1`、逻辑与/或 `&`/`|`、真/假 `1`/`0`，条件末尾问号可留可去。"
                 "每个框里的式子尽量短。\n"
                 "    **决策分支的连线标签统一用英文 T / F（T=是、F=否），别写「是」「否」。**\n"
