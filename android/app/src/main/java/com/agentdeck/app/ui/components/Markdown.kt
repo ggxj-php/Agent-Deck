@@ -12,7 +12,6 @@ import androidx.compose.ui.text.withStyle
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,7 +57,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.agentdeck.app.ui.theme.DeckPalette
 
 /* ------------------------------------------------------------------
@@ -566,18 +564,18 @@ private fun MdBlockView(
             palette = palette,
         )
 
-        is MdBlock.Picture -> AsyncImage(
+        is MdBlock.Picture -> DeckAsyncImage(
             model = resolveUrl(baseUrl, block.url).let { url ->
                 if (isDataUri(url)) decodeDataUri(url) ?: url else url
             },
             contentDescription = block.alt,
             contentScale = ContentScale.FillWidth,
+            shape = RoundedCornerShape(10.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp)
-                .heightIn(max = 280.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .clickable { onPreview(resolveUrl(baseUrl, block.url)) },
+                .heightIn(max = 280.dp),
+            onClick = { onPreview(resolveUrl(baseUrl, block.url)) },
         )
     }
 }

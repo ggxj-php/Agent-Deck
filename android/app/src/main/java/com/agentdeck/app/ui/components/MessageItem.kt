@@ -161,15 +161,15 @@ private fun UserMessage(
                         )
                         return@forEach
                     }
-                    AsyncImage(
+                    DeckAsyncImage(
                         model = request,
                         contentDescription = "发送的图片",
                         contentScale = ContentScale.FillWidth,
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 240.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { onPreview(url) },
+                            .heightIn(max = 240.dp),
+                        onClick = { onPreview(url) },
                     )
                     Spacer(Modifier.height(6.dp))
                 }
@@ -412,15 +412,17 @@ private fun StickerImage(url: String, onPreview: (String) -> Unit) {
     val request = remember(url) {
         ImageRequest.Builder(context).data(url).size(360, 360).build()
     }
-    AsyncImage(
+    DeckAsyncImage(
         model = request,
         contentDescription = "表情包",
         contentScale = ContentScale.Fit,
+        shape = RoundedCornerShape(12.dp),
+        placeholderAspectRatio = 1f,
         onError = { failed = true },
         modifier = Modifier
             .heightIn(max = 132.dp)
-            .widthIn(max = 160.dp)
-            .clickable { onPreview(url) },
+            .widthIn(max = 160.dp),
+        onClick = { onPreview(url) },
     )
 }
 
@@ -693,17 +695,20 @@ private fun ArtifactBlock(
             )
         }
         // 产物本来就是图，用 Coil 解码后直接显示；点一下能全屏放大
-        AsyncImage(
+        DeckAsyncImage(
             model = request,
             contentDescription = block.title.ifBlank { "生成的图" },
             contentScale = ContentScale.Fit,
+            shape = RoundedCornerShape(10.dp),
+            placeholderAspectRatio = 4f / 3f,
+            placeholderLabel = "正在渲染…",
+            errorLabel = "图片没渲染出来",
             onError = { stage += 1 },
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 60.dp, max = 460.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color.White)
-                .clickable { onPreview(url) },
+                .background(Color.White),
+            onClick = { onPreview(url) },
         )
     }
 }

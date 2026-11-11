@@ -14,10 +14,13 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -28,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -52,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.agentdeck.app.DeckApp
+import com.agentdeck.app.ui.theme.LocalPalette
 import com.caverock.androidsvg.SVG
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -180,6 +185,11 @@ private fun ImagePreviewOverlay(
         offset = if (scale <= 1f) Offset.Zero else offset + panChange
     }
 
+    // 三态：加载中转圈 / 加载完铺图 / 失败给个提示。之前只有 AsyncImage，
+    // 大图解码的那几秒就是纯白一片，用户会以为点错了。
+    var loading by remember(request) { mutableStateOf(true) }
+    var loadFailed by remember(request) { mutableStateOf(false) }
+
     val safe = WindowInsets.safeDrawing.asPaddingValues()
     val bottomGap = safe.calculateBottomPadding() + 14.dp
     val topGap = safe.calculateTopPadding() + 6.dp
@@ -189,6 +199,18 @@ private fun ImagePreviewOverlay(
             model = request,
             contentDescription = null,
             contentScale = ContentScale.Fit,
+            onLoading = {
+                loading = true
+                loadFailed = false
+            },
+            onSuccess = {
+                loading = false
+                loadFailed = false
+            },
+            onError = {
+                loading = false
+                loadFailed = true
+            },
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer(
@@ -211,6 +233,32 @@ private fun ImagePreviewOverlay(
                     )
                 },
         )
+
+        if (loading || loadFailed) {
+            Column(
+                modifier = Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (loadFailed) {
+                    Icon(
+                        Icons.Rounded.ErrorOutline,
+                        contentDescription = null,
+                        tint = Color(0xFF9A8F94),
+                        modifier = Modifier.size(28.dp),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text("图片没能加载出来", fontSize = 12.sp, color = Color(0xFF9A8F94))
+                } else {
+                    CircularProgressIndicator(
+                        color = LocalPalette.current.accent,
+                        strokeWidth = 2.5.dp,
+                        modifier = Modifier.size(30.dp),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text("加载中…", fontSize = 12.sp, color = Color(0xFF9A8F94))
+                }
+            }
+        }
 
         IconButton(
             onClick = onDismiss,
