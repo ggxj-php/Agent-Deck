@@ -3772,6 +3772,7 @@ SPECS = [
                 "process{label} / if{condition, then, else} / case{condition, branches:[{value, body}]} / "
                 "while{condition, body} / until{condition, body} / ref{label}；"
                 "if 的 then 画在右边（T）、else 画在左边（F），和教材一致；"
+                "**盒图没有开始/结束框**：不要传 Start/Stop/开始/结束 这类节点。\n"
                 "**题目是 do...until / 直到型循环时用 kind=until（body=循环体 S，condition=条件 P），"
                 "不要画成 if**；do...while / 当型循环用 kind=while；嵌套简化用 ref 椭圆。\n"
                 "  pad: 问题分析图（PAD）：{steps:[...]}，节点结构和 ns 一样；"
