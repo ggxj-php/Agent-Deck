@@ -964,7 +964,7 @@ def _flow_custom_svg(data, has_title=False):
                 nvout.append(_polyline([(cx, join_y), (cx, top)]))
             nvout.append(_polyline([(bx, bend), (loop_x, bend),
                                     (loop_x, join_y), (cx, join_y)]))
-            nvout.append(_arrow_head(cx, join_y, 0, -1))
+            nvout.append(_arrow_head(cx, join_y, -1, 0))
             bl = b.get("back_label") or ""
             if bl:
                 nvout.append(f'<text x="{loop_x + 6:.1f}" y="{cy + 12:.1f}" font-size="12" fill="#5a6480" font-family="system-ui, sans-serif">{_esc(bl)}</text>')
