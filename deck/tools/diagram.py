@@ -1128,24 +1128,6 @@ def draw_dtable(data, title=""):
                                 chosen.add(j)
         execs.append(chosen)
 
-    _bad = []
-    for j, _vals in enumerate(vals):
-        for _grp, _start, _count in cgroups:
-            _seg = _vals[_start:_start + _count]
-            _ys = [v for v in _seg if v == "Y"]
-            if len(_ys) > 1:
-                _bad.append("规则 %d「%s」同时有多个 Y（互斥条件只能一个 Y）"
-                            % (j + 1, _grp))
-            elif not _ys and not all(v == "-" for v in _seg):
-                _bad.append("规则 %d「%s」没有一个 Y 也不是整组 -（不能全 N）"
-                            % (j + 1, _grp))
-        if execs[j] and not any(v == "Y" for v in _vals):
-            _bad.append("规则 %d 没有条件成立却执行动作" % (j + 1))
-    if _bad:
-        raise ValueError(
-            "判定表条件组合不合法（" + "；".join(_bad[:4]) + "）。每组条件互斥：一条规则里必须"
-            "恰好一个 Y、其余 N；整组不关心时全写 -；不能全 N。请按合法组合重新生成。")
-
     cond_col = 46
     group_w = max(72, max((_label_len(g) for g, _, _ in cgroups + agroups), default=60) + 16)
     item_w = max(120, max(_label_len(r["label"]) for r in conds + acts) + 20)
@@ -4035,14 +4017,14 @@ SPECS = [
                 "不要给每条分支复制一份相同的后续流程。\n"
                 "    **伪代码一行一个框**：连续两条声明/赋值别并成一个框（两条 Integer 就画两个框）。\n"
                 "  dtable: 判定表（教材表 5-2 格式）：{conditions:[{group?, label} 或 {group, items:[...]}], "
-                "actions:[{group?, label} 或 {group, items:[...]}], rules:[{values:[Y/N/—...], actions:[执行的动作行下标/名称...]}], "
+                "actions:[{group?, label} 或 {group, items:[...]}], rules:[{values:[Y/N/-...], actions:[执行的动作行下标/名称...]}], "
                 "note?（表格上方一句说明，写清规则 1..N 代表什么）}\n"
                 "    **判定表必须带标题和上方说明**：用 title 写表名，note 写一句「规则 1–N 代表……」，"
                 "不要只画 1..N 编号不解释。\n"
                 "    严格按教材：左上「选项」右上「规则」+ 1..N 列；左侧「条件」「动作」分组；"
                 "    条件值只写 Y / N / -（半角减号，- 表示不关心/无关；不要 T/F、真/假、√、长破折号 —）。\n"
-                "    **组内互斥**：每组条件（如教师类型）一条规则里必须恰好一个 Y、其余 N；"
-                "    整组不关心时全写 -；不能全 N，不能同组多个 Y（不合法直接报错让重画）。\n"
+                "    **条件组合由你判断**：多选一的条件组（如教师类型、教师职称）每条规则给出"
+                "合理组合，不要同组多个 Y 或整组全 N；无关条件写 -。工具只负责表格框架和逐条说明。\n"
                 "  ns: 盒图（N-S 图）：{steps:[...]}，节点 kind 取 "
                 "process{label} / if{condition, then, else} / case{condition, branches:[{value, body}]} / "
                 "while{condition, body} / until{condition, body} / ref{label}；"
