@@ -1265,35 +1265,35 @@ def _ns_draw(node, x, y, w, h, out):
         body_top = y + NS_LOOP_COND
         out.append(_ink_rect(x, y, w, h))
         out.append(_ink_line(x, body_top, x + w, body_top))
-        out.append(_ink_line(x + m, body_top, x + m, y + h))
+        out.append(_ink_line(x + w - m, body_top, x + w - m, y + h))
         out.append(_fit_text(x + w / 2, y + NS_LOOP_COND / 2,
                              _wrap_text(node.get("condition") or "", 18), w - 16))
         body = node.get("body") or []
         single = _ns_single_label(body)
         if single is not None:
-            out.append(_fit_text(x + m + (w - m) / 2, (body_top + y + h) / 2,
+            out.append(_fit_text(x + (w - m) / 2, (body_top + y + h) / 2,
                                  ["do while", single], w - m - 12))
         else:
-            out.append(_fit_text(x + m + (w - m) / 2, body_top + 9, ["do while"], w - m - 12))
-            _ns_draw_seq(body, x + m, body_top + 18, w - m, out)
+            out.append(_fit_text(x + (w - m) / 2, body_top + 9, ["do while"], w - m - 12))
+            _ns_draw_seq(body, x, body_top + 18, w - m, out)
         return
     if kind in ("until", "直到型", "直到型循环"):
         m = NS_LOOP_PAD
         body_bottom = y + h - NS_LOOP_COND
         x2 = x + w - m
         out.append(_ink_rect(x, y, w, h))
-        out.append(_ink_line(x2, y, x2, y + h))
-        out.append(_ink_line(x, body_bottom, x2, body_bottom))
+        out.append(_ink_line(x + m, y, x + m, body_bottom))
+        out.append(_ink_line(x, body_bottom, x + w, body_bottom))
+        out.append(_fit_text(x + w / 2, body_bottom + NS_LOOP_COND / 2,
+                             _wrap_text(node.get("condition") or "", 18), w - 16))
         body = node.get("body") or []
         single = _ns_single_label(body)
         if single is not None:
-            out.append(_fit_text(x + (w - m) / 2, (y + body_bottom) / 2,
+            out.append(_fit_text(x + m + (w - m) / 2, (y + body_bottom) / 2,
                                  ["do until", single], w - m - 12))
         else:
-            out.append(_fit_text(x + (w - m) / 2, y + 9, ["do until"], w - m - 12))
-            _ns_draw_seq(body, x, y + 18, w - m, out)
-        out.append(_fit_text(x + (w - m) / 2, body_bottom + NS_LOOP_COND / 2,
-                             _wrap_text(node.get("condition") or "", 18), w - m - 12))
+            out.append(_fit_text(x + m + (w - m) / 2, y + 9, ["do until"], w - m - 12))
+            _ns_draw_seq(body, x + m, y + 18, w - m, out)
         return
     if kind in ("ref", "nested", "引用", "嵌套", "子图"):
         out.append(f'<ellipse cx="{x + w / 2:.1f}" cy="{y + h / 2:.1f}" '
