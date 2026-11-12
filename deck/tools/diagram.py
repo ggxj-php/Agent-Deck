@@ -1252,11 +1252,11 @@ def _ns_draw(node, x, y, w, h, out):
         body_bottom = y + h - NS_LOOP_COND
         x2 = x + w - m
         out.append(_ink_rect(x, y, w, h))
-        out.append(_ink_line(x2, y, x2, body_bottom))
-        out.append(_ink_line(x, body_bottom, x + w, body_bottom))
+        out.append(_ink_line(x2, y, x2, y + h))
+        out.append(_ink_line(x, body_bottom, x2, body_bottom))
         _ns_draw_seq(node.get("body") or [], x, y, w - m, out)
-        out.append(_fit_text(x + w / 2, body_bottom + NS_LOOP_COND / 2,
-                             _wrap_text(node.get("condition") or "", 18), w - 16))
+        out.append(_fit_text(x + (w - m) / 2, body_bottom + NS_LOOP_COND / 2,
+                             _wrap_text(node.get("condition") or "", 18), w - m - 12))
         return
     if kind in ("ref", "nested", "引用", "嵌套", "子图"):
         out.append(f'<ellipse cx="{x + w / 2:.1f}" cy="{y + h / 2:.1f}" '
