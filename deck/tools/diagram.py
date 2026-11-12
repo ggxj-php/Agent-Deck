@@ -953,6 +953,9 @@ def _flow_custom_svg(data, has_title=False):
             by = top + dh + _FV_GAP
             nvout.append(_polyline([(cx + dw / 2, cy), (bx, cy), (bx, by)]))
             nvout.append(_arrow_head(bx, by, 0, 1))
+            _tl = b.get("inside_label") or ""
+            if _tl:
+                nvout.append(f'<text x="{cx + dw / 2 + 8:.1f}" y="{cy - 10:.1f}" font-size="12" fill="#5a6480" text-anchor="start" font-family="system-ui, sans-serif">{_esc(_tl)}</text>')
             bend = draw(b["body"], bx, by, nvout)
             # 回边：从循环体底部中间向上，接到 header 上方入线（教材画法），不戳菱形侧面
             loop_x = cx + dw / 2 + _FV_HGAP + bw + _FV_LOOP
@@ -961,6 +964,7 @@ def _flow_custom_svg(data, has_title=False):
                 nvout.append(_polyline([(cx, join_y), (cx, top)]))
             nvout.append(_polyline([(bx, bend), (loop_x, bend),
                                     (loop_x, join_y), (cx, join_y)]))
+            nvout.append(_arrow_head(cx, join_y, 0, -1))
             bl = b.get("back_label") or ""
             if bl:
                 nvout.append(f'<text x="{loop_x + 6:.1f}" y="{cy + 12:.1f}" font-size="12" fill="#5a6480" font-family="system-ui, sans-serif">{_esc(bl)}</text>')
@@ -1032,7 +1036,8 @@ def _flow_custom_svg(data, has_title=False):
                     body = {"k": "Seq", "items": body["items"] + [{"k": "S", "nid": info["latch"]}]}
                     items.append({"k": "LoopIf", "hd": cur, "latch": info["latch"],
                                   "body": body, "back_label": info["back_label"],
-                                  "exit_label": info["exit_label"]})
+                                  "exit_label": info["exit_label"],
+                                  "inside_label": labels.get((cur, inside[0]), "")})
                 else:
                     body = parse(fwd[cur][0], info["latch"]) if fwd[cur] else {"k": "Seq", "items": []}
                     items.append({"k": "LoopSeq", "hd": cur, "body": body,
