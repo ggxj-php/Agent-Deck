@@ -1128,6 +1128,24 @@ def draw_dtable(data, title=""):
                                 chosen.add(j)
         execs.append(chosen)
 
+    _bad = []
+    for j, _vals in enumerate(vals):
+        for _grp, _start, _count in cgroups:
+            _seg = _vals[_start:_start + _count]
+            _ys = [v for v in _seg if v == "Y"]
+            if len(_ys) > 1:
+                _bad.append("规则 %d「%s」同时有多个 Y（互斥条件只能一个 Y）"
+                            % (j + 1, _grp))
+            elif not _ys and not all(v == "-" for v in _seg):
+                _bad.append("规则 %d「%s」没有一个 Y 也不是整组 -（不能全 N）"
+                            % (j + 1, _grp))
+        if execs[j] and not any(v == "Y" for v in _vals):
+            _bad.append("规则 %d 没有条件成立却执行动作" % (j + 1))
+    if _bad:
+        raise ValueError(
+            "判定表条件组合不合法（" + "；".join(_bad[:4]) + "）。每组条件互斥：一条规则里必须"
+            "恰好一个 Y、其余 N；整组不关心时全写 -；不能全 N。请按合法组合重新生成。")
+
     cond_col = 46
     group_w = max(72, max((_label_len(g) for g, _, _ in cgroups + agroups), default=60) + 16)
     item_w = max(120, max(_label_len(r["label"]) for r in conds + acts) + 20)
@@ -1179,7 +1197,7 @@ def draw_dtable(data, title=""):
         for j in range(len(rules)):
             rx = x3 + j * rule_w
             value = vals[j][i] if i < len(vals[j]) else ""
-            value = {"-": "—", "–": "—"}.get(value, value)
+            value = {"—": "-", "–": "-", "－": "-"}.get(value, value)
             out.append(_fit_text(rx + rule_w / 2, ry + row_h / 2, [value], rule_w - 6,
                                  bold=True))
     # 动作
@@ -1203,6 +1221,25 @@ def draw_dtable(data, title=""):
                 out.append(_fit_text(rx + rule_w / 2, ry + row_h / 2, ["√"], rule_w - 6,
                                      bold=True))
     out.append(_ink_line(0, ya, total_w, ya))
+    legend_lines = []
+    if 0 < len(rules) <= 12:
+        for j in range(len(rules)):
+            parts = []
+            for _grp, start, count in cgroups:
+                seg = vals[j][start:start + count]
+                picked = [conds[i]["label"] for i in range(start, start + count)
+                          if i < len(vals[j]) and vals[j][i] == "Y"]
+                if picked:
+                    parts.append("+".join(picked))
+                elif seg and all(v == "-" for v in seg):
+                    parts.append("（不关心）")
+                else:
+                    parts.append("（条件缺失）")
+            done = [acts[i]["label"] for i in sorted(execs[j]) if i < len(acts)]
+            legend_lines.append(
+                "规则 %d：%s → %s" % (j + 1, "；".join(parts),
+                                    "、".join(done) if done else "（无动作）"))
+    legend_h = len(legend_lines) * 18 + (10 if legend_lines else 0)
     note = str(data.get("note") or data.get("description") or data.get("说明") or "").strip()
     extra = 0
     body = "".join(out)
@@ -1213,7 +1250,15 @@ def draw_dtable(data, title=""):
         for i, line in enumerate(note_lines):
             note_svg.append(_fit_text(total_w / 2, 10 + i * 20 + 9, [line], total_w - 20))
         body = "".join(note_svg) + f'<g transform="translate(0,{extra})">' + body + "</g>"
-    return _sheet(total_w, total_h + extra, body, title)
+    if legend_lines:
+        legend_svg = []
+        for i, line in enumerate(legend_lines):
+            legend_svg.append(
+                f'<text x="10" y="{extra + total_h + 12 + i * 18:.1f}" '
+                f'font-size="12" fill="#111111" font-family="system-ui, sans-serif">'
+                f'{_esc(line)}</text>')
+        body = body + "".join(legend_svg)
+    return _sheet(total_w, total_h + extra + legend_h, body, title)
 
 
 def draw_flow(data, title=""):
@@ -3995,7 +4040,9 @@ SPECS = [
                 "    **判定表必须带标题和上方说明**：用 title 写表名，note 写一句「规则 1–N 代表……」，"
                 "不要只画 1..N 编号不解释。\n"
                 "    严格按教材：左上「选项」右上「规则」+ 1..N 列；左侧「条件」「动作」分组；"
-                "    条件值只写 Y / N / —（不要 T/F、真/假、√）；动作执行写 √、不执行留空。\n"
+                "    条件值只写 Y / N / -（半角减号，- 表示不关心/无关；不要 T/F、真/假、√、长破折号 —）。\n"
+                "    **组内互斥**：每组条件（如教师类型）一条规则里必须恰好一个 Y、其余 N；"
+                "    整组不关心时全写 -；不能全 N，不能同组多个 Y（不合法直接报错让重画）。\n"
                 "  ns: 盒图（N-S 图）：{steps:[...]}，节点 kind 取 "
                 "process{label} / if{condition, then, else} / case{condition, branches:[{value, body}]} / "
                 "while{condition, body} / until{condition, body} / ref{label}；"
