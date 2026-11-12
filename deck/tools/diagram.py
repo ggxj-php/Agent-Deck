@@ -1058,6 +1058,154 @@ def _flow_custom_svg(data, has_title=False):
         return ""
 
 
+# ---------------- 判定表（教材图 5-7 / 表 5-2 格式） ----------------
+def _dt_rows(raw):
+    rows = []
+    groups = []
+
+    def add_group(grp, labels):
+        start = len(rows)
+        for label in labels:
+            rows.append({"group": grp, "label": str(label)})
+        groups.append((grp, start, len(labels)))
+
+    for item in raw or []:
+        if isinstance(item, dict):
+            grp = str(item.get("group") or item.get("组") or "")
+            items = item.get("items") or item.get("列表")
+            if items:
+                add_group(grp, items)
+            else:
+                add_group(grp, [item.get("label") or item.get("name") or ""])
+        elif isinstance(item, (list, tuple)):
+            add_group("", list(item))
+        else:
+            add_group("", [item])
+    return rows, groups
+
+
+def draw_dtable(data, title=""):
+    """判定表：条件/动作分组、Y/N/—、动作打 √，按教材表 5-2 的样式画。"""
+    conds, cgroups = _dt_rows(data.get("conditions") or data.get("条件"))
+    acts, agroups = _dt_rows(data.get("actions") or data.get("动作"))
+    rules = data.get("rules") or data.get("规则") or []
+    if not conds or not acts or not rules:
+        raise ValueError("判定表至少要给 conditions / actions / rules")
+
+    vals = []
+    execs = []
+    for i, rule in enumerate(rules):
+        if isinstance(rule, dict):
+            rv = rule.get("values") or rule.get("conditions") or rule.get("条件值") or []
+            ra = rule.get("actions") or rule.get("动作") or []
+        else:
+            rv = list(rule or [])
+            ra = []
+        vals.append([str(x).strip() for x in rv][:len(conds)])
+        chosen = set()
+        if isinstance(ra, dict):
+            ra = list(ra.values())
+        for item in ra if isinstance(ra, (list, tuple, set)) else [ra]:
+            if isinstance(item, bool):
+                if item:
+                    chosen.add(len(chosen))
+            elif isinstance(item, int):
+                chosen.add(item)
+            else:
+                text = str(item).strip()
+                for j, row in enumerate(acts):
+                    if row["label"] == text:
+                        chosen.add(j)
+                if text.isdigit():
+                    chosen.add(int(text))
+        if not ra and isinstance(rule, dict):
+            on = rule.get("on") or rule.get("执行")
+            if isinstance(on, dict):
+                for k, v in on.items():
+                    if v:
+                        for j, row in enumerate(acts):
+                            if row["label"] == str(k):
+                                chosen.add(j)
+        execs.append(chosen)
+
+    cond_col = 46
+    group_w = max(72, max((_label_len(g) for g, _, _ in cgroups + agroups), default=60) + 16)
+    item_w = max(120, max(_label_len(r["label"]) for r in conds + acts) + 20)
+    rule_w = max(36, max(len(str(i + 1)) for i in range(len(rules))) * 10 + 16)
+    x1 = cond_col
+    x2 = x1 + group_w
+    x3 = x2 + item_w
+    total_w = x3 + rule_w * len(rules)
+    head1 = 32
+    head2 = 30
+    row_h = 34
+    cond_h = row_h * len(conds)
+    act_h = row_h * len(acts)
+    yc = head1 + head2
+    ya = yc + cond_h
+    total_h = ya + act_h
+
+    out = []
+    out.append(_ink_rect(0, 0, total_w, total_h))
+    # 表头
+    out.append(_ink_rect(0, 0, x3, yc))
+    out.append(_fit_text(x3 / 2, yc / 2, ["选项"], x3 - 12))
+    out.append(_ink_rect(x3, 0, total_w - x3, head1))
+    out.append(_fit_text((x3 + total_w) / 2, head1 / 2, ["规则"], total_w - x3 - 12))
+    for j in range(len(rules)):
+        rx = x3 + j * rule_w
+        out.append(_ink_rect(rx, head1, rule_w, head2))
+        out.append(_fit_text(rx + rule_w / 2, head1 + head2 / 2, [str(j + 1)], rule_w - 6))
+    # 竖线
+    out.append(_ink_line(x1, yc, x1, total_h))
+    out.append(_ink_line(x2, yc, x2, total_h))
+    out.append(_ink_line(x3, 0, x3, total_h))
+    for j in range(1, len(rules)):
+        out.append(_ink_line(x3 + j * rule_w, head1, x3 + j * rule_w, total_h))
+    # 条件
+    out.append(_fit_text(x1 / 2, yc + cond_h / 2, ["条件"], x1 - 8))
+    for grp, start, count in cgroups:
+        gy = yc + start * row_h
+        out.append(_ink_rect(x1, gy, group_w, count * row_h))
+        out.append(_fit_text(x1 + group_w / 2, gy + count * row_h / 2,
+                             _wrap_text(grp, 10), group_w - 10))
+    for i, row in enumerate(conds):
+        ry = yc + i * row_h
+        out.append(_ink_rect(x2, ry, item_w, row_h))
+        out.append(_fit_text(x2 + item_w / 2, ry + row_h / 2,
+                             _wrap_text(row["label"], 18), item_w - 10))
+        if i:
+            out.append(_ink_line(x2, ry, total_w, ry))
+        for j in range(len(rules)):
+            rx = x3 + j * rule_w
+            value = vals[j][i] if i < len(vals[j]) else ""
+            value = {"-": "—", "–": "—"}.get(value, value)
+            out.append(_fit_text(rx + rule_w / 2, ry + row_h / 2, [value], rule_w - 6,
+                                 bold=True))
+    # 动作
+    out.append(_ink_line(0, yc, total_w, yc))
+    out.append(_fit_text(x1 / 2, ya + act_h / 2, ["动作"], x1 - 8))
+    for grp, start, count in agroups:
+        gy = ya + start * row_h
+        out.append(_ink_rect(x1, gy, group_w, count * row_h))
+        out.append(_fit_text(x1 + group_w / 2, gy + count * row_h / 2,
+                             _wrap_text(grp, 10), group_w - 10))
+    for i, row in enumerate(acts):
+        ry = ya + i * row_h
+        out.append(_ink_rect(x2, ry, item_w, row_h))
+        out.append(_fit_text(x2 + item_w / 2, ry + row_h / 2,
+                             _wrap_text(row["label"], 18), item_w - 10))
+        if i:
+            out.append(_ink_line(x2, ry, total_w, ry))
+        for j in range(len(rules)):
+            if i in execs[j]:
+                rx = x3 + j * rule_w
+                out.append(_fit_text(rx + rule_w / 2, ry + row_h / 2, ["√"], rule_w - 6,
+                                     bold=True))
+    out.append(_ink_line(0, ya, total_w, ya))
+    return _sheet(total_w, total_h, "".join(out), title)
+
+
 def draw_flow(data, title=""):
     nodes = _norm_nodes(data.get("nodes"))
     edges = _norm_edges(data.get("edges"))
@@ -3570,6 +3718,10 @@ DRAWERS = {
     "pad": draw_pad,
     "graph": draw_graph,
     "dtree": draw_dtree,
+    "dtable": draw_dtable,
+    "dt": draw_dtable,
+    "判定表": draw_dtable,
+    "决策表": draw_dtable,
     "dataflow": draw_dataflow,
     "dfd": draw_dataflow,
     "arch": draw_arch,
@@ -3619,7 +3771,7 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
     drawer = DRAWERS.get(key)
     if drawer is None:
         return json.dumps({
-            "error": f"不认识的图类型「{kind}」。可选：tree（树）/ flow（流程图）/ ns（盒图）/ pad（问题分析图）/ graph（关系图）/ "
+            "error": f"不认识的图类型「{kind}」。可选：tree（树）/ flow（流程图）/ ns（盒图）/ dtable（判定表）/ pad（问题分析图）/ graph（关系图）/ "
                      f"dataflow（数据流图）/ arch（架构图）/ sequence（时序图）/ chart（图表）/ "
                      f"timeline（时间线）/ er（ER 图）/ state（状态转换图）。要自由创意排版就用 render_html。"
         }, ensure_ascii=False)
@@ -3827,6 +3979,10 @@ SPECS = [
                 "    **分支汇合后公共部分只画一次**：两分支先并回一条线，再画后面的公共判断/动作；"
                 "不要给每条分支复制一份相同的后续流程。\n"
                 "    **伪代码一行一个框**：连续两条声明/赋值别并成一个框（两条 Integer 就画两个框）。\n"
+                "  dtable: 判定表（教材表 5-2 格式）：{conditions:[{group?, label} 或 {group, items:[...]}], "
+                "actions:[{group?, label} 或 {group, items:[...]}], rules:[{values:[Y/N/—...], actions:[执行的动作行下标/名称...]}]}\n"
+                "    严格按教材：左上「选项」右上「规则」+ 1..N 列；左侧「条件」「动作」分组；"
+                "    条件值只写 Y / N / —（不要 T/F、真/假、√）；动作执行写 √、不执行留空。\n"
                 "  ns: 盒图（N-S 图）：{steps:[...]}，节点 kind 取 "
                 "process{label} / if{condition, then, else} / case{condition, branches:[{value, body}]} / "
                 "while{condition, body} / until{condition, body} / ref{label}；"
