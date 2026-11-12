@@ -12,6 +12,8 @@ import androidx.compose.ui.text.withStyle
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.layout.Arrangement
@@ -25,10 +27,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.OpenInFull
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,10 +49,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -63,6 +71,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.TextUnit
 import com.agentdeck.app.ui.theme.DeckPalette
 
 /* ------------------------------------------------------------------
@@ -851,8 +860,8 @@ internal fun inlineAndSplit(text: String, palette: DeckPalette): List<InlineChun
 
 /* ---------------- 表格 ---------------- */
 
-private val TABLE_PAD_H = 8.dp
-private val TABLE_PAD_V = 6.dp
+internal val TABLE_PAD_H = 8.dp
+internal val TABLE_PAD_V = 6.dp
 private val TABLE_COLUMN_MIN = 52.dp
 private val TABLE_COLUMN_MAX = 216.dp
 
@@ -881,20 +890,7 @@ private fun TableBlock(block: MdBlock.Table, palette: DeckPalette) {
 
     // 每列量一次最宽单元格：短列不会被旁边的长列拉宽，长文本到上限后自己折行
     val natural = remember(block, cellStyle) {
-        List(columns) { column ->
-            rows.maxOfOrNull { row ->
-                val cell = row.getOrElse(column) { "" }
-                val measured = measurer.measure(
-                    text = AnnotatedString(tableMeasureText(cell)),
-                    style = cellStyle,
-                    constraints = Constraints(maxWidth = (maxPx - padPx).toInt().coerceAtLeast(1)),
-                )
-                // 行内公式是按代码估算的，真实位图通常比估算宽；给 12% 余量，
-                // 免得量窄了以后单元格里的公式顶出边框。
-                val guard = if (cell.contains('$')) 1.12f else 1f
-                measured.size.width * guard + padPx
-            } ?: 0f
-        }
+        measureTableColumns(measurer, rows, columns, cellStyle, padPx, maxPx)
     }
 
     /*
@@ -904,17 +900,7 @@ private fun TableBlock(block: MdBlock.Table, palette: DeckPalette) {
      * 渲染出来会多一个空框，看着像画错了。这里只做视觉合并：某格为空、且正上方
      * 同一列有内容时，把它和上一格之间的横线去掉，剩下的左右竖线天然就是合并格的样子。
      */
-    val merged = remember(block) {
-        rows.indices.map { r ->
-            BooleanArray(columns) { c ->
-                if (r == 0 || rows[r].getOrElse(c) { "" }.isNotBlank()) {
-                    false
-                } else {
-                    (r - 1 downTo 0).any { up -> rows[up].getOrElse(c) { "" }.isNotBlank() }
-                }
-            }
-        }
-    }
+    val merged = remember(block) { tableMergeMarks(rows, columns) }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -936,124 +922,233 @@ private fun TableBlock(block: MdBlock.Table, palette: DeckPalette) {
         val scroll = rememberScrollState()
         val lineColor = palette.line
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .border(1.dp, lineColor, RoundedCornerShape(8.dp)),
-        ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
             Box(
-                modifier = if (scrollable) {
-                    Modifier
-                        .horizontalScroll(scroll)
-                        // 表宽超过屏幕时，用户很容易从屏幕左右边缘起手横滑；MIUI / 全面屏
-                        // 手势会把它当成「返回」吃掉，表现就是「往左滑没反应」。把表格这块
-                        // 区域登记成系统手势豁免区（Android 10+ API），返回手势就不抢了。
-                        .systemGestureExclusion()
-                } else {
-                    Modifier
-                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, lineColor, RoundedCornerShape(8.dp))
+                    // 整块表格也能点：和下面那行「全屏看」是同一个入口
+                    .pointerInput(block) {
+                        detectTapGestures { TablePreview.show(block) }
+                    },
             ) {
-                Column(
-                    modifier = Modifier
-                        .width(with(density) { totalPx.toDp() })
-                        // 竖线画在内容之上：表头有底色，画在下层会被盖住
-                        .drawWithContent {
-                            drawContent()
-                            val stroke = 1.dp.toPx()
-                            var x = 0f
-                            for (c in 0 until columns - 1) {
-                                x += widths[c]
-                                drawRect(
-                                    color = lineColor,
-                                    topLeft = Offset(x - stroke / 2f, 0f),
-                                    size = Size(stroke, size.height),
-                                )
-                            }
-                        },
+                Box(
+                    modifier = if (scrollable) {
+                        Modifier
+                            .horizontalScroll(scroll)
+                            // 表宽超过屏幕时，用户很容易从屏幕左右边缘起手横滑；MIUI / 全面屏
+                            // 手势会把它当成「返回」吃掉，表现就是「往左滑没反应」。把表格这块
+                            // 区域登记成系统手势豁免区（Android 10+ API），返回手势就不抢了。
+                            .systemGestureExclusion()
+                    } else {
+                        Modifier
+                    },
                 ) {
-                    rows.forEachIndexed { rowIndex, row ->
-                        val header = rowIndex == 0
-                        val lastRow = rowIndex == rows.lastIndex
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
+                    TableCanvas(
+                        rows = rows,
+                        columns = columns,
+                        widths = widths,
+                        merged = merged,
+                        palette = palette,
+                        fontSize = 12.5.sp,
+                        lineHeight = 18.sp,
+                    )
+                }
+
+                // 边缘渐隐：内容被挡住时压一条淡影，明示「还能横滑」。
+                // 不压这条，宽表格看起来就是被硬裁了一刀，用户根本不会想到去滑。
+                if (scrollable) {
+                    val atStart by remember { derivedStateOf { scroll.value <= 0 } }
+                    val atEnd by remember { derivedStateOf { scroll.value >= scroll.maxValue } }
+                    val fade = Color.Black.copy(alpha = 0.10f)
+                    if (!atEnd) {
+                        Box(
                             modifier = Modifier
-                                .width(with(density) { totalPx.toDp() })
-                                .background(if (header) palette.softFill else Color.Transparent)
-                                // 行线画在整行上而不是单元格上：含行内公式的格子会被位图撑高，
-                                // 各格自己画底线就会参差不齐；合并格那一段跳过不画
-                                .drawWithContent {
-                                    drawContent()
-                                    if (!lastRow) {
-                                        // 这条线分隔的是 rowIndex 和 rowIndex+1，合并标记看下一行
-                                        val below = merged[rowIndex + 1]
-                                        val stroke = 1.dp.toPx()
-                                        var x = 0f
-                                        for (c in 0 until columns) {
-                                            if (!below[c]) {
-                                                drawRect(
-                                                    color = lineColor,
-                                                    topLeft = Offset(x, size.height - stroke),
-                                                    size = Size(widths[c], stroke),
-                                                )
-                                            }
-                                            x += widths[c]
-                                        }
-                                    }
-                                },
-                        ) {
-                            for (c in 0 until columns) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(with(density) { widths[c].toDp() })
-                                        // 兜底：万一内容还是比量出来的宽（比如行内公式比估算大），
-                                        // 裁在本格里，不要越过竖线糊到隔壁格
-                                        .clipToBounds()
-                                        .padding(horizontal = TABLE_PAD_H, vertical = TABLE_PAD_V),
-                                ) {
-                                    // 表格里常有 $0$、$A>2$ 这种行内公式，和段落一样处理
-                                    MathText(
-                                        text = rows[rowIndex].getOrElse(c) { "" },
-                                        palette = palette,
-                                        fontSize = 12.5.sp,
-                                        lineHeight = 18.sp,
-                                        color = palette.ink,
-                                        bold = header,
-                                    )
-                                }
-                            }
-                        }
+                                .align(Alignment.CenterEnd)
+                                .fillMaxHeight()
+                                .width(14.dp)
+                                .background(
+                                    Brush.horizontalGradient(listOf(Color.Transparent, fade)),
+                                ),
+                        )
+                    }
+                    if (!atStart) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterStart)
+                                .fillMaxHeight()
+                                .width(14.dp)
+                                .background(
+                                    Brush.horizontalGradient(listOf(fade, Color.Transparent)),
+                                ),
+                        )
                     }
                 }
             }
 
-            // 边缘渐隐：内容被挡住时压一条淡影，明示「还能横滑」。
-            // 不压这条，宽表格看起来就是被硬裁了一刀，用户根本不会想到去滑。
-            if (scrollable) {
-                val atStart by remember { derivedStateOf { scroll.value <= 0 } }
-                val atEnd by remember { derivedStateOf { scroll.value >= scroll.maxValue } }
-                val fade = Color.Black.copy(alpha = 0.10f)
-                if (!atEnd) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .fillMaxHeight()
-                            .width(14.dp)
-                            .background(Brush.horizontalGradient(listOf(Color.Transparent, fade))),
+            // 全屏入口：每张表都给，判定表那种宽表横滑着读太累，2 列的窄表放大了也更好读。
+            // 做成右下角一行 11sp 的浅色小字，不抢正文的注意力。
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable { TablePreview.show(block) }
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.OpenInFull,
+                        contentDescription = null,
+                        tint = palette.inkSoft,
+                        modifier = Modifier.size(11.dp),
                     )
-                }
-                if (!atStart) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .fillMaxHeight()
-                            .width(14.dp)
-                            .background(Brush.horizontalGradient(listOf(fade, Color.Transparent))),
-                    )
+                    Spacer(Modifier.width(3.dp))
+                    Text("全屏看", fontSize = 11.sp, color = palette.inkSoft)
                 }
             }
         }
     }
+}
+
+/**
+ * 表格本体：只管把格子按给定列宽画出来，尺寸和滚动交给调用方。
+ *
+ * 内联渲染和全屏页共用这一份——两处只是字号、列宽上限和滚动方式不同，
+ * 如果各写一遍，合并单元格的横线逻辑迟早会对不上。
+ *
+ * @param widths 每列宽度（px），顺序和列数一致。
+ * @param merged 纵向上「并入上一格」的标记：`merged[r][c] == true` 表示 (r,c) 那格的
+ *   上方横线不画，看起来就是一个跨行的大格子。
+ */
+@Composable
+internal fun TableCanvas(
+    rows: List<List<String>>,
+    columns: Int,
+    widths: List<Float>,
+    merged: List<BooleanArray>,
+    palette: DeckPalette,
+    fontSize: TextUnit,
+    lineHeight: TextUnit,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val lineColor = palette.line
+    val totalPx = widths.sum() + with(density) { columns.dp.toPx() }
+    val totalDp = with(density) { totalPx.toDp() }
+
+    Column(
+        modifier = modifier
+            .width(totalDp)
+            // 竖线画在内容之上：表头有底色，画在下层会被盖住
+            .drawWithContent {
+                drawContent()
+                val stroke = 1.dp.toPx()
+                var x = 0f
+                for (c in 0 until columns - 1) {
+                    x += widths[c]
+                    drawRect(
+                        color = lineColor,
+                        topLeft = Offset(x - stroke / 2f, 0f),
+                        size = Size(stroke, size.height),
+                    )
+                }
+            },
+    ) {
+        rows.forEachIndexed { rowIndex, row ->
+            val header = rowIndex == 0
+            val lastRow = rowIndex == rows.lastIndex
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .width(totalDp)
+                    .background(if (header) palette.softFill else Color.Transparent)
+                    // 行线画在整行上而不是单元格上：含行内公式的格子会被位图撑高，
+                    // 各格自己画底线就会参差不齐；合并格那一段跳过不画
+                    .drawWithContent {
+                        drawContent()
+                        if (!lastRow) {
+                            // 这条线分隔的是 rowIndex 和 rowIndex+1，合并标记看下一行
+                            val below = merged[rowIndex + 1]
+                            val stroke = 1.dp.toPx()
+                            var x = 0f
+                            for (c in 0 until columns) {
+                                if (!below[c]) {
+                                    drawRect(
+                                        color = lineColor,
+                                        topLeft = Offset(x, size.height - stroke),
+                                        size = Size(widths[c], stroke),
+                                    )
+                                }
+                                x += widths[c]
+                            }
+                        }
+                    },
+            ) {
+                for (c in 0 until columns) {
+                    Box(
+                        modifier = Modifier
+                            .width(with(density) { widths[c].toDp() })
+                            // 兜底：万一内容还是比量出来的宽（比如行内公式比估算大），
+                            // 裁在本格里，不要越过竖线糊到隔壁格
+                            .clipToBounds()
+                            .padding(horizontal = TABLE_PAD_H, vertical = TABLE_PAD_V),
+                    ) {
+                        // 表格里常有 $0$、$A>2$ 这种行内公式，和段落一样处理
+                        MathText(
+                            text = row.getOrElse(c) { "" },
+                            palette = palette,
+                            fontSize = fontSize,
+                            lineHeight = lineHeight,
+                            color = palette.ink,
+                            bold = header,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 纵向上「并入上一格」的位置，内联和全屏共用。 */
+internal fun tableMergeMarks(rows: List<List<String>>, columns: Int): List<BooleanArray> =
+    rows.indices.map { r ->
+        BooleanArray(columns) { c ->
+            if (r == 0 || rows[r].getOrElse(c) { "" }.isNotBlank()) {
+                false
+            } else {
+                (r - 1 downTo 0).any { up -> rows[up].getOrElse(c) { "" }.isNotBlank() }
+            }
+        }
+    }
+
+/**
+ * 量出每列的期望宽度（已含左右内边距）。内联表格和全屏页共用同一套量法，
+ * 免得同一条数据在两处排出不同的列宽。
+ */
+internal fun measureTableColumns(
+    measurer: TextMeasurer,
+    rows: List<List<String>>,
+    columns: Int,
+    style: TextStyle,
+    padPx: Float,
+    maxPx: Float,
+): List<Float> = List(columns) { column ->
+    rows.maxOfOrNull { row ->
+        val cell = row.getOrElse(column) { "" }
+        val measured = measurer.measure(
+            text = AnnotatedString(tableMeasureText(cell)),
+            style = style,
+            constraints = Constraints(maxWidth = (maxPx - padPx).toInt().coerceAtLeast(1)),
+        )
+        // 行内公式是按代码估算的，真实位图通常比估算宽；给 12% 余量，
+        // 免得量窄了以后单元格里的公式顶出边框。
+        val guard = if (cell.contains('$')) 1.12f else 1f
+        measured.size.width * guard + padPx
+    } ?: 0f
 }
 
 /**
