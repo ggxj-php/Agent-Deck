@@ -8,6 +8,7 @@
   - 数据合法就一定能画出来，不会因为 CSS 写错炸掉
 创意海报、界面草图、动画这类仍然用 render_html。
 """
+import html as _html
 import json
 import math
 import re
@@ -41,8 +42,14 @@ LINE = "#8a8fa3"
 
 
 def _esc(text):
-    return (str(text if text is not None else "")
-            .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    s = str(text if text is not None else "")
+    # 模型常常把 < > 写成 &lt; &gt;；HTML 实体还原后再统一转义，避免双重转义
+    for _ in range(3):
+        _u = _html.unescape(s)
+        if _u == s:
+            break
+        s = _u
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             .replace('"', "&quot;"))
 
 
@@ -4146,6 +4153,8 @@ SPECS = [
                 "    **分支汇合后公共部分只画一次**：两分支先并回一条线，再画后面的公共判断/动作；"
                 "不要传「汇合/合并」辅助节点，分支用线自然汇合即可。\n"
                 "不要给每条分支复制一份相同的后续流程。\n"
+                "    **图上文字用原始字符**：条件/标签直接写 C<10、X>1000、A>1，"
+                "不要写 &lt; &gt; 这类 HTML 实体（工具会自动转义一次）。\n"
                 "    **伪代码一行一个框**：连续两条声明/赋值别并成一个框（两条 Integer 就画两个框）。\n"
                 "  dtable: 判定表（教材表 5-2 格式）：{conditions:[{group?, label} 或 {group, items:[...]}], "
                 "actions:[{group?, label} 或 {group, items:[...]}], rules:[{values:[Y/N/-...], actions:[执行的动作行下标/名称...]}], "
