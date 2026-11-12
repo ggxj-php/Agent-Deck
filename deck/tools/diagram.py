@@ -938,12 +938,13 @@ def _flow_custom_svg(data, has_title=False):
             nvout.append(_polyline([(cx + dw / 2, cy), (bx, cy), (bx, by)]))
             nvout.append(_arrow_head(bx, by, 0, 1))
             bend = draw(b["body"], bx, by, nvout)
-            # 回边：从循环体底部右侧绕出去、向上、箭头指回判断框
+            # 回边：从循环体底部中间向上，接到 header 上方入线（教材画法），不戳菱形侧面
             loop_x = cx + dw / 2 + _FV_HGAP + bw + _FV_LOOP
-            latch_w = size(b["latch"])[0] if b.get("latch") else bw
-            nvout.append(_polyline([(bx + latch_w / 2, bend), (loop_x, bend),
-                                    (loop_x, cy), (cx + dw / 2, cy)]))
-            nvout.append(_arrow_head(cx + dw / 2, cy, -1, 0))
+            join_y = top - _FV_GAP / 2
+            if join_y < top:
+                nvout.append(_polyline([(cx, join_y), (cx, top)]))
+            nvout.append(_polyline([(bx, bend), (loop_x, bend),
+                                    (loop_x, join_y), (cx, join_y)]))
             bl = b.get("back_label") or ""
             if bl:
                 nvout.append(f'<text x="{loop_x + 6:.1f}" y="{cy + 12:.1f}" font-size="12" fill="#5a6480" font-family="system-ui, sans-serif">{_esc(bl)}</text>')
@@ -982,6 +983,19 @@ def _flow_custom_svg(data, has_title=False):
                 nvout.append(f'<text x="{cx + 8:.1f}" y="{ly + lh / 2 + 16:.1f}" font-size="12" fill="#5a6480" font-family="system-ui, sans-serif">{_esc(exit_label)}</text>')
             return ey
         raise _FlowBad()
+
+    def _reaches(src, dst):
+        seen = set()
+        stack = [src]
+        while stack:
+            cur = stack.pop()
+            if cur == dst:
+                return True
+            if cur in seen or cur not in by_id:
+                continue
+            seen.add(cur)
+            stack.extend(fwd.get(cur, []))
+        return False
 
     # ---- 解析结构 ----
     def parse(start, stop):
@@ -1023,7 +1037,9 @@ def _flow_custom_svg(data, has_title=False):
             # 判断
             if len(outs) != 2:
                 raise _FlowBad()
-            M = stop if stop is not None else ipdom.get(cur)
+            M = ipdom.get(cur)
+            if stop is not None and (M is None or M == cur or not _reaches(M, stop)):
+                M = stop
             if M is None or M == cur:
                 raise _FlowBad()
             a, b = outs
