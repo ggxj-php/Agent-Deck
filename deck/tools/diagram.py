@@ -798,7 +798,7 @@ def _flow_custom_svg(data, has_title=False):
     for nid in ids:
         cand = [m for m in pdom[nid] if m != nid]
         if cand:
-            ipdom[nid] = min(cand, key=lambda m: len(pdom[m]))
+            ipdom[nid] = max(cand, key=lambda m: len(pdom[m]))
 
     def size(nid):
         return _flow_node_box(nv, nid)
