@@ -680,6 +680,55 @@ def _flow_custom_svg(data, has_title=False):
 
     fwd = {nid: [v for v in succ.get(nid, []) if (nid, v) not in back] for nid in ids}
 
+    # 模型常把「汇合后的公共部分」复制成两份独立子图。这里按（节点名, 类型, 各出边标签及下游结构）
+    # 完全相同的子图做合并；有回边的图不合并（避免把不同的循环误合成一个）。
+    if not back:
+        _sig_cache = {}
+
+        def _sub_sig(nid, stack):
+            if nid in _sig_cache:
+                return _sig_cache[nid]
+            if nid in stack:
+                return ("cycle",)
+            stack.add(nid)
+            outs = tuple(sorted((labels.get((nid, c), ""), _sub_sig(c, stack))
+                                for c in fwd.get(nid, [])))
+            stack.discard(nid)
+            sig = ((by_id[nid].get("kind") or "").strip().lower(),
+                   by_id[nid]["label"], outs)
+            _sig_cache[nid] = sig
+            return sig
+
+        _canon = {}
+        _first = {}
+        _keep = []
+        for nid in ids:
+            s = _sub_sig(nid, set())
+            if s in _first:
+                _canon[nid] = _first[s]
+            else:
+                _first[s] = nid
+                _canon[nid] = nid
+                _keep.append(nid)
+        if len(_keep) < len(ids):
+            ids = _keep
+            by_id = {nid: by_id[nid] for nid in ids}
+            nv["by_id"] = by_id
+            _succ = {nid: [] for nid in ids}
+            _labels = {}
+            for a in ids:
+                for b in succ.get(a, []):
+                    cb = _canon.get(b, b)
+                    if cb not in _succ[a]:
+                        _succ[a].append(cb)
+                    _labels[(a, cb)] = labels.get((a, b), "")
+            succ = _succ
+            labels = _labels
+            fwd = {nid: list(succ[nid]) for nid in ids}
+            if data.get("start") in _canon:
+                data = dict(data)
+                data["start"] = _canon[data["start"]]
+
     def reach(start, graph):
         seen = set()
         stack = [start]
@@ -3777,6 +3826,7 @@ SPECS = [
                 "不要把公共节点塞在判断和分支之间，也不要让下一层的框再分 T/F（写错工具会提示你重画）。\n"
                 "    **分支汇合后公共部分只画一次**：两分支先并回一条线，再画后面的公共判断/动作；"
                 "不要给每条分支复制一份相同的后续流程。\n"
+                "    **伪代码一行一个框**：连续两条声明/赋值别并成一个框（两条 Integer 就画两个框）。\n"
                 "  ns: 盒图（N-S 图）：{steps:[...]}，节点 kind 取 "
                 "process{label} / if{condition, then, else} / case{condition, branches:[{value, body}]} / "
                 "while{condition, body} / until{condition, body} / ref{label}；"
