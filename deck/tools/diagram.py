@@ -1149,19 +1149,6 @@ def _ns_node(step):
     return {"kind": "process", "label": str(step)}
 
 
-def _ns_single_label(body):
-    """循环体只有一个普通动作时，把 do until/S 画进同一个框（教材画法）。"""
-    body = body or []
-    if len(body) != 1:
-        return None
-    node = _ns_node(body[0])
-    kind = str(node.get("kind") or "process").strip().lower()
-    if kind not in ("process", "任务", "处理", ""):
-        return None
-    label = str(node.get("label") or "").strip()
-    return label or None
-
-
 def _ns_measure_seq(steps):
     w, h = 0, 0
     for step in steps or []:
@@ -1186,22 +1173,12 @@ def _ns_measure(node):
         return max(230, bw * max(1, len(branches))), NS_HEAD + NS_ROW + bh
     if kind in ("while", "当型", "当型循环"):
         cw = max(80, _label_len(node.get("condition") or "") + 24)
-        body = node.get("body") or []
-        single = _ns_single_label(body)
-        if single is not None:
-            bh = max(34, _lines_h(["do while", single]) + 8)
-            return NS_LOOP_PAD + max(cw, 120), NS_LOOP_COND + bh
-        bw, bh = _ns_measure_seq(body)
-        return NS_LOOP_PAD + max(bw, cw, 120), NS_LOOP_COND + 18 + max(bh, 34)
+        bw, bh = _ns_measure_seq(node.get("body") or [])
+        return NS_LOOP_PAD + max(bw, cw, 120), NS_LOOP_COND + max(bh, 34)
     if kind in ("until", "直到型", "直到型循环"):
         cw = max(80, _label_len(node.get("condition") or "") + 24)
-        body = node.get("body") or []
-        single = _ns_single_label(body)
-        if single is not None:
-            bh = max(34, _lines_h(["do until", single]) + 8)
-            return NS_LOOP_PAD + max(cw, 120), bh + NS_LOOP_COND
-        bw, bh = _ns_measure_seq(body)
-        return NS_LOOP_PAD + max(bw, cw, 120), 18 + max(bh, 34) + NS_LOOP_COND
+        bw, bh = _ns_measure_seq(node.get("body") or [])
+        return NS_LOOP_PAD + max(bw, cw, 120), max(bh, 34) + NS_LOOP_COND
     if kind in ("ref", "nested", "引用", "嵌套", "子图"):
         return max(90, _label_len(node.get("label") or "") + 40), 42
     lines = _wrap_text(node.get("label"))
@@ -1264,35 +1241,22 @@ def _ns_draw(node, x, y, w, h, out):
         m = NS_LOOP_PAD
         body_top = y + NS_LOOP_COND
         out.append(_ink_rect(x, y, w, h))
-        out.append(_ink_line(x, body_top, x + w, body_top))
-        out.append(_ink_line(x + w - m, body_top, x + w - m, y + h))
-        out.append(_fit_text(x + w / 2, y + NS_LOOP_COND / 2,
-                             _wrap_text(node.get("condition") or "", 18), w - 16))
-        body = node.get("body") or []
-        single = _ns_single_label(body)
-        if single is not None:
-            out.append(_fit_text(x + (w - m) / 2, (body_top + y + h) / 2,
-                                 ["do while", single], w - m - 12))
-        else:
-            out.append(_fit_text(x + (w - m) / 2, body_top + 9, ["do while"], w - m - 12))
-            _ns_draw_seq(body, x, body_top + 18, w - m, out)
+        out.append(_ink_line(x + m, body_top, x + w, body_top))
+        out.append(_ink_line(x + m, body_top, x + m, y + h))
+        out.append(_fit_text(x + m + (w - m) / 2, y + NS_LOOP_COND / 2,
+                             _wrap_text(node.get("condition") or "", 18), w - m - 12))
+        _ns_draw_seq(node.get("body") or [], x + m, body_top, w - m, out)
         return
     if kind in ("until", "直到型", "直到型循环"):
         m = NS_LOOP_PAD
         body_bottom = y + h - NS_LOOP_COND
+        x2 = x + w - m
         out.append(_ink_rect(x, y, w, h))
-        out.append(_ink_line(x + m, y, x + m, body_bottom))
+        out.append(_ink_line(x2, y, x2, body_bottom))
         out.append(_ink_line(x, body_bottom, x + w, body_bottom))
+        _ns_draw_seq(node.get("body") or [], x, y, w - m, out)
         out.append(_fit_text(x + w / 2, body_bottom + NS_LOOP_COND / 2,
                              _wrap_text(node.get("condition") or "", 18), w - 16))
-        body = node.get("body") or []
-        single = _ns_single_label(body)
-        if single is not None:
-            out.append(_fit_text(x + m + (w - m) / 2, (y + body_bottom) / 2,
-                                 ["do until", single], w - m - 12))
-        else:
-            out.append(_fit_text(x + m + (w - m) / 2, y + 9, ["do until"], w - m - 12))
-            _ns_draw_seq(body, x + m, y + 18, w - m, out)
         return
     if kind in ("ref", "nested", "引用", "嵌套", "子图"):
         out.append(f'<ellipse cx="{x + w / 2:.1f}" cy="{y + h / 2:.1f}" '
