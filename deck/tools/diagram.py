@@ -1121,7 +1121,14 @@ def _dt_rows(raw):
             if items:
                 add_group(grp, items)
             else:
-                add_group(grp, [item.get("label") or item.get("name") or ""])
+                _label = str(item.get("label") or item.get("name") or "").strip()
+                if not grp and _label:
+                    _pos = next((k for k, ch in enumerate(_label) if ch.isdigit()), -1)
+                    _prefix = _label[:_pos].strip() if _pos > 0 else ""
+                    if _prefix:
+                        grp = _prefix
+                        _label = _label[_pos:].strip()
+                add_group(grp, [_label])
         elif isinstance(item, (list, tuple)):
             add_group("", list(item))
         else:
@@ -4086,6 +4093,8 @@ SPECS = [
                 "    严格按教材：左上「选项」右上「规则」+ 1..N 列；左侧「条件」「动作」分组；"
                 "    条件值只写 Y / N / -（半角减号，- 表示不关心/无关；不要 T/F、真/假、√、长破折号 —）。\n"
                 "    **条件成组**：用 {group, items:[...]}，或每行带相同 group（连续同组会自动合并）。\n"
+                "    **动作也要分组**：组名照题目写（如「课时津贴费」），行里只写数值；"
+                "不要省略组名或把「津贴 80 元/课时」整串写进行里。\n"
                 "    **多选一的条件组**：选中的行写 Y，组内其余行写 N；整组不关心才全写 -；"
                 "    不要用 - 代替 N（工具会把有 Y 的组里其余列渲染成 N）。\n"
                 "  ns: 盒图（N-S 图）：{steps:[...]}，节点 kind 取 "
