@@ -1280,7 +1280,6 @@ def _ns_draw(node, x, y, w, h, out):
     if kind in ("until", "直到型", "直到型循环"):
         m = NS_LOOP_PAD
         body_bottom = y + h - NS_LOOP_COND
-        x2 = x + w - m
         out.append(_ink_rect(x, y, w, h))
         out.append(_ink_line(x + m, y, x + m, body_bottom))
         out.append(_ink_line(x, body_bottom, x + w, body_bottom))
