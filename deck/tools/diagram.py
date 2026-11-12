@@ -394,6 +394,25 @@ def _flow_structure(nodes, edges, start):
             return None
         root = roots[0]
 
+    # 有环（do-until / while 的回边）不套两侧布局：回边会从框中间穿过去，
+    # 这种图交给 Graphviz 完整渲染，它会自动把线绕开节点。
+    _state = {}
+
+    def _has_cycle(u):
+        _state[u] = 1
+        for v in succ.get(u, []):
+            st = _state.get(v)
+            if st == 1:
+                return True
+            if st is None and _has_cycle(v):
+                return True
+        _state[u] = 2
+        return False
+
+    for _n in ids:
+        if _state.get(_n) is None and _has_cycle(_n):
+            return None
+
     spine = []
     decisions = {}
     seen = set()
@@ -1934,6 +1953,8 @@ def _dot_flow(data):
                           "fontcolor": "#33333d"})
         else:
             attrs.update(_dot_colors(n.get("color")))
+            # 处理框：直角矩形（只有开始/结束才圆角）
+            attrs.update({"shape": "box", "style": "filled"})
         lines.append(f'  "n{i}" [{_dot_attr(attrs)}];')
     for a, b, label in edges:
         if a not in idx or b not in idx:
@@ -3165,6 +3186,16 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
         except Exception as exc:         # noqa: BLE001
             print(f"[diagram] flow 两侧布局失败：{type(exc).__name__}: {exc}", flush=True)
             svg = ""
+        if not svg:
+            # 复杂图（有环 / 嵌套判断）：直接让 Graphviz 完整渲染，
+            # 它会把边绕开节点；以前拿它的坐标自己画直线，回边会穿过框。
+            try:
+                _dot_src = _dot_flow(data)
+                if _dot_src:
+                    svg = _dot_svg(_dot_src)
+            except Exception as exc:         # noqa: BLE001
+                print(f"[diagram] flow graphviz 渲染失败：{type(exc).__name__}: {exc}", flush=True)
+                svg = ""
         if not svg:
             try:
                 svg = _flow_svg(data)
