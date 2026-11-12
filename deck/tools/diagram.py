@@ -1175,10 +1175,12 @@ def _flow_svg(data):
                         "h": float(parts[5]) * FLOW_PX})
     if len(geo) != len(raw_nodes):
         return ""
-    for g in geo:
-        # Graphviz 算的框偏紧，留点余量，避免短表达式被挤成两行
+    for i, g in enumerate(geo):
+        # Graphviz 算的框偏紧，留点余量，避免短表达式被挤成两行；
+        # 再按文字宽估一遍（`Int X = 1` 这种别被拆成两行）。
         g["w"] += 16.0
         g["h"] += 8.0
+        g["w"] = max(g["w"], _label_len(raw_nodes[i]["label"]) + 34)
     mx, my = 70.0, 40.0
     cw = gw * FLOW_PX + mx * 2
     ch = gh * FLOW_PX + my * 2
@@ -1216,6 +1218,58 @@ def _flow_svg(data):
                        f'height="{h:.1f}" fill="{fill}" stroke="{stroke}" stroke-width="1.6"/>')
             tw = w - 18
         out.append(_fit_text(cx, cy, _wrap_px(n.get("label"), tw), tw, color=tcolor))
+    # ---- 用 Graphviz 自己算的走线（绕开节点），不再手工画折线 ----
+    # 以前只拿 Graphviz 的节点坐标、边自己画直角线：回边会从框中间穿过去，
+    # 长边也会压住中间的框。这里直接解析 dot -Tplain 的 edge 折线。
+    _edge_label_map = {}
+    for _a, _b, _lab in raw_edges:
+        _edge_label_map.setdefault((_a, _b), _lab)
+    _splines = {}
+    for _line in rows[1:]:
+        _p = _line.split()
+        if not _p or _p[0] != "edge" or len(_p) < 6:
+            continue
+        try:
+            _ia = int(_p[1].lstrip("n"))
+            _ib = int(_p[2].lstrip("n"))
+            _n = int(_p[3])
+        except ValueError:
+            continue
+        if _ia >= len(raw_nodes) or _ib >= len(raw_nodes) or _n < 2:
+            continue
+        if 4 + 2 * _n > len(_p):
+            continue
+        _pts = [(float(_p[4 + 2 * _k]), float(_p[5 + 2 * _k])) for _k in range(_n)]
+        _rest = _p[4 + 2 * _n:]
+        _lpos = None
+        if len(_rest) >= 2:
+            try:
+                _lpos = (float(_rest[0]), float(_rest[1]))
+            except ValueError:
+                _lpos = None
+        _splines[(_ia, _ib)] = (_pts, _lpos)
+    if _splines:
+        for (_ia, _ib), (_pts, _lpos) in _splines.items():
+            if len(_pts) < 2:
+                continue
+            _tp = [(mx + _x * FLOW_PX, my + (gh - _y) * FLOW_PX) for _x, _y in _pts]
+            out.append(_polyline(_tp))
+            _dx = _tp[-1][0] - _tp[-2][0]
+            _dy = _tp[-1][1] - _tp[-2][1]
+            _ln = math.hypot(_dx, _dy) or 1.0
+            out.append(_arrow_head(_tp[-1][0], _tp[-1][1], _dx / _ln, _dy / _ln))
+            _label = _edge_label_map.get((raw_nodes[_ia]["id"], raw_nodes[_ib]["id"]), "")
+            if _label:
+                if _lpos:
+                    _lx = mx + _lpos[0] * FLOW_PX
+                    _ly = my + (gh - _lpos[1]) * FLOW_PX
+                else:
+                    _lx, _ly = _tp[len(_tp) // 2]
+                out.append(f'<text x="{_lx:.1f}" y="{_ly - 8:.1f}" font-size="12" '
+                           f'fill="#5a6480" text-anchor="middle" '
+                           f'font-family="system-ui, sans-serif">{_esc(_label)}</text>')
+        return _canvas(cw, ch, "".join(out), "")
+
     right_ch = mx + gw * FLOW_PX + 34
     left_ch = mx - 34
 
