@@ -58,6 +58,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -140,14 +141,11 @@ private fun UserMessage(
             ) {
                 message.images.forEach { raw ->
                     val url = resolveUrl(baseUrl, raw)
-                    val context = LocalContext.current
                     // 刚发出去的图片是 data URI，Coil 解不了，先自己解成 Bitmap
                     val localBitmap = remember(url) {
                         if (isDataUri(url)) decodeDataUri(url) else null
                     }
-                    val request = remember(url) {
-                        ImageRequest.Builder(context).data(url).size(1200, 1200).build()
-                    }
+                    val request = rememberDeckImageRequest(url, widthFactor = 1.0f)
                     if (localBitmap != null) {
                         androidx.compose.foundation.Image(
                             bitmap = localBitmap.asImageBitmap(),
@@ -166,9 +164,8 @@ private fun UserMessage(
                         contentDescription = "发送的图片",
                         contentScale = ContentScale.FillWidth,
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 240.dp),
+                        maxHeight = 240.dp,
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = { onPreview(url) },
                     )
                     Spacer(Modifier.height(6.dp))
@@ -676,15 +673,17 @@ private fun ArtifactBlock(
         return
     }
     val url = if (stage == 0) {
-        "$baseUrl/api/artifact/${block.id}/png"
+        // v=2：早期服务端渲染被产物的自适应脚本缩过，缓存里留了一批几十像素宽的糊图。
+        // 换个查询串让 Coil 重新拉，别继续吃旧缓存。
+        "$baseUrl/api/artifact/${block.id}/png?v=2"
     } else {
         "$baseUrl/api/artifact/${block.id}/svg"
     }
-    val context = LocalContext.current
-    // 内联按 1600px 栅格化，缩放/小屏看文字都够清楚
-    val request = remember(url) {
-        ImageRequest.Builder(context).data(url).size(1600, 1600).build()
-    }
+    // 按屏幕宽度定分辨率：产物图常常是 1:3、1:4 的长图，固定 1600×1600 的框会把宽度压
+    // 到 400px，铺满屏宽就是 2.7 倍放大，糊得看不清字。
+    val request = rememberDeckImageRequest(url, widthFactor = 1.15f)
+    // 内联最多占到七成屏高，再长就顶部对齐裁掉，点开看完整
+    val maxInline = with(LocalConfiguration.current) { (screenHeightDp * 0.72f).dp }
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         if (block.title.isNotBlank()) {
             Text(
@@ -698,15 +697,16 @@ private fun ArtifactBlock(
         DeckAsyncImage(
             model = request,
             contentDescription = block.title.ifBlank { "生成的图" },
-            contentScale = ContentScale.Fit,
+            contentScale = ContentScale.FillWidth,
             shape = RoundedCornerShape(10.dp),
             placeholderAspectRatio = 4f / 3f,
             placeholderLabel = "正在渲染…",
             errorLabel = "图片没渲染出来",
+            maxHeight = maxInline,
+            longImageHint = "长图 · 点一下看完整",
             onError = { stage += 1 },
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 60.dp, max = 460.dp)
                 .background(Color.White),
             onClick = { onPreview(url) },
         )

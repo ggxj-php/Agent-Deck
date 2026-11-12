@@ -10,12 +10,16 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,13 +41,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
+import coil.request.ImageRequest
 import com.agentdeck.app.ui.theme.DeckPalette
 import com.agentdeck.app.ui.theme.LocalPalette
+import kotlin.math.roundToInt
 
 /**
  * 图片加载中的骨架占位。
@@ -180,17 +190,23 @@ fun ImageUnavailablePlaceholder(
  * @param placeholderAspectRatio 加载中的占位按这个比例撑满宽度（图片还没解码，没有
  *   intrinsic size，不给比例会塌成 0 高度——那才是「一片空白」的由来）。传 null 表示
  *   由调用方的 modifier 决定高度。
+ * @param maxHeight 长图内联显示的高度上限。超出就按宽度铺满、顶部对齐裁掉下半截，
+ *   底部压一条渐隐提示（[longImageHint]）。不设上限的话，1:6 的长图会把整屏顶满；
+ *   设成 460dp 再用 Fit 塞进去，长图就会被缩成一条，糊到看不清字——两头都不对。
+ * @param longImageHint 被裁掉时底部显示的提示语，null 表示不提示。
  */
 @Composable
 fun DeckAsyncImage(
     model: Any?,
     contentDescription: String?,
     modifier: Modifier = Modifier,
-    contentScale: ContentScale = ContentScale.Fit,
+    contentScale: ContentScale = ContentScale.FillWidth,
     shape: Shape = RoundedCornerShape(10.dp),
     placeholderAspectRatio: Float? = 3f / 2f,
     placeholderLabel: String? = null,
     errorLabel: String = "图片加载失败",
+    maxHeight: Dp? = null,
+    longImageHint: String? = null,
     onError: (() -> Unit)? = null,
     onClick: (() -> Unit)? = null,
 ) {
@@ -227,12 +243,81 @@ fun DeckAsyncImage(
                 shape = shape,
             )
 
-            else -> Image(
-                painter = painter,
-                contentDescription = contentDescription,
-                contentScale = contentScale,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            else -> BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                // 图还没画出来时 intrinsicSize 是 Unspecified（NaN），比较结果为 false
+                val intrinsic = painter.intrinsicSize
+                val ratio = if (intrinsic.width > 0f && intrinsic.height > 0f) {
+                    intrinsic.width / intrinsic.height
+                } else {
+                    null
+                }
+                val naturalHeight = ratio?.let { maxWidth / it }
+                val cropped = maxHeight != null && naturalHeight != null && naturalHeight > maxHeight
+                val limit = maxHeight
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(if (cropped && limit != null) Modifier.height(limit) else Modifier),
+                ) {
+                    Image(
+                        painter = painter,
+                        contentDescription = contentDescription,
+                        // 裁切时 Width 铺满、顶部对齐：先看到图的开头，而不是被裁成中间一段
+                        contentScale = if (cropped) ContentScale.FillWidth else contentScale,
+                        alignment = if (cropped) Alignment.TopCenter else Alignment.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(if (cropped && limit != null) Modifier.height(limit) else Modifier),
+                    )
+                    if (cropped && longImageHint != null) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.45f)),
+                                    ),
+                                )
+                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                        ) {
+                            Text(text = longImageHint, color = Color.White, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+/**
+ * 图片请求：按**宽度**定分辨率，高度放开。
+ *
+ * 之前的 `.size(1600, 1600)` 语义是「整张图塞进 1600×1600 的框」。一张 1:4 的长图为了
+ * 塞进高度，宽度会被压到 400px，铺到 1080px 宽的屏幕上就是放大 2.7 倍——糊得看不清字。
+ * 这里把高度给到宽度的 12 倍：常见比例都能按真实宽度解码，内存仍由源图（服务端 PNG
+ * 最宽 2600）和 Coil 的 2 次幂采样兜住。
+ *
+ * @param widthFactor 相对屏幕宽度的倍率。内联 1.1 够用；全屏预览要放大看，给 1.8。
+ */
+@Composable
+fun rememberDeckImageRequest(
+    url: String,
+    widthFactor: Float = 1.1f,
+): ImageRequest {
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val targetPx = with(density) { screenWidthDp.dp.toPx() } * widthFactor
+    return remember(url, targetPx) {
+        val width = targetPx.roundToInt().coerceIn(480, 3000)
+        ImageRequest.Builder(context)
+            .data(url)
+            .size(width, width * 12)
+            .crossfade(false)
+            .build()
     }
 }

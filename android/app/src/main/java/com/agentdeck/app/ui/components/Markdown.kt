@@ -13,7 +13,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -30,15 +32,19 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
@@ -442,7 +448,15 @@ fun MarkdownText(
     }
 }
 
-private fun MdBlock.isInteractive(): Boolean = this is MdBlock.Download || this is MdBlock.Picture
+/*
+ * 需要自己管手势的块：不放进 SelectionContainer。
+ *
+ * 表格是后加进来的：它本身是个横向滚动区，套在 SelectionContainer 里时，长按选中和
+ * 横向拖动会抢同一个手势——表现就是「字多的表格往左滑没反应」（拖下去变成了选字）。
+ * 表格文字本来也不适合当正文选中，独立出来更稳。
+ */
+private fun MdBlock.isInteractive(): Boolean =
+    this is MdBlock.Download || this is MdBlock.Picture || this is MdBlock.Table
 
 @Composable
 private fun MdBlockView(
@@ -564,19 +578,24 @@ private fun MdBlockView(
             palette = palette,
         )
 
-        is MdBlock.Picture -> DeckAsyncImage(
-            model = resolveUrl(baseUrl, block.url).let { url ->
-                if (isDataUri(url)) decodeDataUri(url) ?: url else url
-            },
-            contentDescription = block.alt,
-            contentScale = ContentScale.FillWidth,
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-                .heightIn(max = 280.dp),
-            onClick = { onPreview(resolveUrl(baseUrl, block.url)) },
-        )
+        is MdBlock.Picture -> {
+            val raw = resolveUrl(baseUrl, block.url)
+            val bitmap = if (isDataUri(raw)) decodeDataUri(raw) else null
+            // 请求总是建：包在 ?: 里条件调用 composable 编译器不认
+            val request = rememberDeckImageRequest(raw)
+            DeckAsyncImage(
+                model = bitmap ?: request,
+                contentDescription = block.alt,
+                contentScale = ContentScale.FillWidth,
+                shape = RoundedCornerShape(10.dp),
+                maxHeight = with(LocalConfiguration.current) { (screenHeightDp * 0.6f).dp },
+                longImageHint = "长图 · 点一下看完整",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                onClick = { onPreview(raw) },
+            )
+        }
     }
 }
 
@@ -864,12 +883,16 @@ private fun TableBlock(block: MdBlock.Table, palette: DeckPalette) {
     val natural = remember(block, cellStyle) {
         List(columns) { column ->
             rows.maxOfOrNull { row ->
+                val cell = row.getOrElse(column) { "" }
                 val measured = measurer.measure(
-                    text = AnnotatedString(tableMeasureText(row.getOrElse(column) { "" })),
+                    text = AnnotatedString(tableMeasureText(cell)),
                     style = cellStyle,
                     constraints = Constraints(maxWidth = (maxPx - padPx).toInt().coerceAtLeast(1)),
                 )
-                measured.size.width + padPx
+                // 行内公式是按代码估算的，真实位图通常比估算宽；给 12% 余量，
+                // 免得量窄了以后单元格里的公式顶出边框。
+                val guard = if (cell.contains('$')) 1.12f else 1f
+                measured.size.width * guard + padPx
             } ?: 0f
         }
     }
@@ -919,7 +942,18 @@ private fun TableBlock(block: MdBlock.Table, palette: DeckPalette) {
                 .clip(RoundedCornerShape(8.dp))
                 .border(1.dp, lineColor, RoundedCornerShape(8.dp)),
         ) {
-            Box(modifier = if (scrollable) Modifier.horizontalScroll(scroll) else Modifier) {
+            Box(
+                modifier = if (scrollable) {
+                    Modifier
+                        .horizontalScroll(scroll)
+                        // 表宽超过屏幕时，用户很容易从屏幕左右边缘起手横滑；MIUI / 全面屏
+                        // 手势会把它当成「返回」吃掉，表现就是「往左滑没反应」。把表格这块
+                        // 区域登记成系统手势豁免区（Android 10+ API），返回手势就不抢了。
+                        .systemGestureExclusion()
+                } else {
+                    Modifier
+                },
+            ) {
                 Column(
                     modifier = Modifier
                         .width(with(density) { totalPx.toDp() })
@@ -972,6 +1006,9 @@ private fun TableBlock(block: MdBlock.Table, palette: DeckPalette) {
                                 Box(
                                     modifier = Modifier
                                         .width(with(density) { widths[c].toDp() })
+                                        // 兜底：万一内容还是比量出来的宽（比如行内公式比估算大），
+                                        // 裁在本格里，不要越过竖线糊到隔壁格
+                                        .clipToBounds()
                                         .padding(horizontal = TABLE_PAD_H, vertical = TABLE_PAD_V),
                                 ) {
                                     // 表格里常有 $0$、$A>2$ 这种行内公式，和段落一样处理
@@ -987,6 +1024,32 @@ private fun TableBlock(block: MdBlock.Table, palette: DeckPalette) {
                             }
                         }
                     }
+                }
+            }
+
+            // 边缘渐隐：内容被挡住时压一条淡影，明示「还能横滑」。
+            // 不压这条，宽表格看起来就是被硬裁了一刀，用户根本不会想到去滑。
+            if (scrollable) {
+                val atStart by remember { derivedStateOf { scroll.value <= 0 } }
+                val atEnd by remember { derivedStateOf { scroll.value >= scroll.maxValue } }
+                val fade = Color.Black.copy(alpha = 0.10f)
+                if (!atEnd) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                            .width(14.dp)
+                            .background(Brush.horizontalGradient(listOf(Color.Transparent, fade))),
+                    )
+                }
+                if (!atStart) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .fillMaxHeight()
+                            .width(14.dp)
+                            .background(Brush.horizontalGradient(listOf(fade, Color.Transparent))),
+                    )
                 }
             }
         }

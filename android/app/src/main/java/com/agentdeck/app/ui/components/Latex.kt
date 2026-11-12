@@ -143,7 +143,9 @@ fun LatexImage(
             bitmap = bitmap!!.asImageBitmap(),
             contentDescription = latex,
             contentScale = ContentScale.Fit,
-            modifier = modifier.wrapContentSize(),
+            // 不再用 wrapContentSize：那个会让位图突破父级约束（宽公式顶出表格单元格）。
+            // 交给 Image 按 intrinsic 尺寸测量、超宽时等比缩小，表格/段落都不会被撑破。
+            modifier = modifier,
         )
 
         failed -> Text(

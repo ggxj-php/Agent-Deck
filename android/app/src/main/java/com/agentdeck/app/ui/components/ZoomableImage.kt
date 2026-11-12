@@ -167,17 +167,14 @@ private fun ImagePreviewOverlay(
     val localBitmap = remember(url) {
         url.takeIf { it.startsWith("data:") }?.let { decodeDataUri(it) }
     }
-    // 预览按高分辨率栅格化：SVG 默认只按屏幕尺寸解一次（1200px 左右），放大就糊了
-    val request = remember(url, localBitmap) {
-        if (localBitmap != null) {
-            localBitmap
-        } else {
-            ImageRequest.Builder(context)
-                .data(url)
-                .size(3072, 3072)
-                .crossfade(false)
-                .build()
-        }
+    // 预览按「屏宽 ×1.3」解码：固定 3072×3072 的框对长图反而是灾难——一张 1:4 的图
+    // 为了塞进高度，宽度只剩 768，放大两倍就是马赛克。这里按宽度解码，1080 屏解出
+    // 约 1300px，放大 1.2 倍仍然清晰。
+    // 为什么不给更大：Coil 的采样只有 2 的幂，再往上就直接解原始 2600×10400（约 108MB），
+    // 真机会 OOM。长图想无限放大得靠分块渲染，那是另一个量级的改造。
+    val remoteRequest = rememberDeckImageRequest(url, widthFactor = 1.3f)
+    val request: Any = remember(url, localBitmap, remoteRequest) {
+        localBitmap ?: remoteRequest
     }
 
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
