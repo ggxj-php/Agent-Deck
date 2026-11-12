@@ -1064,9 +1064,16 @@ def _dt_rows(raw):
     groups = []
 
     def add_group(grp, labels):
+        labels = [str(x) for x in labels]
+        if groups and grp and groups[-1][0] == grp:
+            g, start, count = groups[-1]
+            for label in labels:
+                rows.append({"group": grp, "label": label})
+            groups[-1] = (grp, start, count + len(labels))
+            return
         start = len(rows)
         for label in labels:
-            rows.append({"group": grp, "label": str(label)})
+            rows.append({"group": grp, "label": label})
         groups.append((grp, start, len(labels)))
 
     for item in raw or []:
@@ -1127,6 +1134,17 @@ def draw_dtable(data, title=""):
                             if row["label"] == str(k):
                                 chosen.add(j)
         execs.append(chosen)
+
+    # 多选一的条件组：组里已经有一个 Y 时，其余列按 N 渲染（模型常把 N 误写成 -）
+    for _vals in vals:
+        for _grp, _start, _count in cgroups:
+            if _count < 2:
+                continue
+            _seg = _vals[_start:_start + _count]
+            if sum(1 for v in _seg if v == "Y") == 1:
+                for _k in range(_start, _start + _count):
+                    if _vals[_k] != "Y":
+                        _vals[_k] = "N"
 
     cond_col = 46
     group_w = max(72, max((_label_len(g) for g, _, _ in cgroups + agroups), default=60) + 16)
@@ -1216,7 +1234,9 @@ def draw_dtable(data, title=""):
                 elif seg and all(v == "-" for v in seg):
                     parts.append("（不关心）")
                 else:
-                    parts.append("（条件缺失）")
+                    _ns = [conds[i]["label"] for i in range(start, start + count)
+                           if i < len(vals[j]) and vals[j][i] == "N"]
+                    parts.append("、".join(_ns) + "不成立" if _ns else "（条件缺失）")
             done = [acts[i]["label"] for i in sorted(execs[j]) if i < len(acts)]
             legend_lines.append(
                 "规则 %d：%s → %s" % (j + 1, "；".join(parts),
@@ -4023,8 +4043,9 @@ SPECS = [
                 "不要只画 1..N 编号不解释。\n"
                 "    严格按教材：左上「选项」右上「规则」+ 1..N 列；左侧「条件」「动作」分组；"
                 "    条件值只写 Y / N / -（半角减号，- 表示不关心/无关；不要 T/F、真/假、√、长破折号 —）。\n"
-                "    **条件组合由你判断**：多选一的条件组（如教师类型、教师职称）每条规则给出"
-                "合理组合，不要同组多个 Y 或整组全 N；无关条件写 -。工具只负责表格框架和逐条说明。\n"
+                "    **条件成组**：用 {group, items:[...]}，或每行带相同 group（连续同组会自动合并）。\n"
+                "    **多选一的条件组**：选中的行写 Y，组内其余行写 N；整组不关心才全写 -；"
+                "    不要用 - 代替 N（工具会把有 Y 的组里其余列渲染成 N）。\n"
                 "  ns: 盒图（N-S 图）：{steps:[...]}，节点 kind 取 "
                 "process{label} / if{condition, then, else} / case{condition, branches:[{value, body}]} / "
                 "while{condition, body} / until{condition, body} / ref{label}；"
