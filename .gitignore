@@ -33,3 +33,5 @@ personas/
 # 覆盖率数据，别提交
 .coverage
 .coverage.*
+
+.tmp/
