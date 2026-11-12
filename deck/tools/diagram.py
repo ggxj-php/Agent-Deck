@@ -1203,7 +1203,17 @@ def draw_dtable(data, title=""):
                 out.append(_fit_text(rx + rule_w / 2, ry + row_h / 2, ["√"], rule_w - 6,
                                      bold=True))
     out.append(_ink_line(0, ya, total_w, ya))
-    return _sheet(total_w, total_h, "".join(out), title)
+    note = str(data.get("note") or data.get("description") or data.get("说明") or "").strip()
+    extra = 0
+    body = "".join(out)
+    if note:
+        note_lines = _wrap_text(note, 42)
+        extra = len(note_lines) * 20 + 14
+        note_svg = []
+        for i, line in enumerate(note_lines):
+            note_svg.append(_fit_text(total_w / 2, 10 + i * 20 + 9, [line], total_w - 20))
+        body = "".join(note_svg) + f'<g transform="translate(0,{extra})">' + body + "</g>"
+    return _sheet(total_w, total_h + extra, body, title)
 
 
 def draw_flow(data, title=""):
@@ -3980,7 +3990,10 @@ SPECS = [
                 "不要给每条分支复制一份相同的后续流程。\n"
                 "    **伪代码一行一个框**：连续两条声明/赋值别并成一个框（两条 Integer 就画两个框）。\n"
                 "  dtable: 判定表（教材表 5-2 格式）：{conditions:[{group?, label} 或 {group, items:[...]}], "
-                "actions:[{group?, label} 或 {group, items:[...]}], rules:[{values:[Y/N/—...], actions:[执行的动作行下标/名称...]}]}\n"
+                "actions:[{group?, label} 或 {group, items:[...]}], rules:[{values:[Y/N/—...], actions:[执行的动作行下标/名称...]}], "
+                "note?（表格上方一句说明，写清规则 1..N 代表什么）}\n"
+                "    **判定表必须带标题和上方说明**：用 title 写表名，note 写一句「规则 1–N 代表……」，"
+                "不要只画 1..N 编号不解释。\n"
                 "    严格按教材：左上「选项」右上「规则」+ 1..N 列；左侧「条件」「动作」分组；"
                 "    条件值只写 Y / N / —（不要 T/F、真/假、√）；动作执行写 √、不执行留空。\n"
                 "  ns: 盒图（N-S 图）：{steps:[...]}，节点 kind 取 "
