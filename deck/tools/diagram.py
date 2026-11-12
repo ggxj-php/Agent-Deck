@@ -918,9 +918,10 @@ def _flow_custom_svg(data, has_title=False):
             exit_label = b.get("exit_label") or ""
             # 回边：从 latch 左侧出去，向上回到 header 左侧
             loop_x = cx - bw / 2 - _FV_LOOP
+            # 回边要接到 header 上方那条入线（教材画法），不要直接戳在框侧面
+            join_y = top - _FV_GAP / 2
             nvout.append(_polyline([(cx - lw / 2, ly), (loop_x, ly),
-                                    (loop_x, top + hh / 2), (cx - hw / 2, top + hh / 2)]))
-            nvout.append(_arrow_head(cx - hw / 2, top + hh / 2, 1, 0))
+                                    (loop_x, join_y), (cx, join_y)]))
             if back_label:
                 nvout.append(f'<text x="{loop_x - 8:.1f}" y="{ly - 8:.1f}" font-size="12" fill="#5a6480" text-anchor="end" font-family="system-ui, sans-serif">{_esc(back_label)}</text>')
             ey = ly + lh / 2 + _FV_BGAP
@@ -1170,11 +1171,11 @@ def _ns_measure(node):
     if kind in ("while", "当型", "当型循环"):
         cw = max(80, _label_len(node.get("condition") or "") + 24)
         bw, bh = _ns_measure_seq(node.get("body") or [])
-        return NS_LOOP_PAD + max(bw, cw, 120), NS_LOOP_COND + max(bh, 34)
+        return NS_LOOP_PAD + max(bw, cw, 120), NS_LOOP_COND + 18 + max(bh, 34)
     if kind in ("until", "直到型", "直到型循环"):
         cw = max(80, _label_len(node.get("condition") or "") + 24)
         bw, bh = _ns_measure_seq(node.get("body") or [])
-        return NS_LOOP_PAD + max(bw, cw, 120), max(bh, 34) + NS_LOOP_COND
+        return NS_LOOP_PAD + max(bw, cw, 120), 18 + max(bh, 34) + NS_LOOP_COND
     if kind in ("ref", "nested", "引用", "嵌套", "子图"):
         return max(90, _label_len(node.get("label") or "") + 40), 42
     lines = _wrap_text(node.get("label"))
@@ -1241,7 +1242,8 @@ def _ns_draw(node, x, y, w, h, out):
         out.append(_ink_line(x + m, body_top, x + m, y + h))
         out.append(_fit_text(x + m + (w - m) / 2, y + NS_LOOP_COND / 2,
                              _wrap_text(node.get("condition") or "", 18), w - m - 12))
-        _ns_draw_seq(node.get("body") or [], x + m, body_top, w - m, out)
+        out.append(_fit_text(x + m + (w - m) / 2, body_top + 9, ["do while"], w - m - 12))
+        _ns_draw_seq(node.get("body") or [], x + m, body_top + 18, w - m, out)
         return
     if kind in ("until", "直到型", "直到型循环"):
         m = NS_LOOP_PAD
@@ -1250,7 +1252,8 @@ def _ns_draw(node, x, y, w, h, out):
         out.append(_ink_rect(x, y, w, h))
         out.append(_ink_line(x2, y, x2, body_bottom))
         out.append(_ink_line(x, body_bottom, x + w, body_bottom))
-        _ns_draw_seq(node.get("body") or [], x, y, w - m, out)
+        out.append(_fit_text(x + (w - m) / 2, y + 9, ["do until"], w - m - 12))
+        _ns_draw_seq(node.get("body") or [], x, y + 18, w - m, out)
         out.append(_fit_text(x + w / 2, body_bottom + NS_LOOP_COND / 2,
                              _wrap_text(node.get("condition") or "", 18), w - 16))
         return
@@ -3673,6 +3676,24 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
         "title": str(title or ""),
         "note": "已经画成卡片给用户看了，正文里一两句话说明画的是什么就行，别再贴任何 SVG/HTML。",
     }
+    if key in ("flow", "flowchart"):
+        _fn = _norm_nodes(data.get("nodes"))
+        _fe = _norm_edges(data.get("edges"))
+        _out = {}
+        for _a, _b, _lab in _fe:
+            _out.setdefault(_a, []).append((_b, _lab))
+        _bad = []
+        for _n in _fn:
+            _k = (_n.get("kind") or "").strip().lower()
+            if _k in ("decision", "判断", "条件"):
+                _targets = [b for b, _ in _out.get(_n["id"], [])]
+                if len(_targets) < 2 or len(set(_targets)) < 2:
+                    _bad.append(_n["label"])
+        if _bad:
+            payload["warning"] = (
+                "判断框必须有两条出边（T/F 直接标在判断框的两条出边上），"
+                "不要把公共节点塞在判断和分支之间，也别让下一层再分 T/F。问题判断框："
+                + "、".join(_bad[:3]))
     if key == "dtree":
         try:
             payload["book_format_latex"] = _dtree_latex(data)
@@ -3744,10 +3765,14 @@ SPECS = [
                 "赋值 `flag=1`、逻辑与/或 `&`/`|`、真/假 `1`/`0`，条件末尾问号可留可去。"
                 "每个框里的式子尽量短。\n"
                 "    **决策分支的连线标签统一用英文 T / F（T=是、F=否），别写「是」「否」。**\n"
+                "    **判断框必须有两条出边**：T/F 直接标在判断框的两条出边上，各自连到分支节点或汇合点；"
+                "不要把公共节点塞在判断和分支之间，也不要让下一层的框再分 T/F（写错工具会提示你重画）。\n"
                 "  ns: 盒图（N-S 图）：{steps:[...]}，节点 kind 取 "
                 "process{label} / if{condition, then, else} / case{condition, branches:[{value, body}]} / "
                 "while{condition, body} / until{condition, body} / ref{label}；"
-                "if 的 then 画在右边（T）、else 画在左边（F），和教材一致\n"
+                "if 的 then 画在右边（T）、else 画在左边（F），和教材一致；"
+                "**题目是 do...until / 直到型循环时用 kind=until（body=循环体 S，condition=条件 P），"
+                "不要画成 if**；do...while / 当型循环用 kind=while；嵌套简化用 ref 椭圆。\n"
                 "  pad: 问题分析图（PAD）：{steps:[...]}，节点结构和 ns 一样；"
                 "程序从左边竖线开始从上往下排，分支/循环体画在右侧\n"
                 "  graph: {nodes:[{id,label,color?,x?,y?,kind?:circle}], edges:[{from,to,label?}]}"
