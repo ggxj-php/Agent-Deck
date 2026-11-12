@@ -618,6 +618,393 @@ def _flow_side_svg(nodes, edges, start, has_title):
     return (f'<g transform="translate({shift:.1f},0)">' + "".join(body) + '</g>'), width, height
 
 
+# ---------------- 流程图：结构化自绘排版 ----------------
+# Graphviz 的通用布局画不出教材/黑板那种「主轴 + 左右分支 + 汇合 + 回边」的结构化样式，
+# 这里自己解析 sequence / if-else / do-until 结构，全部用同一套画法。
+_FV_GAP = 40        # 主流程竖向间距
+_FV_HGAP = 36       # 判断到左右分支列的水平距离
+_FV_BGAP = 20       # 分支块底部到汇合横线的距离
+_FV_MGAP = 18       # 汇合横线到下一个框的距离
+_FV_LOOP = 26       # 循环回边离外框的距离
+
+
+class _FlowBad(Exception):
+    pass
+
+
+def _flow_node_box(nv, nid):
+    n = nv["by_id"][nid]
+    w, h = _node_size(n["label"])
+    kind = _flow_kind(n)
+    if kind in ("start", "end", "起", "止"):
+        return w + 16, h
+    if kind in ("decision", "判断", "条件"):
+        return w + 34, h + 18
+    if _flow_io(kind):
+        return w + FLOW_IO_EXTRA, h
+    return w, h
+
+
+def _flow_custom_svg(data, has_title=False):
+    nodes = _norm_nodes(data.get("nodes"))
+    edges = _norm_edges(data.get("edges"))
+    if not nodes:
+        return ""
+    ids = [n["id"] for n in nodes]
+    by_id = {n["id"]: n for n in nodes}
+    succ = {nid: [] for nid in ids}
+    labels = {}
+    for a, b, lab in edges:
+        if a in by_id and b in by_id:
+            succ[a].append(b)
+            labels[(a, b)] = lab
+    nv = {"by_id": by_id}
+
+    # 回边（do-until / while 循环）
+    color = {}
+    back = set()
+
+    def dfs(u):
+        color[u] = 1
+        for v in succ.get(u, []):
+            c = color.get(v)
+            if c == 1:
+                back.add((u, v))
+            elif c is None:
+                dfs(v)
+        color[u] = 2
+
+    for nid in ids:
+        if color.get(nid) is None:
+            dfs(nid)
+
+    fwd = {nid: [v for v in succ.get(nid, []) if (nid, v) not in back] for nid in ids}
+
+    def reach(start, graph):
+        seen = set()
+        stack = [start]
+        while stack:
+            cur = stack.pop()
+            if cur in seen or cur not in by_id:
+                continue
+            seen.add(cur)
+            stack.extend(graph.get(cur, []))
+        return seen
+
+    rev = {nid: [] for nid in ids}
+    for a in ids:
+        for b in fwd[a]:
+            rev[b].append(a)
+
+    loops = {}
+    for latch, header in back:
+        in_loop = reach(header, fwd) & reach(latch, rev)
+        in_loop.add(header)
+        if latch not in in_loop:
+            return ""
+        exits = []
+        for u in in_loop:
+            for v in fwd[u]:
+                if v not in in_loop:
+                    exits.append((u, v, labels.get((u, v), "")))
+        if len(exits) != 1:
+            return ""
+        eu, ev, elab = exits[0]
+        if header in loops:
+            return ""
+        loops[header] = {"latch": latch, "nodes": in_loop, "exit": ev,
+                         "exit_label": elab, "back_label": labels.get((latch, header), ""),
+                         "exit_from_latch": eu == latch}
+
+    # 判断的汇合点：在去掉回边的 DAG 上做后支配
+    dag = {nid: list(fwd[nid]) for nid in ids}
+    for header, info in loops.items():
+        if not dag[info["latch"]]:
+            dag[info["latch"]].append(info["exit"])
+    exits = [nid for nid in ids if not dag[nid]]
+    if len(exits) != 1:
+        return ""
+    exit_node = exits[0]
+    allset = set(ids)
+    pdom = {nid: set(allset) for nid in ids}
+    pdom[exit_node] = {exit_node}
+    changed = True
+    while changed:
+        changed = False
+        for nid in ids:
+            if nid == exit_node:
+                continue
+            succs = dag[nid]
+            if not succs:
+                new = {nid}
+            else:
+                inter = set(allset)
+                for s in succs:
+                    inter &= pdom.get(s, {s})
+                new = {nid} | inter
+            if new != pdom[nid]:
+                pdom[nid] = new
+                changed = True
+    ipdom = {}
+    for nid in ids:
+        cand = [m for m in pdom[nid] if m != nid]
+        if cand:
+            ipdom[nid] = min(cand, key=lambda m: len(pdom[m]))
+
+    def size(nid):
+        return _flow_node_box(nv, nid)
+
+    def span(b):
+        """块相对自身中心的左右占用，用于算画布宽度（左右可能不对称）。"""
+        k = b["k"]
+        if k == "S":
+            w, _h = size(b["nid"])
+            return w / 2, w / 2
+        if k == "Seq":
+            if not b["items"]:
+                return 0.0, 0.0
+            sp = [span(x) for x in b["items"]]
+            return max(x[0] for x in sp), max(x[1] for x in sp)
+        if k == "If":
+            dw, _dh = size(b["dec"])
+            lw, _lh = measure(b["left"])
+            rw, _rh = measure(b["right"])
+            return dw / 2 + _FV_HGAP + lw, dw / 2 + _FV_HGAP + rw
+        if k == "LoopIf":
+            dw, _dh = size(b["hd"])
+            bw, _bh = measure(b["body"])
+            return dw / 2, dw / 2 + _FV_HGAP + bw + _FV_LOOP + 12
+        if k == "LoopSeq":
+            hw, _hh = size(b["hd"])
+            bw, _bh = measure(b["body"])
+            lw, _lh = size(b["latch"]) if b["latch"] else (0, 0)
+            return max(hw, bw, lw) / 2 + _FV_LOOP + 12, max(hw, bw, lw) / 2
+        raise _FlowBad()
+
+    def draw_node(nid, cx, cy):
+        n = by_id[nid]
+        kind = _flow_kind(n)
+        w, h = _flow_node_box(nv, nid)
+        color = n.get("color")
+        if kind in ("start", "end", "起", "止"):
+            return _box(cx, cy, w, h, n["label"], color or "green", shape="pill")
+        if kind in ("decision", "判断", "条件"):
+            return _diamond(cx, cy, w, h, n["label"], color)
+        return _box(cx, cy, w, h, n["label"], color, shape="square")
+
+    # ---- 块 ----
+    def measure(b):
+        k = b["k"]
+        if k == "S":
+            return size(b["nid"])
+        if k == "Seq":
+            ws = [measure(x)[0] for x in b["items"]] or [0]
+            hs = [measure(x)[1] for x in b["items"]]
+            return max(ws), sum(hs) + _FV_GAP * max(0, len(hs) - 1)
+        if k == "If":
+            dw, dh = size(b["dec"])
+            lw, lh = measure(b["left"])
+            rw, rh = measure(b["right"])
+            w = dw + 2 * _FV_HGAP + lw + rw
+            h = dh + _FV_GAP + max(lh, rh) + _FV_BGAP + _FV_MGAP
+            return w, h
+        if k == "LoopIf":
+            dw, dh = size(b["hd"])
+            bw, bh = measure(b["body"])
+            return dw + _FV_HGAP + bw + _FV_LOOP + 12, dh + _FV_GAP + bh + _FV_BGAP
+        if k == "LoopSeq":
+            hw, hh = size(b["hd"])
+            bw, bh = measure(b["body"])
+            lw, lh = size(b["latch"]) if b["latch"] else (0, 0)
+            return max(hw, bw, lw) + _FV_LOOP + 24, hh + _FV_GAP + bh + _FV_BGAP + max(lh, 0)
+        raise _FlowBad()
+
+    def draw(b, cx, top, nvout):
+        k = b["k"]
+        if k == "S":
+            w, h = size(b["nid"])
+            nvout.append(draw_node(b["nid"], cx, top + h / 2))
+            return top + h
+        if k == "Seq":
+            y = top
+            for i, item in enumerate(b["items"]):
+                if i:
+                    y += _FV_GAP
+                    nvout.append(_arrow(cx, y - _FV_GAP, cx, y))
+                y = draw(item, cx, y, nvout)
+            return y
+        if k == "If":
+            dw, dh = size(b["dec"])
+            lw, lh = measure(b["left"])
+            rw, rh = measure(b["right"])
+            cy = top + dh / 2
+            nvout.append(draw_node(b["dec"], cx, cy))
+            lL, lR = span(b["left"])
+            rL, rR = span(b["right"])
+            lx = cx - (dw / 2 + _FV_HGAP) - lR
+            rx = cx + (dw / 2 + _FV_HGAP) + rL
+            by = top + dh + _FV_GAP
+            left_empty = b["left"]["k"] == "Seq" and not b["left"]["items"]
+            right_empty = b["right"]["k"] == "Seq" and not b["right"]["items"]
+            end_l = by if left_empty else draw(b["left"], lx, by, nvout)
+            end_r = by if right_empty else draw(b["right"], rx, by, nvout)
+            yb = top + dh + _FV_GAP + max(lh, rh) + _FV_BGAP
+            # 菱形到分支
+            lc = labels.get((b["dec"], b["lchild"]), "") if b["lchild"] else ""
+            rc = labels.get((b["dec"], b["rchild"]), "") if b["rchild"] else ""
+            # 菱形左右顶点到分支列顶部
+            if not left_empty:
+                nvout.append(_polyline([(cx - dw / 2, cy), (lx, cy), (lx, by)]))
+                nvout.append(_arrow_head(lx, by, 0, 1))
+
+            if lc:
+                nvout.append(f'<text x="{cx - dw / 2 - 8:.1f}" y="{cy - 10:.1f}" font-size="12" fill="#5a6480" text-anchor="end" font-family="system-ui, sans-serif">{_esc(lc)}</text>')
+            if not right_empty:
+                nvout.append(_polyline([(cx + dw / 2, cy), (rx, cy), (rx, by)]))
+                nvout.append(_arrow_head(rx, by, 0, 1))
+
+            if rc:
+                nvout.append(f'<text x="{cx + dw / 2 + 8:.1f}" y="{cy - 10:.1f}" font-size="12" fill="#5a6480" text-anchor="start" font-family="system-ui, sans-serif">{_esc(rc)}</text>')
+            # 分支底部到汇合
+            if left_empty:
+                ex = cx - dw / 2 - _FV_HGAP / 2
+                nvout.append(_polyline([(cx - dw / 2, cy), (ex, cy), (ex, yb), (cx, yb)]))
+            else:
+                nvout.append(_polyline([(lx, end_l), (lx, yb), (cx, yb)]))
+            if right_empty:
+                ex = cx + dw / 2 + _FV_HGAP / 2
+                nvout.append(_polyline([(cx + dw / 2, cy), (ex, cy), (ex, yb), (cx, yb)]))
+            else:
+                nvout.append(_polyline([(rx, end_r), (rx, yb), (cx, yb)]))
+            nvout.append(_arrow_head(cx, yb, 0, 1) if False else "")
+            nvout.append(_arrow(cx, yb, cx, yb + _FV_MGAP))
+            return yb + _FV_MGAP
+        if k == "LoopIf":
+            dw, dh = size(b["hd"])
+            bw, bh = measure(b["body"])
+            cy = top + dh / 2
+            nvout.append(draw_node(b["hd"], cx, cy))
+            bx = cx + dw / 2 + _FV_HGAP + bw / 2
+            by = top + dh + _FV_GAP
+            bend = draw(b["body"], bx, by, nvout)
+            # 回边：从循环体底部右侧绕出去、向上、箭头指回判断框
+            loop_x = cx + dw / 2 + _FV_HGAP + bw + _FV_LOOP
+            latch_w = size(b["latch"])[0] if b.get("latch") else bw
+            nvout.append(_polyline([(bx + latch_w / 2, bend), (loop_x, bend),
+                                    (loop_x, cy), (cx + dw / 2, cy)]))
+            nvout.append(_arrow_head(cx + dw / 2, cy, -1, 0))
+            bl = b.get("back_label") or ""
+            if bl:
+                nvout.append(f'<text x="{loop_x + 6:.1f}" y="{cy + 12:.1f}" font-size="12" fill="#5a6480" font-family="system-ui, sans-serif">{_esc(bl)}</text>')
+            # 出口：菱形底部一路向下（接下一个块）
+            ey = by + bh + _FV_BGAP
+            nvout.append(_arrow(cx, cy + dh / 2, cx, ey))
+            el = b.get("exit_label") or ""
+            if el:
+                nvout.append(f'<text x="{cx + 8:.1f}" y="{cy + dh / 2 + 16:.1f}" font-size="12" fill="#5a6480" font-family="system-ui, sans-serif">{_esc(el)}</text>')
+            return ey
+        if k == "LoopSeq":
+            hw, hh = size(b["hd"])
+            nvout.append(draw_node(b["hd"], cx, top + hh / 2))
+            y = top + hh + _FV_GAP
+            bw, _bh = measure(b["body"])
+            y = draw(b["body"], cx, y, nvout)
+            # latch 判断框（循环条件），带出口和回边
+            latch = b["latch"]
+            lw, lh = size(latch)
+            ly = y + _FV_BGAP
+            nvout.append(draw_node(latch, cx, ly))
+            back_label = b.get("back_label") or ""
+            exit_label = b.get("exit_label") or ""
+            # 回边：从 latch 左侧出去，向上回到 header 左侧
+            loop_x = cx - bw / 2 - _FV_LOOP
+            nvout.append(_polyline([(cx - lw / 2, ly), (loop_x, ly),
+                                    (loop_x, top + hh / 2), (cx - hw / 2, top + hh / 2)]))
+            nvout.append(_arrow_head(cx - hw / 2, top + hh / 2, 1, 0))
+            if back_label:
+                nvout.append(f'<text x="{loop_x - 8:.1f}" y="{ly - 8:.1f}" font-size="12" fill="#5a6480" text-anchor="end" font-family="system-ui, sans-serif">{_esc(back_label)}</text>')
+            ey = ly + lh / 2 + _FV_BGAP
+            nvout.append(_arrow(cx, ly + lh / 2, cx, ey))
+            if exit_label:
+                nvout.append(f'<text x="{cx + 8:.1f}" y="{ly + lh / 2 + 16:.1f}" font-size="12" fill="#5a6480" font-family="system-ui, sans-serif">{_esc(exit_label)}</text>')
+            return ey
+        raise _FlowBad()
+
+    # ---- 解析结构 ----
+    def parse(start, stop):
+        items = []
+        cur = start
+        guard = 0
+        while cur is not None and cur != stop:
+            guard += 1
+            if guard > len(ids) + 2 or cur not in by_id:
+                raise _FlowBad()
+            if cur in loops:
+                info = loops[cur]
+                if _flow_kind(by_id[cur]) in ("decision", "判断", "条件"):
+                    inside = [v for v in fwd[cur] if v in info["nodes"]]
+                    if len(inside) != 1:
+                        raise _FlowBad()
+                    body = parse(inside[0], info["latch"])
+                    body = {"k": "Seq", "items": body["items"] + [{"k": "S", "nid": info["latch"]}]}
+                    items.append({"k": "LoopIf", "hd": cur, "latch": info["latch"],
+                                  "body": body, "back_label": info["back_label"],
+                                  "exit_label": info["exit_label"]})
+                else:
+                    body = parse(fwd[cur][0], info["latch"]) if fwd[cur] else {"k": "Seq", "items": []}
+                    items.append({"k": "LoopSeq", "hd": cur, "body": body,
+                                  "latch": info["latch"],
+                                  "back_label": info["back_label"],
+                                  "exit_label": info["exit_label"]})
+                cur = info["exit"]
+                continue
+            outs = fwd[cur]
+            if not outs:
+                items.append({"k": "S", "nid": cur})
+                cur = None
+                break
+            if len(outs) == 1:
+                items.append({"k": "S", "nid": cur})
+                cur = outs[0]
+                continue
+            # 判断
+            if len(outs) != 2:
+                raise _FlowBad()
+            M = stop if stop is not None else ipdom.get(cur)
+            if M is None or M == cur:
+                raise _FlowBad()
+            a, b = outs
+            la, lb = labels.get((cur, a), ""), labels.get((cur, b), "")
+            def is_f(x):
+                return str(x or "").strip().upper() in ("F", "否", "N", "FALSE")
+            if is_f(la) and not is_f(lb):
+                left_child, right_child = a, b
+            else:
+                left_child, right_child = b, a
+            items.append({"k": "If", "dec": cur, "lchild": left_child,
+                          "rchild": right_child, "left": parse(left_child, M),
+                          "right": parse(right_child, M)})
+            cur = M
+        return {"k": "Seq", "items": items}
+
+    try:
+        root = str(data.get("start")) if data.get("start") and str(data.get("start")) in by_id else None
+        if root is None:
+            roots = [nid for nid in ids if not any(a in by_id and b == nid for a in ids for b in fwd[a])]
+            root = roots[0] if len(roots) == 1 else ids[0]
+        b = parse(root, None)
+        w, h = measure(b)
+        left, right = span(b)
+        out = []
+        top = 46 if has_title else 16
+        draw(b, left + 20, top, out)
+        return _canvas(left + right + 40, top + h + 24, "".join(out), "")
+    except _FlowBad:
+        return ""
+    except Exception:      # noqa: BLE001
+        return ""
+
+
 def draw_flow(data, title=""):
     nodes = _norm_nodes(data.get("nodes"))
     edges = _norm_edges(data.get("edges"))
@@ -3208,16 +3595,11 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
     dfd_notation = _dfd_notation(data)
     svg = ""
     if key in ("flow", "flowchart"):
-        # 先试「主轴 + 菱形左右分支 + 汇合点」的黑板布局；结构不符合再退回 graphviz
+        # 统一自绘：解析 sequence / if-else / do-until，全部用同一套画法
         try:
-            _fn = _norm_nodes(data.get("nodes"))
-            _fe = _norm_edges(data.get("edges"))
-            _side = _flow_side_svg(_fn, _fe, data.get("start"), bool(title))
-            if _side:
-                _sb, _sw, _sh = _side
-                svg = _canvas(max(_sw, 300), max(_sh, 220), _sb, title)
+            svg = _flow_custom_svg(data, bool(title))
         except Exception as exc:         # noqa: BLE001
-            print(f"[diagram] flow 两侧布局失败：{type(exc).__name__}: {exc}", flush=True)
+            print(f"[diagram] flow 结构化排版失败：{type(exc).__name__}: {exc}", flush=True)
             svg = ""
         if not svg:
             try:
