@@ -3684,12 +3684,19 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
         for _a, _b, _lab in _fe:
             _out.setdefault(_a, []).append((_b, _lab))
         _bad = []
+        _dec_labels = []
         for _n in _fn:
             _k = (_n.get("kind") or "").strip().lower()
             if _k in ("decision", "判断", "条件"):
+                _dec_labels.append(str(_n.get("label") or "").strip())
                 _targets = [b for b, _ in _out.get(_n["id"], [])]
                 if len(_targets) < 2 or len(set(_targets)) < 2:
                     _bad.append(_n["label"])
+        _dups = sorted({x for x in _dec_labels if x and _dec_labels.count(x) > 1})
+        if _dups:
+            payload["warning"] = (
+                "同一个判断出现了多次（" + "、".join(_dups[:3]) + "）：分支汇合后的公共部分只画一次，"
+                "两条线并回来再往下，不要给每条分支复制一份相同的后续流程。")
         if _bad:
             payload["warning"] = (
                 "判断框必须有两条出边（T/F 直接标在判断框的两条出边上），"
@@ -3768,6 +3775,8 @@ SPECS = [
                 "    **决策分支的连线标签统一用英文 T / F（T=是、F=否），别写「是」「否」。**\n"
                 "    **判断框必须有两条出边**：T/F 直接标在判断框的两条出边上，各自连到分支节点或汇合点；"
                 "不要把公共节点塞在判断和分支之间，也不要让下一层的框再分 T/F（写错工具会提示你重画）。\n"
+                "    **分支汇合后公共部分只画一次**：两分支先并回一条线，再画后面的公共判断/动作；"
+                "不要给每条分支复制一份相同的后续流程。\n"
                 "  ns: 盒图（N-S 图）：{steps:[...]}，节点 kind 取 "
                 "process{label} / if{condition, then, else} / case{condition, branches:[{value, body}]} / "
                 "while{condition, body} / until{condition, body} / ref{label}；"
