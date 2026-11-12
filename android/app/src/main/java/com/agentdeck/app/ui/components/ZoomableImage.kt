@@ -235,8 +235,11 @@ private fun ImagePreviewOverlay(
     val bottomGap = safe.calculateBottomPadding() + 14.dp
     val topGap = safe.calculateTopPadding() + 6.dp
     val chipHeight = 44.dp
-    // 图片区底部让出的高度 = 手势条 + 按钮自身高度 + 一点呼吸缝。
-    // 长图代价是宽度缩 6~7%，但换来「任何比例都不被浮层压住」，比让用户自己拖动躲按钮划算。
+    // 图片区上下都要避开系统区域：
+    // 上——状态栏/刘海。之前图是整屏 Fit 的，长图铺满高度时最上面一截直接钻到状态栏底下，
+    //     被时间和电量压住；下——「保存图片」按钮自身高度，避免那颗胶囊糊在图的内容上。
+    // 两头让白后长图宽度会缩 8% 左右，但换来「整张图都露在干净的区域里」。
+    val imageTopInset = safe.calculateTopPadding() + 8.dp
     val imageBottomInset = bottomGap + chipHeight + 10.dp
 
     Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
@@ -258,8 +261,8 @@ private fun ImagePreviewOverlay(
             },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = imageBottomInset)
-                // 放大后的图裁在这块「窗口」里，不会反过来糊到下面按钮上
+                .padding(top = imageTopInset, bottom = imageBottomInset)
+                // 放大后的图裁在这块「窗口」里，不会反过来糊到上下两头的浮层上
                 .clipToBounds()
                 .graphicsLayer(
                     scaleX = scale,
@@ -289,7 +292,7 @@ private fun ImagePreviewOverlay(
             Column(
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .padding(bottom = imageBottomInset),
+                    .padding(top = imageTopInset, bottom = imageBottomInset),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 if (loadFailed) {
