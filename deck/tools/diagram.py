@@ -648,6 +648,22 @@ def _flow_node_box(nv, nid):
 def _flow_custom_svg(data, has_title=False):
     nodes = _norm_nodes(data.get("nodes"))
     edges = _norm_edges(data.get("edges"))
+    # 模型常塞「汇合/合并」这种辅助节点，分支用线自然汇合即可，这里直接去掉
+    _merge_labels = ("汇合", "合并", "汇合点", "合并点", "merge", "join")
+    _drop = set()
+    for n in nodes:
+        if str(n.get("label") or "").strip().lower() in _merge_labels \
+                and _flow_kind(n) not in ("decision", "判断", "条件", "start", "end", "start/end"):
+            _drop.add(n["id"])
+    for mid in _drop:
+        ins = [(a, lab) for a, b, lab in edges if b == mid]
+        outs = [(b, lab) for a, b, lab in edges if a == mid]
+        if ins and outs:
+            edges = [e for e in edges if e[0] != mid and e[1] != mid]
+            for a, lab in ins:
+                for b, olab in outs:
+                    edges.append((a, b, lab or olab))
+    nodes = [n for n in nodes if n["id"] not in _drop]
     if not nodes:
         return ""
     ids = [n["id"] for n in nodes]
@@ -1081,8 +1097,14 @@ def _dt_rows(raw):
 
     def add_group(grp, labels):
         labels = [str(x) for x in labels]
+        seen = set()
+        labels = [x for x in labels if not (x in seen or seen.add(x))]
         if groups and grp and groups[-1][0] == grp:
             g, start, count = groups[-1]
+            existing = {rows[i]["label"] for i in range(start, start + count)}
+            labels = [x for x in labels if x not in existing]
+            if not labels:
+                return
             for label in labels:
                 rows.append({"group": grp, "label": label})
             groups[-1] = (grp, start, count + len(labels))
@@ -1124,7 +1146,10 @@ def draw_dtable(data, title=""):
         else:
             rv = list(rule or [])
             ra = []
-        vals.append([str(x).strip() for x in rv][:len(conds)])
+        _row = [str(x).strip() for x in rv][:len(conds)]
+        if len(_row) < len(conds):
+            _row += ["-"] * (len(conds) - len(_row))
+        vals.append(_row)
         chosen = set()
         if isinstance(ra, dict):
             ra = list(ra.values())
@@ -4050,6 +4075,7 @@ SPECS = [
                 "    **判断框必须有两条出边**：T/F 直接标在判断框的两条出边上，各自连到分支节点或汇合点；"
                 "不要把公共节点塞在判断和分支之间，也不要让下一层的框再分 T/F（写错工具会提示你重画）。\n"
                 "    **分支汇合后公共部分只画一次**：两分支先并回一条线，再画后面的公共判断/动作；"
+                "不要传「汇合/合并」辅助节点，分支用线自然汇合即可。\n"
                 "不要给每条分支复制一份相同的后续流程。\n"
                 "    **伪代码一行一个框**：连续两条声明/赋值别并成一个框（两条 Integer 就画两个框）。\n"
                 "  dtable: 判定表（教材表 5-2 格式）：{conditions:[{group?, label} 或 {group, items:[...]}], "
