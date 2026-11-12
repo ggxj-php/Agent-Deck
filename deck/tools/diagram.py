@@ -761,15 +761,29 @@ def _flow_custom_svg(data, has_title=False):
         for b in fwd[a]:
             rev[b].append(a)
 
+    # 自然循环：从 latch 反向走（不经过 header）能到的节点都属于循环体；
+    # 这样嵌套循环的外层能包含内层节点，内层也不会被外层回边带偏。
+    rev_all = {nid: [] for nid in ids}
+    for a in ids:
+        for b in succ.get(a, []):
+            rev_all[b].append(a)
     loops = {}
     for latch, header in back:
-        in_loop = reach(header, fwd) & reach(latch, rev)
+        in_loop = {latch}
+        stack = [latch]
+        while stack:
+            u = stack.pop()
+            for p in rev_all.get(u, []):
+                if p == header or p in in_loop:
+                    continue
+                in_loop.add(p)
+                stack.append(p)
         in_loop.add(header)
         if latch not in in_loop:
             return ""
         exits = []
         for u in in_loop:
-            for v in fwd[u]:
+            for v in succ.get(u, []):
                 if v not in in_loop:
                     exits.append((u, v, labels.get((u, v), "")))
         if len(exits) != 1:
@@ -844,6 +858,9 @@ def _flow_custom_svg(data, has_title=False):
             bw, _bh = measure(b["body"])
             lw, _lh = size(b["latch"]) if b["latch"] else (0, 0)
             return max(hw, bw, lw) / 2 + _FV_LOOP + 12, max(hw, bw, lw) / 2
+        if k == "Case":
+            w, _h = measure(b)
+            return w / 2, w / 2
         raise _FlowBad()
 
     def draw_node(nid, cx, cy):
@@ -882,6 +899,12 @@ def _flow_custom_svg(data, has_title=False):
             bw, bh = measure(b["body"])
             lw, lh = size(b["latch"]) if b["latch"] else (0, 0)
             return max(hw, bw, lw) + _FV_LOOP + 24, hh + _FV_GAP + bh + _FV_BGAP + max(lh, 0)
+        if k == "Case":
+            dw, dh = size(b["dec"])
+            ws = [measure(br["body"])[0] for br in b["branches"]] or [0]
+            hs = [measure(br["body"])[1] for br in b["branches"]] or [0]
+            colw = max(ws) + _FV_HGAP
+            return max(dw, colw * len(b["branches"])), dh + _FV_GAP + max(hs) + _FV_BGAP + _FV_MGAP
         raise _FlowBad()
 
     def draw(b, cx, top, nvout):
@@ -917,6 +940,12 @@ def _flow_custom_svg(data, has_title=False):
             # 菱形到分支
             lc = labels.get((b["dec"], b["lchild"]), "") if b["lchild"] else ""
             rc = labels.get((b["dec"], b["rchild"]), "") if b["rchild"] else ""
+            if not lc and not rc:
+                lc, rc = "F", "T"
+            elif not lc:
+                lc = "F"
+            elif not rc:
+                rc = "T"
             # 菱形左右顶点到分支列顶部
             if not left_empty:
                 nvout.append(_polyline([(cx - dw / 2, cy), (lx, cy), (lx, by)]))
@@ -953,7 +982,7 @@ def _flow_custom_svg(data, has_title=False):
             by = top + dh + _FV_GAP
             nvout.append(_polyline([(cx + dw / 2, cy), (bx, cy), (bx, by)]))
             nvout.append(_arrow_head(bx, by, 0, 1))
-            _tl = b.get("inside_label") or ""
+            _tl = b.get("inside_label") or "T"
             if _tl:
                 nvout.append(f'<text x="{cx + dw / 2 + 8:.1f}" y="{cy - 10:.1f}" font-size="12" fill="#5a6480" text-anchor="start" font-family="system-ui, sans-serif">{_esc(_tl)}</text>')
             bend = draw(b["body"], bx, by, nvout)
@@ -971,7 +1000,7 @@ def _flow_custom_svg(data, has_title=False):
             # 出口：菱形底部一路向下（接下一个块）
             ey = by + bh + _FV_BGAP
             nvout.append(_arrow(cx, cy + dh / 2, cx, ey))
-            el = b.get("exit_label") or ""
+            el = b.get("exit_label") or "F"
             if el:
                 nvout.append(f'<text x="{cx + 8:.1f}" y="{cy + dh / 2 + 16:.1f}" font-size="12" fill="#5a6480" font-family="system-ui, sans-serif">{_esc(el)}</text>')
             return ey
@@ -1002,6 +1031,31 @@ def _flow_custom_svg(data, has_title=False):
             if exit_label:
                 nvout.append(f'<text x="{cx + 8:.1f}" y="{ly + lh / 2 + 16:.1f}" font-size="12" fill="#5a6480" font-family="system-ui, sans-serif">{_esc(exit_label)}</text>')
             return ey
+        if k == "Case":
+            dw, dh = size(b["dec"])
+            cy = top + dh / 2
+            nvout.append(draw_node(b["dec"], cx, cy))
+            branches = b["branches"]
+            ws = [measure(br["body"])[0] for br in branches]
+            colw = max(ws or [0]) + _FV_HGAP
+            xs = [cx + (i - (len(branches) - 1) / 2) * colw
+                  for i in range(len(branches))]
+            by = top + dh + _FV_GAP
+            bar_y = top + dh + _FV_GAP / 2
+            nvout.append(_polyline([(cx, top + dh), (cx, bar_y)]))
+            ends = []
+            for x, br in zip(xs, branches):
+                nvout.append(_polyline([(cx, bar_y), (x, bar_y), (x, by)]))
+                nvout.append(_arrow_head(x, by, 0, 1))
+                lab = br.get("label") or ""
+                if lab:
+                    nvout.append(f'<text x="{x:.1f}" y="{by - 6:.1f}" font-size="12" fill="#5a6480" text-anchor="middle" font-family="system-ui, sans-serif">{_esc(lab)}</text>')
+                ends.append(draw(br["body"], x, by, nvout))
+            yb = (max(ends) if ends else by) + _FV_BGAP
+            for x, ey in zip(xs, ends):
+                nvout.append(_polyline([(x, ey), (x, yb), (cx, yb)]))
+            nvout.append(_arrow(cx, yb, cx, yb + _FV_MGAP))
+            return yb + _FV_MGAP
         raise _FlowBad()
 
     def _reaches(src, dst):
@@ -1055,14 +1109,18 @@ def _flow_custom_svg(data, has_title=False):
                 items.append({"k": "S", "nid": cur})
                 cur = outs[0]
                 continue
-            # 判断
-            if len(outs) != 2:
-                raise _FlowBad()
+            # 判断（支持任意多分支：if-else / case / switch）
             M = ipdom.get(cur)
             if stop is not None and (M is None or M == cur or not _reaches(M, stop)):
                 M = stop
             if M is None or M == cur:
                 raise _FlowBad()
+            if len(outs) > 2:
+                items.append({"k": "Case", "dec": cur, "branches": [
+                    {"nid": v, "label": labels.get((cur, v), ""),
+                     "body": parse(v, M)} for v in outs]})
+                cur = M
+                continue
             a, b = outs
             la, lb = labels.get((cur, a), ""), labels.get((cur, b), "")
             def is_f(x):
@@ -3917,11 +3975,10 @@ def draw_diagram(kind=None, data=None, title="", **kwargs) -> str:
             print(f"[diagram] flow 结构化排版失败：{type(exc).__name__}: {exc}", flush=True)
             svg = ""
         if not svg:
-            try:
-                svg = _flow_svg(data)
-            except Exception as exc:         # noqa: BLE001
-                print(f"[diagram] flow 正交排版失败：{type(exc).__name__}: {exc}", flush=True)
-                svg = ""
+            return json.dumps({
+                "error": "流程图结构无法自动排版。请检查数据：单一入口、单一出口、"
+                         "分支最终汇合到同一个点、循环只有一条回边且回边指向循环头。修正后重新调用 draw_diagram。",
+            }, ensure_ascii=False)
     builder = GRAPHVIZ_BUILDERS.get(key) if not svg else None
     if builder:
         try:
