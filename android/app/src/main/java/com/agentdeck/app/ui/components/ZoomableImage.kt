@@ -4,12 +4,16 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.RectF
+import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -37,14 +41,18 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -148,6 +156,13 @@ fun ImagePreviewHost() {
  *
  * 底部按钮用 `safeDrawing` 的内边距——它同时包含手势条、导航栏和刘海，比自己猜
  * 一个固定值靠谱；图片本身仍然铺满整屏，只有按钮和关闭键让开系统区域。
+ *
+ * **关于「挡图」**：原来按钮是浮动在图片正下方的，横图底部本来就空着看不出问题；
+ * 一旦是 1:2 往上的长图，Fit 之后图片会顶满整个高度，那颗居中的实心按钮就正好糊在
+ * 图的下半截内容上（ER 图、「供应商」那几行）。现在把图片可绘制区域底部让出一截
+ * 按钮的高度（见 [imageBottomInset]），按钮落在空白处而不是图面上；同时交互时
+ * （缩放 / 拖动）浮层会淡出，静止一会儿再回来，看细节和截图都不受干扰；
+ * 想彻底看全图，轻点画面即可把浮层收起来，再点一次恢复。
  */
 @Composable
 private fun ImagePreviewOverlay(
@@ -177,9 +192,38 @@ private fun ImagePreviewOverlay(
         localBitmap ?: remoteRequest
     }
 
+    // 浮层显隐：`pinnedHidden` 是用户轻点锁定的，`gestureHidden` 只是手势期间的临时收起
+    var pinnedHidden by remember(url) { mutableStateOf(false) }
+    var gestureHidden by remember(url) { mutableStateOf(false) }
+    var gestureTick by remember { mutableIntStateOf(0) }
+    val lastGestureAt = remember { longArrayOf(0L) }
+    val chromeVisible = !pinnedHidden && !gestureHidden
+    val chromeAlpha by animateFloatAsState(
+        targetValue = if (chromeVisible) 1f else 0f,
+        animationSpec = tween(durationMillis = if (chromeVisible) 220 else 130),
+        label = "preview-chrome",
+    )
+
+    /** 手势一动就把浮层收起来，但 120ms 内只触发一次，避免每帧都写 state。 */
+    fun noteGesture() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastGestureAt[0] < 120) return
+        lastGestureAt[0] = now
+        if (!gestureHidden) gestureHidden = true
+        gestureTick++
+    }
+
+    // 手停下来 1.5s 再把浮层放回来
+    LaunchedEffect(gestureTick) {
+        if (gestureTick == 0) return@LaunchedEffect
+        kotlinx.coroutines.delay(1500)
+        gestureHidden = false
+    }
+
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
         scale = (scale * zoomChange).coerceIn(1f, 6f)
         offset = if (scale <= 1f) Offset.Zero else offset + panChange
+        if (zoomChange != 1f || panChange != Offset.Zero) noteGesture()
     }
 
     // 三态：加载中转圈 / 加载完铺图 / 失败给个提示。之前只有 AsyncImage，
@@ -190,6 +234,10 @@ private fun ImagePreviewOverlay(
     val safe = WindowInsets.safeDrawing.asPaddingValues()
     val bottomGap = safe.calculateBottomPadding() + 14.dp
     val topGap = safe.calculateTopPadding() + 6.dp
+    val chipHeight = 44.dp
+    // 图片区底部让出的高度 = 手势条 + 按钮自身高度 + 一点呼吸缝。
+    // 长图代价是宽度缩 6~7%，但换来「任何比例都不被浮层压住」，比让用户自己拖动躲按钮划算。
+    val imageBottomInset = bottomGap + chipHeight + 10.dp
 
     Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
         AsyncImage(
@@ -210,6 +258,9 @@ private fun ImagePreviewOverlay(
             },
             modifier = Modifier
                 .fillMaxSize()
+                .padding(bottom = imageBottomInset)
+                // 放大后的图裁在这块「窗口」里，不会反过来糊到下面按钮上
+                .clipToBounds()
                 .graphicsLayer(
                     scaleX = scale,
                     scaleY = scale,
@@ -226,14 +277,19 @@ private fun ImagePreviewOverlay(
                             } else {
                                 scale = 2.5f
                             }
+                            noteGesture()
                         },
+                        // 轻点：把浮层收起来看整张图 / 再点一次叫回来
+                        onTap = { pinnedHidden = !pinnedHidden },
                     )
                 },
         )
 
         if (loading || loadFailed) {
             Column(
-                modifier = Modifier.align(Alignment.Center),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(bottom = imageBottomInset),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 if (loadFailed) {
@@ -259,18 +315,19 @@ private fun ImagePreviewOverlay(
 
         IconButton(
             onClick = onDismiss,
+            enabled = chromeVisible,
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(top = topGap, end = 10.dp)
+                .graphicsLayer { alpha = chromeAlpha }
                 .background(Color.White.copy(alpha = 0.85f), CircleShape),
         ) {
             Icon(Icons.Rounded.Close, contentDescription = "关闭", tint = Color(0xFF333333))
         }
 
         val failed = outcome as? SaveOutcome.Failed
-        Surface(
-            onClick = {
-                if (saving || outcome != null) return@Surface
+        val save = {
+            if (!saving && outcome == null) {
                 saving = true
                 scope.launch {
                     val result = withContext(Dispatchers.IO) { saveToGallery(context, url) }
@@ -283,7 +340,10 @@ private fun ImagePreviewOverlay(
                     }
                     Toast.makeText(context, toast, Toast.LENGTH_SHORT).show()
                 }
-            },
+            }
+            Unit
+        }
+        Surface(
             shape = RoundedCornerShape(999.dp),
             color = if (failed != null) Color(0xFFFFF3F3) else Color.White,
             border = BorderStroke(
@@ -294,7 +354,11 @@ private fun ImagePreviewOverlay(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = bottomGap)
-                .heightIn(min = 48.dp),
+                .graphicsLayer { alpha = chromeAlpha }
+                .clip(RoundedCornerShape(999.dp))
+                // 浮层淡出后不再吃点击，否则收起来时戳到这块区域会误触发保存
+                .clickable(enabled = chromeVisible, onClick = save)
+                .heightIn(min = chipHeight),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
