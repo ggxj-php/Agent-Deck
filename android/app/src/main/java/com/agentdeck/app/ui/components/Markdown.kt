@@ -463,9 +463,15 @@ fun MarkdownText(
  * 表格是后加进来的：它本身是个横向滚动区，套在 SelectionContainer 里时，长按选中和
  * 横向拖动会抢同一个手势——表现就是「字多的表格往左滑没反应」（拖下去变成了选字）。
  * 表格文字本来也不适合当正文选中，独立出来更稳。
+ *
+ * 显示公式（$$…$$）同理：超宽公式现在是「按原尺寸画 + 左右滑动看」，套在
+ * SelectionContainer 里一样滑不动。公式本来也无字可选中。
  */
 private fun MdBlock.isInteractive(): Boolean =
-    this is MdBlock.Download || this is MdBlock.Picture || this is MdBlock.Table
+    this is MdBlock.Download ||
+        this is MdBlock.Picture ||
+        this is MdBlock.Table ||
+        this is MdBlock.MathBlock
 
 @Composable
 private fun MdBlockView(
@@ -474,14 +480,14 @@ private fun MdBlockView(
     baseUrl: String,
     onPreview: (String) -> Unit,
 ) {
-    // 打开字体合成，保证没有粗体字面的中文字体也能"加粗"
-    val syncedStyle = TextStyle(fontSynthesis = FontSynthesis.All)
     when (block) {
         is MdBlock.Heading -> {
-            val text = remember(block.text, palette.accent) { inline(block.text, palette) }
-            Text(
-                text = text,
-                style = syncedStyle,
+            // 标题也要过行内公式：`### 第二步：$E(Z)$` 这种小标题原来直接走 inline()，
+            // 公式被当成普通文字，屏幕上就露出两枚 `$`。改走 MathText，和正文同一套
+            // 「先摘公式、再排版、最后嵌回」的流程，标题里的 $...$ 才能变成公式图。
+            MathText(
+                text = block.text,
+                palette = palette,
                 fontSize = when (block.level) {
                     1 -> 19.sp
                     2 -> 17.sp
@@ -489,8 +495,9 @@ private fun MdBlockView(
                     else -> 15.sp
                 },
                 lineHeight = 24.sp,
-                fontWeight = FontWeight.W800,
                 color = palette.ink,
+                bold = true,
+                boldWeight = FontWeight.W800,
                 modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
             )
         }
@@ -577,7 +584,13 @@ private fun MdBlockView(
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             contentAlignment = Alignment.Center,
         ) {
-            LatexImage(latex = block.latex, palette = palette)
+            // panWhenWide：长公式按原尺寸画、左右滑动，不再为塞进屏宽把字压成一条
+            LatexImage(
+                latex = block.latex,
+                palette = palette,
+                panWhenWide = true,
+                fadeColor = palette.softFill,
+            )
         }
 
         is MdBlock.Download -> DownloadCard(
@@ -759,11 +772,12 @@ private fun highlightCode(code: String, lang: String): AnnotatedString {
  * 早先的写法是「按公式把段落切段、每段单独解析」，于是 `**加粗**` 只要被公式劈开，
  * 两半各自都找不到配对的星号，屏幕上就露出 `**` 了——截图里第一处正是这个原因。
  */
-/** 整段加粗：表头用。行内已经解析好的样式原样保留，只补一层字重。 */
-private fun AnnotatedString.bolded(): AnnotatedString = buildAnnotatedString {
-    append(this@bolded)
-    addStyle(SpanStyle(fontWeight = FontWeight.W900), 0, length)
-}
+/** 整段加粗：表头、标题用。行内已经解析好的样式原样保留，只补一层字重。 */
+private fun AnnotatedString.bolded(weight: FontWeight = FontWeight.W900): AnnotatedString =
+    buildAnnotatedString {
+        append(this@bolded)
+        addStyle(SpanStyle(fontWeight = weight), 0, length)
+    }
 
 @Composable
 private fun MathText(
@@ -774,6 +788,7 @@ private fun MathText(
     lineHeight: androidx.compose.ui.unit.TextUnit = 22.sp,
     color: androidx.compose.ui.graphics.Color = palette.ink,
     bold: Boolean = false,
+    boldWeight: FontWeight = FontWeight.W900,
 ) {
     // 打开字体合成，保证没有粗体字面的中文字体也能「加粗」
     val style = androidx.compose.ui.text.TextStyle(fontSynthesis = FontSynthesis.All)
@@ -781,8 +796,8 @@ private fun MathText(
 
     if (split.formulas.isEmpty()) {
         Text(
-            text = remember(text, palette.accent, bold) {
-                inline(demath(text), palette).let { if (bold) it.bolded() else it }
+            text = remember(text, palette.accent, bold, boldWeight) {
+                inline(demath(text), palette).let { if (bold) it.bolded(boldWeight) else it }
             },
             style = style,
             fontSize = fontSize,
@@ -794,9 +809,13 @@ private fun MathText(
     }
 
     // 整段先解析一遍：此时公式已换成占位符，加粗/斜体/行内代码都能正常配对
-    val chunks = remember(split.text, palette.accent, bold) {
+    val chunks = remember(split.text, palette.accent, bold, boldWeight) {
         inlineAndSplit(split.text, palette).map {
-            if (bold && it is InlineChunk.Text) InlineChunk.Text(it.annotated.bolded()) else it
+            if (bold && it is InlineChunk.Text) {
+                InlineChunk.Text(it.annotated.bolded(boldWeight))
+            } else {
+                it
+            }
         }
     }
 

@@ -5,18 +5,31 @@ import android.graphics.Canvas
 import android.util.Log
 import android.util.LruCache
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -115,12 +128,23 @@ internal fun sanitizeLatex(latex: String): String {
     return text.trim()
 }
 
+/**
+ * 把一段 LaTeX 画成图片。
+ *
+ * [panWhenWide] 只给**独立成块的显示公式**（`$$...$$`）用：那种公式常常一路排到
+ * 两三个屏宽，若按 `ContentScale.Fit` 缩进屏宽，一张 900px 高的式子会被压成
+ * 一条几像素高的灰带，字全糊在一起（用户的原话是「挤在一条里，太小了看不清」）。
+ * 打开后改为**按 1:1 原尺寸绘制，超宽时左右滑动**，和网页端 `overflow-x:auto` 一致。
+ * 行内公式不能开：段落里一个公式跟着可左右滑，会和整页竖滑抢手感。
+ */
 @Composable
 fun LatexImage(
     latex: String,
     palette: DeckPalette,
     modifier: Modifier = Modifier,
     textSize: Int = 17,
+    panWhenWide: Boolean = false,
+    fadeColor: Color = Color.Transparent,
 ) {
     val density = LocalDensity.current
     val sizePx = with(density) { textSize.sp.toPx() }.toInt()
@@ -139,14 +163,99 @@ fun LatexImage(
     }
 
     when {
-        bitmap != null -> Image(
-            bitmap = bitmap!!.asImageBitmap(),
-            contentDescription = latex,
-            contentScale = ContentScale.Fit,
-            // 不再用 wrapContentSize：那个会让位图突破父级约束（宽公式顶出表格单元格）。
-            // 交给 Image 按 intrinsic 尺寸测量、超宽时等比缩小，表格/段落都不会被撑破。
-            modifier = modifier,
-        )
+        bitmap != null -> {
+            val image = bitmap!!.asImageBitmap()
+            if (!panWhenWide) {
+                Image(
+                    bitmap = image,
+                    contentDescription = latex,
+                    contentScale = ContentScale.Fit,
+                    // 不再用 wrapContentSize：那个会让位图突破父级约束（宽公式顶出表格单元格）。
+                    // 交给 Image 按 intrinsic 尺寸测量、超宽时等比缩小，表格/段落都不会被撑破。
+                    modifier = modifier,
+                )
+            } else {
+                BoxWithConstraints(
+                    modifier = modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // 位图是按 textSize(sp)×density 画的，这里原样换成 dp，就是「1:1 不缩放」
+                    val wDp = with(density) { bitmap!!.width.toDp() }
+                    val hDp = with(density) { bitmap!!.height.toDp() }
+                    val ratio = if (wDp.value > 0f) hDp.value / wDp.value else 1f
+                    // 轻微超宽（缩不到 18%）就还按屏宽缩一缩：为此让用户滑一次不值得
+                    val fitScale = if (wDp.value > 0f) maxWidth.value / wDp.value else 1f
+                    when {
+                        // 装得下就原尺寸居中放，别给用户一个白滑的滚动条
+                        wDp <= maxWidth -> Image(
+                            bitmap = image,
+                            contentDescription = latex,
+                            contentScale = ContentScale.Fit,
+                        )
+
+                        fitScale >= 0.82f -> Image(
+                            bitmap = image,
+                            contentDescription = latex,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.size(maxWidth, (maxWidth.value * ratio).dp),
+                        )
+
+                        else -> {
+                            val scroll = rememberScrollState()
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(scroll)
+                                    // 从屏幕边缘起手横滑时，别让系统的返回手势把它吃掉
+                                    .systemGestureExclusion(),
+                            ) {
+                                Image(
+                                    bitmap = image,
+                                    contentDescription = latex,
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.size(wDp, hDp),
+                                )
+                            }
+                            if (fadeColor.alpha > 0f) {
+                                val atStart by remember(scroll) {
+                                    derivedStateOf { scroll.value <= 0 }
+                                }
+                                val atEnd by remember(scroll) {
+                                    derivedStateOf { scroll.value >= scroll.maxValue }
+                                }
+                                val fade = fadeColor.copy(alpha = 0.92f)
+                                if (!atEnd) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.CenterEnd)
+                                            .fillMaxHeight()
+                                            .width(18.dp)
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    listOf(Color.Transparent, fade)
+                                                )
+                                            ),
+                                    )
+                                }
+                                if (!atStart) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.CenterStart)
+                                            .fillMaxHeight()
+                                            .width(18.dp)
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    listOf(fade, Color.Transparent)
+                                                )
+                                            ),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         failed -> Text(
             text = demathForFallback(latex),
