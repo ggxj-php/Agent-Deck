@@ -36,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -244,21 +246,30 @@ fun DeckAsyncImage(
             )
 
             else -> BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                // 图还没画出来时 intrinsicSize 是 Unspecified（NaN），比较结果为 false
+                // 注意：intrinsicSize 为 Size.Unspecified 时，读 .width/.height 不是得到 NaN，
+                // 而是直接抛 IllegalStateException("Size is unspecified")（见 Compose 的
+                // Size.getWidth-impl）。这里必须先 isSpecified 兜一层——否则「state 已是
+                // Success、但 drawable 还没有固有尺寸」的那一帧就会闪退。1.18.4 起真机上
+                // 反复出现的那个崩溃就是这一行，栈里全是 R8 混淆名，之前一直没认出来。
                 val intrinsic = painter.intrinsicSize
-                val ratio = if (intrinsic.width > 0f && intrinsic.height > 0f) {
-                    intrinsic.width / intrinsic.height
-                } else {
-                    null
-                }
+                val ratio = safeAspectRatio(intrinsic)
                 val naturalHeight = ratio?.let { maxWidth / it }
                 val cropped = maxHeight != null && naturalHeight != null && naturalHeight > maxHeight
                 val limit = maxHeight
+                val unknownSize = ratio == null
 
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .then(if (cropped && limit != null) Modifier.height(limit) else Modifier),
+                        .then(if (cropped && limit != null) Modifier.height(limit) else Modifier)
+                        // 尺寸完全不可知时退回占位比例占住版面，别让这块塌成 0 高度
+                        .then(
+                            if (unknownSize && placeholderAspectRatio != null) {
+                                Modifier.aspectRatio(placeholderAspectRatio)
+                            } else {
+                                Modifier
+                            },
+                        ),
                 ) {
                     Image(
                         painter = painter,
@@ -292,6 +303,20 @@ fun DeckAsyncImage(
         }
     }
 }
+
+/**
+ * 从 painter 的固有尺寸里安全地算宽高比。
+ *
+ * `Size.Unspecified` 的 `width`/`height` getter 是**抛异常**的（不是返回 NaN），
+ * 所以不能直接写 `if (size.width > 0f)`——那一行在真机上就是一次闪退。
+ * 拿不到有效尺寸时返回 null，由调用方退回占位比例。
+ */
+internal fun safeAspectRatio(size: Size): Float? =
+    if (size.isSpecified && size.width > 0f && size.height > 0f) {
+        size.width / size.height
+    } else {
+        null
+    }
 
 /**
  * 图片请求：按**宽度**定分辨率，高度放开。
