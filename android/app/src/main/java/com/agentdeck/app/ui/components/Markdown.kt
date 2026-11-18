@@ -1336,7 +1336,8 @@ private fun renderMathBody(source: String): String =
     demathExpr(source).replace(Regex("""\s+"""), " ").trim()
 
 internal fun demathExpr(input: String): String {
-    var text = input
+    // 公式渲染失败走纯文本兜底时，`\\[4pt]` 里的方括号不能跟着印出来
+    var text = stripLatexLineGaps(input)
     // 先把 \text{...} / \mathrm{...} 这层壳剥掉：否则 S_{\text{总}} 这种嵌套花括号
     // 会让后面的下标/分式正则一个都匹配不上（之前数学没渲染出来就是这个原因）。
     repeat(3) {

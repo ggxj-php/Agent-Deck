@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -116,9 +117,61 @@ private val LATEX_RULES: List<LatexRule> = buildList {
     )
 }
 
+/**
+ * 去掉 `\\[4pt]` 里那对方括号（保留 `\\` 换行本身）。
+ *
+ * `\\[4pt]` 是 LaTeX 的「换行 + 额外竖直间距」，模型在 cases / aligned 里特别爱写：
+ *
+ * ```
+ * f(y)=\begin{cases}0, & y<0\\[2pt] u, & 0\le y<8\\[4pt] 1, & y\ge 8\end{cases}
+ * ```
+ *
+ * JLaTeXMath 的 `\\` 不认这个可选参数，`[4pt]` 会被当成正文排进公式、原样印在屏幕上
+ * （`1, & y\ge 8[4pt]`），看着像渲染坏了。这点间距纯粹是排版微调，丢掉不影响语义。
+ *
+ * 为什么手写扫描而不用正则：Android 走的是 ICU 正则，比 JVM 严，`\[` `\]` 这种写法
+ * 容易在真机上栽跟头（本文件顶部那两个坑就是这么来的）。这里是纯字符串处理，
+ * 不编译正则，也就不会在低版本机型上炸。
+ */
+internal fun stripLatexLineGaps(source: String): String {
+    // 快速通道：连 `\\`（换行符本身）都没有的公式直接返回。
+    // 注意判的是两个反斜杠——`\\*[4pt]` 这种中间还夹了个星号，`\[` 在这里出现不了。
+    if (!source.contains("\\\\")) return source
+    val out = StringBuilder(source.length)
+    var i = 0
+    while (i < source.length) {
+        // 只处理「两个反斜杠」开头的换行符，单个 `\[` 是行间公式定界符，不能动
+        if (source[i] == '\\' && i + 1 < source.length && source[i + 1] == '\\') {
+            out.append("\\\\")
+            i += 2
+            if (i < source.length && source[i] == '*') { // `\\*[4pt]` 变体
+                out.append('*')
+                i++
+            }
+            if (i < source.length && source[i] == '[') {
+                val close = source.indexOf(']', i)
+                // [4pt] / [1.5ex] / [-2pt]：只认「有数字、只有数字和单位字母」的短括号
+                if (close in (i + 2) until minOf(source.length, i + 12)) {
+                    val body = source.substring(i + 1, close)
+                    val looksLikeGap = body.any { it.isDigit() } &&
+                        body.all { it.isDigit() || it.isLetter() || it == '.' || it == '-' || it == ' ' }
+                    if (looksLikeGap) {
+                        i = close + 1
+                        continue
+                    }
+                }
+            }
+            continue
+        }
+        out.append(source[i])
+        i++
+    }
+    return out.toString()
+}
+
 /** 把一段 LaTeX 洗成 JLaTeXMath 能吃的样子；认不出来的命令一律保持原样，不吞内容。 */
 internal fun sanitizeLatex(latex: String): String {
-    var text = latex
+    var text = stripLatexLineGaps(latex)
     for (rule in LATEX_RULES) {
         // 用 lambda 替换：替换串里的 "\b" 会被当成转义，反斜杠会丢
         text = rule.pattern.replace(text) { rule.replacement }
@@ -202,53 +255,77 @@ fun LatexImage(
 
                         else -> {
                             val scroll = rememberScrollState()
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(scroll)
-                                    // 从屏幕边缘起手横滑时，别让系统的返回手势把它吃掉
-                                    .systemGestureExclusion(),
-                            ) {
-                                Image(
-                                    bitmap = image,
-                                    contentDescription = latex,
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier.size(wDp, hDp),
-                                )
+                            val atStart by remember(scroll) {
+                                derivedStateOf { scroll.value <= 0 }
                             }
-                            if (fadeColor.alpha > 0f) {
-                                val atStart by remember(scroll) {
-                                    derivedStateOf { scroll.value <= 0 }
-                                }
-                                val atEnd by remember(scroll) {
-                                    derivedStateOf { scroll.value >= scroll.maxValue }
-                                }
-                                val fade = fadeColor.copy(alpha = 0.92f)
-                                if (!atEnd) {
+                            val atEnd by remember(scroll) {
+                                derivedStateOf { scroll.value >= scroll.maxValue }
+                            }
+
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Box(modifier = Modifier.fillMaxWidth()) {
                                     Box(
                                         modifier = Modifier
-                                            .align(Alignment.CenterEnd)
-                                            .fillMaxHeight()
-                                            .width(18.dp)
-                                            .background(
-                                                Brush.horizontalGradient(
-                                                    listOf(Color.Transparent, fade)
-                                                )
-                                            ),
-                                    )
+                                            .fillMaxWidth()
+                                            .horizontalScroll(scroll)
+                                            // 从屏幕边缘起手横滑时，别让系统的返回手势把它吃掉
+                                            .systemGestureExclusion(),
+                                    ) {
+                                        Image(
+                                            bitmap = image,
+                                            contentDescription = latex,
+                                            contentScale = ContentScale.Fit,
+                                            modifier = Modifier.size(wDp, hDp),
+                                        )
+                                    }
+                                    if (fadeColor.alpha > 0f) {
+                                        val fade = fadeColor.copy(alpha = 0.92f)
+                                        if (!atEnd) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.CenterEnd)
+                                                    .fillMaxHeight()
+                                                    .width(18.dp)
+                                                    .background(
+                                                        Brush.horizontalGradient(
+                                                            listOf(Color.Transparent, fade)
+                                                        )
+                                                    ),
+                                            )
+                                        }
+                                        if (!atStart) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.CenterStart)
+                                                    .fillMaxHeight()
+                                                    .width(18.dp)
+                                                    .background(
+                                                        Brush.horizontalGradient(
+                                                            listOf(fade, Color.Transparent)
+                                                        )
+                                                    ),
+                                            )
+                                        }
+                                    }
                                 }
-                                if (!atStart) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.CenterStart)
-                                            .fillMaxHeight()
-                                            .width(18.dp)
-                                            .background(
-                                                Brush.horizontalGradient(
-                                                    listOf(fade, Color.Transparent)
-                                                )
-                                            ),
-                                    )
+
+                                // 只靠两侧渐隐，很多人根本看不出「右边还有」——1.18.8 上线后
+                                // 就有人把截断的公式当成渲染坏了。这里给一句明说的提示，滑过之后
+                                // 自动收起。高度是常驻的，收起时不占位跳动，不会在拖动途中抖一下。
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(15.dp),
+                                    contentAlignment = Alignment.CenterEnd,
+                                ) {
+                                    if (atStart) {
+                                        Text(
+                                            text = "↔ 可左右滑动",
+                                            fontSize = 10.5.sp,
+                                            color = palette.inkSoft.copy(alpha = 0.85f),
+                                            modifier = Modifier.padding(end = 2.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
