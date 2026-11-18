@@ -311,7 +311,84 @@ const VIEW_HOOKS = {
   knowledge: loadKnowledge,
   workspace: () => loadWorkspace(wsDir),
   update: initUpdate,
+  backups: loadDbBackups,
 };
+
+
+
+/* ---------------- 数据库备份 ---------------- */
+
+let dbBackupWired = false;
+
+async function loadDbBackups() {
+  const rowsEl = document.getElementById('db-backup-rows');
+  const msgEl = document.getElementById('db-backup-msg');
+  if (!rowsEl) return;
+  if (!dbBackupWired) {
+    dbBackupWired = true;
+    const btn = document.getElementById('db-backup-now');
+    if (btn) btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      if (msgEl) msgEl.textContent = '正在备份…';
+      try {
+        const r = await api('/api/admin/db-backups', {}, 'POST');
+        if (msgEl) msgEl.textContent = `备份完成：${r.file}`;
+        await loadDbBackups();
+      } catch (err) {
+        if (msgEl) msgEl.textContent = err.message || '备份失败';
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+  try {
+    const data = await api('/api/admin/db-backups');
+    rowsEl.textContent = '';
+    if (msgEl) msgEl.textContent = `保留最近 ${data.keep} 份`;
+    if (!data.items || !data.items.length) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4;
+      td.textContent = '还没有备份';
+      tr.appendChild(td);
+      rowsEl.appendChild(tr);
+      return;
+    }
+    data.items.forEach((item) => {
+      const tr = document.createElement('tr');
+      const name = document.createElement('td');
+      name.textContent = item.name;
+      const timeCell = document.createElement('td');
+      timeCell.textContent = new Date(item.mtime * 1000).toLocaleString();
+      const size = document.createElement('td');
+      size.textContent = `${(item.size / 1048576).toFixed(1)} MB`;
+      const ops = document.createElement('td');
+      const dl = document.createElement('a');
+      dl.href = `/api/admin/db-backups/${encodeURIComponent(item.name)}`;
+      dl.textContent = '下载';
+      ops.appendChild(dl);
+      ops.appendChild(document.createTextNode(' '));
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.textContent = '删除';
+      del.className = 'ghost';
+      del.addEventListener('click', async () => {
+        if (!confirm(`确定删除 ${item.name}？`)) return;
+        try {
+          await api(`/api/admin/db-backups/${encodeURIComponent(item.name)}`, null, 'DELETE');
+          await loadDbBackups();
+        } catch (err) {
+          if (msgEl) msgEl.textContent = err.message || '删除失败';
+        }
+      });
+      ops.appendChild(del);
+      tr.appendChild(name); tr.appendChild(timeCell); tr.appendChild(size); tr.appendChild(ops);
+      rowsEl.appendChild(tr);
+    });
+  } catch (err) {
+    if (msgEl) msgEl.textContent = err.message || '读取备份失败';
+  }
+}
 
 function showLogin() {
   /* 后台鉴权现在走用户账号：不是管理员就回登录页（登录后再跳回来） */

@@ -23,6 +23,7 @@ from .. import (
     capabilities,
     config_report,
     db,
+    db_backup,
     geoip,
     llm,
     persona,
@@ -1183,3 +1184,47 @@ async def persona_asset(pid: str, request: Request, kind: str = "avatar"):
     persona._cache["key"] = None
     return {"ok": True, "kind": kind, "size": list(size),
             "url": f"/api/persona/{kind}?pid={pid}"}
+
+
+# ---------------- 数据库备份 ----------------
+
+@router.get("/api/admin/db-backups")
+def admin_db_backup_list(request: Request):
+    _require(request)
+    return {"dir": db_backup.BACKUP_DIR, "keep": db_backup.KEEP,
+            "items": db_backup.list_backups()}
+
+
+@router.post("/api/admin/db-backups")
+def admin_db_backup_create(request: Request):
+    _require(request)
+    try:
+        path = db_backup.backup_now("manual")
+    except Exception as exc:                 # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"备份失败：{type(exc).__name__}: {exc}")
+    return {"ok": True, "file": os.path.basename(path),
+            "items": db_backup.list_backups()}
+
+
+@router.get("/api/admin/db-backups/{name}")
+def admin_db_backup_download(name: str, request: Request):
+    _require(request)
+    name = os.path.basename(name)
+    if not db_backup.NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="备份文件名不合法")
+    path = os.path.join(db_backup.BACKUP_DIR, name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="备份不存在")
+    return FileResponse(path, media_type="application/octet-stream", filename=name)
+
+
+@router.delete("/api/admin/db-backups/{name}")
+def admin_db_backup_delete(name: str, request: Request):
+    _require(request)
+    try:
+        db_backup.delete_backup(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="备份不存在")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "items": db_backup.list_backups()}
