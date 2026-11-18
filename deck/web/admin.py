@@ -199,7 +199,7 @@ def traffic_state(request: Request, days: int = 7, overseas: int = 0,
                   scanners: int = 1, site: str = "www"):
     """访问日志统计：页面访问 / 独立 IP / 地区分布 / 热门路径 / 状态码。
 
-    口径和命令行版 /root/taffy-traffic.py 一样：排掉本机、扫描器、腾讯网段，
+    口径和命令行版脚本一样：排掉本机、扫描器、腾讯网段，
     默认再排掉海外 IP（只要真实国内访客）。overseas=1 就全算上。
     结果在模块里缓存 60 秒，重复点不会反复扫日志。
     """
