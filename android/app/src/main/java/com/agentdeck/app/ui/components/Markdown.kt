@@ -575,22 +575,30 @@ private fun MdBlockView(
                 .background(palette.line),
         )
 
-        is MdBlock.MathBlock -> Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 5.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(palette.softFill)
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            // panWhenWide：长公式按原尺寸画、左右滑动，不再为塞进屏宽把字压成一条
-            LatexImage(
-                latex = block.latex,
-                palette = palette,
-                panWhenWide = true,
-                fadeColor = palette.softFill,
-            )
+        is MdBlock.MathBlock -> {
+            // 公式卡片只包公式本身；「可左右滑动」提示由 WideScrollHint 画在卡片下方，
+            // 免得卡片为了塞一行小字被撑高、提示又贴在右下圆角上像脚注。
+            val wideState = remember(block.latex) { WideScrollState() }
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(palette.softFill)
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // panWhenWide：长公式按原尺寸画、左右滑动，不再为塞进屏宽把字压成一条
+                    LatexImage(
+                        latex = block.latex,
+                        palette = palette,
+                        panWhenWide = true,
+                        fadeColor = palette.softFill,
+                        wideState = wideState,
+                    )
+                }
+                WideScrollHint(wideState, palette)
+            }
         }
 
         is MdBlock.Download -> DownloadCard(

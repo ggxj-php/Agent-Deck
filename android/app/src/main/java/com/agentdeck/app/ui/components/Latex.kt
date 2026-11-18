@@ -4,24 +4,25 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.util.Log
 import android.util.LruCache
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,11 +30,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agentdeck.app.ui.theme.DeckPalette
@@ -181,6 +188,85 @@ internal fun sanitizeLatex(latex: String): String {
     return text.trim()
 }
 
+/** 宽公式左右两端「还有内容」的渐隐宽度。 */
+private val fadeWidth = 18.dp
+
+/**
+ * 宽公式的横滑状态，由 [LatexImage] 写、[WideScrollHint] 读。
+ *
+ * 为什么要绕这一道：提示文字早先画在公式卡片**里面**（滚动区下方的常驻行），
+ * 结果粉色卡片为了塞这行小字被撑高一条空白，字还紧贴在右下圆角上，看着像公式
+ * 自带的一行脚注——用户的原话是「这里不太适配」。现在卡片只包公式，提示由调用
+ * 方画在卡片外面（[WideScrollHint]），所以状态得往外提一层。
+ */
+class WideScrollState {
+    /** 这张公式是否真的要横滑（装得下就没有提示）。 */
+    var active by mutableStateOf(false)
+
+    /** 是否还停在最左边：停着才提示「可以往右滑」，滑过就收起。 */
+    var atStart by mutableStateOf(true)
+}
+
+/**
+ * 宽公式的滑动提示：一行 10.5sp 小字，画在公式卡片**下方**。
+ *
+ * 高度在 [WideScrollState.active] 时恒定为 15dp：滑到底收起文字时不会把下面的
+ * 内容顶上去（拖动途中跳一下比留着一条空白更难接受）。公式不宽时整行不存在，
+ * 普通短公式下面不会多出空隙。
+ */
+@Composable
+internal fun WideScrollHint(state: WideScrollState, palette: DeckPalette) {
+    if (!state.active) return
+    // 滑过之后不是「啪」一下消失，淡出更顺眼；高度始终占着，不影响下面的位置
+    val alpha by animateFloatAsState(
+        targetValue = if (state.atStart) 1f else 0f,
+        label = "wide-hint",
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(15.dp),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.graphicsLayer { this.alpha = alpha },
+        ) {
+            // 不用「↔」字符：中文/符号字体的回落字形比正文字号小一圈、基线还偏低，
+            // 摆在「可左右滑动」旁边像掉下去半个字。自己画一个，粗细和字号都对得上。
+            ScrollArrow(color = palette.inkSoft.copy(alpha = 0.8f))
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = "可左右滑动",
+                fontSize = 10.5.sp,
+                color = palette.inkSoft.copy(alpha = 0.8f),
+            )
+        }
+    }
+}
+
+/** 双向箭头（← →合在一起），给「可左右滑动」提示用。 */
+@Composable
+private fun ScrollArrow(
+    color: Color,
+    width: Dp = 12.dp,
+    height: Dp = 8.dp,
+) {
+    Canvas(modifier = Modifier.size(width, height)) {
+        val stroke = 1.1.dp.toPx()
+        val cy = size.height / 2f
+        val left = 0.55.dp.toPx()
+        val right = size.width - 0.55.dp.toPx()
+        val head = 2.2.dp.toPx()
+        val wing = head * 0.72f
+        drawLine(color, Offset(left, cy), Offset(right, cy), strokeWidth = stroke, cap = StrokeCap.Round)
+        drawLine(color, Offset(left + head, cy - wing), Offset(left, cy), strokeWidth = stroke, cap = StrokeCap.Round)
+        drawLine(color, Offset(left + head, cy + wing), Offset(left, cy), strokeWidth = stroke, cap = StrokeCap.Round)
+        drawLine(color, Offset(right - head, cy - wing), Offset(right, cy), strokeWidth = stroke, cap = StrokeCap.Round)
+        drawLine(color, Offset(right - head, cy + wing), Offset(right, cy), strokeWidth = stroke, cap = StrokeCap.Round)
+    }
+}
+
 /**
  * 把一段 LaTeX 画成图片。
  *
@@ -189,6 +275,8 @@ internal fun sanitizeLatex(latex: String): String {
  * 一条几像素高的灰带，字全糊在一起（用户的原话是「挤在一条里，太小了看不清」）。
  * 打开后改为**按 1:1 原尺寸绘制，超宽时左右滑动**，和网页端 `overflow-x:auto` 一致。
  * 行内公式不能开：段落里一个公式跟着可左右滑，会和整页竖滑抢手感。
+ *
+ * [wideState] 传进来时会把「能不能滑 / 滑到哪」写进去，由调用方决定提示画在哪里。
  */
 @Composable
 fun LatexImage(
@@ -198,6 +286,7 @@ fun LatexImage(
     textSize: Int = 17,
     panWhenWide: Boolean = false,
     fadeColor: Color = Color.Transparent,
+    wideState: WideScrollState? = null,
 ) {
     val density = LocalDensity.current
     val sizePx = with(density) { textSize.sp.toPx() }.toInt()
@@ -238,95 +327,92 @@ fun LatexImage(
                     val ratio = if (wDp.value > 0f) hDp.value / wDp.value else 1f
                     // 轻微超宽（缩不到 18%）就还按屏宽缩一缩：为此让用户滑一次不值得
                     val fitScale = if (wDp.value > 0f) maxWidth.value / wDp.value else 1f
+                    val needsScroll = wDp > maxWidth && fitScale < 0.82f
+
+                    val scroll = rememberScrollState()
+                    val atStart by remember(scroll) {
+                        derivedStateOf { scroll.value <= 0 }
+                    }
+                    val atEnd by remember(scroll) {
+                        derivedStateOf { scroll.value >= scroll.maxValue }
+                    }
+
+                    // 把状态交给外面：提示画在卡片下方（见 WideScrollHint），不挤在卡片里。
+                    // 注意这里必须先在本函数体里读一次 atStart——只在 SideEffect 的 lambda 里读
+                    // 是不订阅的，滚动再多也不会重组，外面那行提示会一直挂着（真机上就是这个现象）。
+                    val startNow = atStart
+                    val scrollNow = needsScroll
+                    SideEffect {
+                        wideState?.active = scrollNow
+                        wideState?.atStart = if (scrollNow) startNow else true
+                    }
+
                     when {
                         // 装得下就原尺寸居中放，别给用户一个白滑的滚动条
-                        wDp <= maxWidth -> Image(
+                        !needsScroll && wDp <= maxWidth -> Image(
                             bitmap = image,
                             contentDescription = latex,
                             contentScale = ContentScale.Fit,
                         )
 
-                        fitScale >= 0.82f -> Image(
+                        !needsScroll -> Image(
                             bitmap = image,
                             contentDescription = latex,
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.size(maxWidth, (maxWidth.value * ratio).dp),
                         )
 
-                        else -> {
-                            val scroll = rememberScrollState()
-                            val atStart by remember(scroll) {
-                                derivedStateOf { scroll.value <= 0 }
-                            }
-                            val atEnd by remember(scroll) {
-                                derivedStateOf { scroll.value >= scroll.maxValue }
-                            }
-
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Box(modifier = Modifier.fillMaxWidth()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .horizontalScroll(scroll)
-                                            // 从屏幕边缘起手横滑时，别让系统的返回手势把它吃掉
-                                            .systemGestureExclusion(),
-                                    ) {
-                                        Image(
-                                            bitmap = image,
-                                            contentDescription = latex,
-                                            contentScale = ContentScale.Fit,
-                                            modifier = Modifier.size(wDp, hDp),
-                                        )
-                                    }
+                        else -> Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                // 两侧渐隐直接在绘制阶段画。原来是用两个 fillMaxHeight() 的
+                                // 兄弟 Box 叠上去——聊天列表是纵向无界的，父级 maxHeight 是
+                                // Infinity，fillMaxHeight 拿不到高度，那两个渐变一直是 0 高，
+                                // 屏幕上就是公式被硬切一刀（用户说的「像截断了」）。
+                                .drawWithContent {
+                                    drawContent()
                                     if (fadeColor.alpha > 0f) {
-                                        val fade = fadeColor.copy(alpha = 0.92f)
+                                        val w = fadeWidth.toPx()
+                                        // 末端必须画到完全不透明：只到 0.92 的话，裁切线那里还留着
+                                        // 一层 8% 的墨迹，看着仍然是一刀切断的硬边。
+                                        val fade = fadeColor.copy(alpha = 1f)
                                         if (!atEnd) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .align(Alignment.CenterEnd)
-                                                    .fillMaxHeight()
-                                                    .width(18.dp)
-                                                    .background(
-                                                        Brush.horizontalGradient(
-                                                            listOf(Color.Transparent, fade)
-                                                        )
-                                                    ),
+                                            drawRect(
+                                                brush = Brush.horizontalGradient(
+                                                    listOf(Color.Transparent, fade),
+                                                    startX = size.width - w,
+                                                    endX = size.width,
+                                                ),
+                                                topLeft = Offset(size.width - w, 0f),
+                                                size = Size(w, size.height),
                                             )
                                         }
                                         if (!atStart) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .align(Alignment.CenterStart)
-                                                    .fillMaxHeight()
-                                                    .width(18.dp)
-                                                    .background(
-                                                        Brush.horizontalGradient(
-                                                            listOf(fade, Color.Transparent)
-                                                        )
-                                                    ),
+                                            drawRect(
+                                                brush = Brush.horizontalGradient(
+                                                    listOf(fade, Color.Transparent),
+                                                    startX = 0f,
+                                                    endX = w,
+                                                ),
+                                                size = Size(w, size.height),
                                             )
                                         }
                                     }
-                                }
-
-                                // 只靠两侧渐隐，很多人根本看不出「右边还有」——1.18.8 上线后
-                                // 就有人把截断的公式当成渲染坏了。这里给一句明说的提示，滑过之后
-                                // 自动收起。高度是常驻的，收起时不占位跳动，不会在拖动途中抖一下。
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(15.dp),
-                                    contentAlignment = Alignment.CenterEnd,
-                                ) {
-                                    if (atStart) {
-                                        Text(
-                                            text = "↔ 可左右滑动",
-                                            fontSize = 10.5.sp,
-                                            color = palette.inkSoft.copy(alpha = 0.85f),
-                                            modifier = Modifier.padding(end = 2.dp),
-                                        )
-                                    }
-                                }
+                                },
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(scroll)
+                                    // 从屏幕边缘起手横滑时，别让系统的返回手势把它吃掉
+                                    .systemGestureExclusion(),
+                            ) {
+                                Image(
+                                    bitmap = image,
+                                    contentDescription = latex,
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.size(wDp, hDp),
+                                )
                             }
                         }
                     }
