@@ -431,9 +431,20 @@ fun MarkdownText(
     palette: DeckPalette,
     baseUrl: String,
     onPreview: (String) -> Unit = {},
+    selectable: Boolean = true,
 ) {
     val blocks = remember(text) { parseMarkdown(text) }
     Column {
+        if (!selectable) {
+            // 流式输出期间不套 SelectionContainer。
+            //
+            // 正文每 60ms 换一次 text，容器里的选区偏移会跟着失效、留下一个「幽灵选区」，
+            // 而点任何按钮的第一下都只用来清那个选区——表现就是「刚输出完，点下载按钮
+            // 没反应」，要等这条消息不再是流式、容器整个重建之后才恢复正常。
+            // 流式期间本来也没法好好选字（内容一直在变），等说完再开选择更合理。
+            for (block in blocks) MdBlockView(block, palette, baseUrl, onPreview)
+            return@Column
+        }
         // 正文整体可长按选中复制；下载卡片、图片自带点击（按钮 / 看大图），
         // 套在 SelectionContainer 里会跟「取消选区」抢手势——选中过文字后再点按钮，
         // 第一下只清选区，看着就是「点了没反应」。这两类单独放，不参与选择。

@@ -105,6 +105,10 @@ object DownloadCenter {
     private var nextId = 1L
 
     fun start(url: String, fallbackName: String): Long {
+        // 同一个地址还在下就别再开一条：连点两次会同时拉两份，落到「下载」里是两个同名文件
+        synchronized(this) {
+            _tasks.value.firstOrNull { it.url == url && it.status == DownloadStatus.RUNNING }
+        }?.let { return it.id }
         val id = synchronized(this) { nextId++ }
         val task = DownloadTask(id = id, name = fallbackName, url = url)
         update { it + task }
@@ -160,11 +164,12 @@ object DownloadCenter {
                         }
                     }
                 }
-            } catch (error: Exception) {
+            } catch (error: Throwable) {
                 if (calls[id]?.isCanceled() == true) {
                     update { list -> list.map { if (it.id == id) it.copy(status = DownloadStatus.CANCELED, speed = 0) else it } }
                 } else {
-                    fail(id, error.message ?: "下载失败")
+                    // 任何失败都要落到卡片上：静默吞掉的话，用户看到的就是「点了没反应」
+                    fail(id, error.message?.takeIf { it.isNotBlank() } ?: "下载失败")
                 }
             } finally {
                 calls.remove(id)
@@ -203,6 +208,12 @@ object DownloadCenter {
         update { list -> list.map { if (it.id == id) it.copy(status = DownloadStatus.FAILED, speed = 0, error = message) else it } }
     }
 
+    /**
+     * 任务列表是「读-改-写」，下载线程（进度回调）和主线程（新建 / 取消）会同时改它。
+     * 不加锁就可能互相覆盖：刚点下的任务被一次并发的进度更新挤掉，卡片上什么都不变，
+     * 看着就是「点了没反应，重启才好」。锁在 object 上，和 [start] 里分 id 是同一把。
+     */
+    @Synchronized
     private fun update(transform: (List<DownloadTask>) -> List<DownloadTask>) {
         _tasks.value = transform(_tasks.value)
     }

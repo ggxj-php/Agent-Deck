@@ -350,12 +350,15 @@ private fun AssistantMessage(
                 when (block) {
                     is Block.Text -> {
                         // 选择容器下沉到 MarkdownText 内部：下载卡片 / 图片不参与选中，
-                        // 否则「选中过文字」时点卡片按钮只清选区，按钮像坏了一样
+                        // 否则「选中过文字」时点卡片按钮只清选区，按钮像坏了一样。
+                        // 流式期间整段都不套选择容器：内容一直在变，选区会变成清不掉的
+                        // 幽灵，把后面每一次点击都吃掉。
                         MarkdownWithStickers(
                             markdown = block.markdown,
                             palette = palette,
                             baseUrl = baseUrl,
                             onPreview = onPreview,
+                            selectable = !message.streaming,
                         )
                     }
 
@@ -437,12 +440,19 @@ private fun MarkdownWithStickers(
     palette: DeckPalette,
     baseUrl: String,
     onPreview: (String) -> Unit,
+    selectable: Boolean = true,
 ) {
     val parts = remember(markdown) {
         splitStickerMarks(HistoryParser.snapStickersToBoundaries(markdown))
     }
     if (parts.none { it is StickerPart.Mark }) {
-        MarkdownText(text = markdown, palette = palette, baseUrl = baseUrl, onPreview = onPreview)
+        MarkdownText(
+            text = markdown,
+            palette = palette,
+            baseUrl = baseUrl,
+            onPreview = onPreview,
+            selectable = selectable,
+        )
         return
     }
     Column {
@@ -456,6 +466,7 @@ private fun MarkdownWithStickers(
                             palette = palette,
                             baseUrl = baseUrl,
                             onPreview = onPreview,
+                            selectable = selectable,
                         )
                     }
                 }

@@ -2,8 +2,8 @@ package com.agentdeck.app.ui.components
 
 import android.content.Intent
 import android.net.Uri
-import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,8 +23,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.agentdeck.app.data.AppSettings
 import com.agentdeck.app.ui.theme.DeckPalette
 
 /**
@@ -46,35 +51,66 @@ fun DownloadCard(
     palette: DeckPalette,
 ) {
     val context = LocalContext.current
-    val fullUrl = if (path.startsWith("http")) path else baseUrl + path
-    // baseUrl 偶尔是空的（老数据 / 历史消息），拼出来就是 /d/xxx：OkHttp 直接抛异常、
-    // 浏览器也打不开，用户看到的就是「点了没反应」。先认出来，把原因说清楚。
+    // serverUrl 偶发为空（消息刚回来、ViewModel 还在 boot，或者历史数据没带地址），
+    // 这时拼出来的是 `/d/xxx`：OkHttp 直接抛异常、浏览器也打不开，用户看到的就是
+    // 「两个按钮都没反应」。进程里那份设置永远读得到，用它兜底。
+    val root = baseUrl.ifBlank { AppSettings.baseUrl(context) }.trimEnd('/')
+    val fullUrl = if (path.startsWith("http")) path else root + path
     val absolute = fullUrl.startsWith("http://") || fullUrl.startsWith("https://")
-    fun toast(text: String) = Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+
+    // 点击必须留下看得见的痕迹：真正开始下载之前（或者根本没法下载）先把原因写在
+    // 卡片里。之前只有 Toast，一闪而过，用户就记住「点了没反应」。
+    var hint by remember(fullUrl) { mutableStateOf<String?>(null) }
+    var hintError by remember(fullUrl) { mutableStateOf(false) }
+    // /d/<token> 的末段是 token，直接用会把文件名存成哈希；链接文字有扩展名时优先用它
+    val fallbackName = label.takeIf { it.contains('.') && it.length <= 80 }
+        ?: path.trimEnd('/').substringAfterLast('/').ifBlank { "附件" }
+
+    fun showHint(text: String, isError: Boolean) {
+        hint = text
+        hintError = isError
+    }
+
+    fun startDownload() {
+        if (!absolute) {
+            showHint("下载地址不完整（服务器地址是空的），下拉刷新会话再试", true)
+            return
+        }
+        // 先画出「点击已收到」：任务一建起来就会被进度条取代。如果这行一直停着，
+        // 说明请求根本没走出去——比什么都不变好排查得多。
+        showHint("正在准备下载…", false)
+        DownloadCenter.start(fullUrl, fallbackName)
+    }
+
     fun openInBrowser() {
         if (!absolute) {
-            toast("下载地址不完整，刷新一下会话再试")
+            showHint("下载地址不完整（服务器地址是空的），下拉刷新会话再试", true)
             return
         }
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fullUrl))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (runCatching { context.startActivity(intent) }.isFailure) {
-            toast("没有能打开网页的浏览器")
+            showHint("这台机器上没有能打开网页的浏览器", true)
         }
     }
-    // /d/<token> 的末段是 token，直接用会把文件名存成哈希；链接文字有扩展名时优先用它
-    val fallbackName = label.takeIf { it.contains('.') && it.length <= 80 }
-        ?: path.trimEnd('/').substringAfterLast('/').ifBlank { "附件" }
+
     val tasks by DownloadCenter.tasks.collectAsState()
     val task = tasks.lastOrNull { it.url == fullUrl }
+    // 任务一旦建起来，卡片自己就会显示进度，不用再留着提示
+    LaunchedEffect(task?.status) {
+        if (task != null) hint = null
+    }
 
     Surface(
         color = palette.softFill,
         shape = RoundedCornerShape(10.dp),
         border = BorderStroke(1.dp, palette.line),
+        // 整张卡片都能点：手指落在右边空白处也不至于「没反应」。
+        // 只有还没开始下载（两个入口都摆着）的时候才接管，进度/完成态仍用行内按钮。
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = 4.dp)
+            .then(if (task == null) Modifier.clickable { startDownload() } else Modifier),
     ) {
         Column(modifier = Modifier.padding(horizontal = 11.dp, vertical = 9.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -100,10 +136,7 @@ fun DownloadCard(
                     horizontalArrangement = Arrangement.End,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    TextButton(onClick = {
-                        if (absolute) DownloadCenter.start(fullUrl, fallbackName)
-                        else toast("下载地址不完整，刷新一下会话再试")
-                    }) {
+                    TextButton(onClick = { startDownload() }) {
                         Text("App 内下载", fontSize = 12.5.sp, color = palette.accent)
                     }
                     TextButton(onClick = { openInBrowser() }) {
@@ -160,6 +193,16 @@ fun DownloadCard(
                         Text("重试", fontSize = 12.5.sp, color = palette.accent)
                     }
                 }
+            }
+
+            // 点击没成的时候，原因留在卡片里，别只闪一下 Toast
+            hint?.let { message ->
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = message,
+                    fontSize = 11.5.sp,
+                    color = if (hintError) MaterialTheme.colorScheme.error else palette.inkSoft,
+                )
             }
         }
     }
