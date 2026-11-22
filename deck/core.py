@@ -9,7 +9,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import browser as browser_mod
-from . import context, ratelimit, settings, uploads
+from . import context, ratelimit, sandbox, settings, uploads
 from . import usage as usage_mod
 from .config import (
     CONTEXT_OVERFLOW_RETRIES,
@@ -145,6 +145,14 @@ def _safe_execute(name, call):
         return {}, f"工具执行出错：{type(exc).__name__}: {exc}"
 
 
+def _safe_execute_owned(name, call, owner):
+    """并发线程里没有 run() 设的线程本地 owner：先补上再执行工具。"""
+    download_tool.set_owner(owner)
+    # worker 线程也要有 sandbox owner，否则 safe_path 会退回全局 workspace。
+    sandbox.set_owner(owner)
+    return _safe_execute(name, call)
+
+
 _STICKER_MARK = re.compile(r"\[\s*sticker\s*:\s*([a-zA-Z_]+)\s*\]", re.I)
 _MARK_PREFIX = "[sticker:"
 
@@ -248,7 +256,7 @@ def _sticker_moods(args):
 _IMAGE_MARK = re.compile(r"\[图片 #([0-9a-f]{6,32})")
 
 
-def _rehydrate(messages, max_images=3, window=2):
+def _rehydrate(messages, max_images=3, window=2, owner=None):
     """把最近一两轮里带 [图片 #id] 标记的消息，重新塞回图片（多模态）。
 
     图片不常驻历史——几百 KB 的 base64 每轮重发太贵。但「刚从上下文里掉出去的图」
@@ -269,7 +277,7 @@ def _rehydrate(messages, max_images=3, window=2):
         ids = _IMAGE_MARK.findall(content)[:max_images]
         parts = [{"type": "text", "text": content}]
         for aid in ids:
-            url = uploads.data_url(aid)
+            url = uploads.data_url(aid, owner=owner)
             if url:
                 parts.append({"type": "image_url", "image_url": {"url": url}})
         if len(parts) == 1:
@@ -417,6 +425,7 @@ class DeckAgent:
           cut         {reason}                     回复被截断/中断了，可以发「继续」接着写
           done        {context}                    这一轮结束（附带当前上下文用量）
         """
+        sandbox.set_owner(self.owner)
         # 历史快把模型的上下文窗口填满时，先把旧的那段压成摘要（见 deck/context.py）。
         # 放在追加用户消息之前：这句刚说的话不该被压掉。压失败也照常往下走。
         squeezed = context.compress_if_needed(self.messages)
@@ -447,7 +456,7 @@ class DeckAgent:
                 text = text + "\n\n" + markers
             parts = [{"type": "text", "text": text}]
             for ref in refs:
-                url = uploads.data_url(ref["id"])
+                url = uploads.data_url(ref["id"], owner=self.owner)
                 if url:
                     parts.append({"type": "image_url", "image_url": {"url": url}})
             self.messages.append({"role": "user", "content": parts})
@@ -499,7 +508,7 @@ class DeckAgent:
                 while True:
                   try:
                     specs = active_specs(extra=("ask_user",) if self.interactive else ())
-                    sent_messages = _sendable(_trim_history(_rehydrate(self.messages)))
+                    sent_messages = _sendable(_trim_history(_rehydrate(self.messages, owner=self.owner)))
                     # 上游有「每分钟 token 配额」：发之前先排队，别把额度一次打爆。
                     # 记账要把工具 schema + 系统提示也算进去（之前漏了，导致实际超支）
                     overhead = (len(json.dumps(specs, ensure_ascii=False))
@@ -718,10 +727,11 @@ class DeckAgent:
                         todo = []
                 if len(todo) == 1:
                     one = todo[0]
-                    one["args"], one["result"] = _safe_execute(one["name"], one["call"])
+                    one["args"], one["result"] = _safe_execute_owned(
+                        one["name"], one["call"], self.owner)
                 elif todo:
                     with ThreadPoolExecutor(max_workers=min(4, len(todo))) as pool:
-                        futures = {pool.submit(_safe_execute, p["name"], p["call"]): p
+                        futures = {pool.submit(_safe_execute_owned, p["name"], p["call"], self.owner): p
                                    for p in todo}
                         for future in as_completed(futures):
                             item = futures[future]

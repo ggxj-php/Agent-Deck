@@ -2,7 +2,8 @@
 import os
 import shutil
 
-from ..sandbox import WORKSPACE, safe_path
+from .. import sandbox
+from ..sandbox import safe_path
 
 MAX_READ_BYTES = 512 * 1024   # 一次最多读这么多，别让一个超大文件把内存 / 上下文撑爆
 
@@ -88,6 +89,11 @@ SPECS = [
 
 def list_files(path: str = ".") -> str:
     """列出工作区某个目录下的内容"""
+    from .. import sandbox
+
+    rel = os.path.normpath(str(path or "."))
+    if rel in ("browser", "." + os.sep + "browser") and sandbox.current_owner() is not None:
+        path = os.path.join("browser", str(sandbox.current_owner()))
     full = safe_path(path)
     if not os.path.isdir(full):
         return f"错误：{path} 不是目录"
@@ -136,7 +142,7 @@ def write_file(path: str, content: str) -> str:
 def delete_file(path: str, recursive: bool = False) -> str:
     """删除工作区内的文件或目录；删目录要显式 recursive=True"""
     full = safe_path(path)
-    if os.path.normcase(full) == os.path.normcase(WORKSPACE):
+    if os.path.normcase(full) == os.path.normcase(sandbox.user_workspace()):
         return "错误：不能删除 workspace 根目录"
     if os.path.isfile(full):
         os.remove(full)

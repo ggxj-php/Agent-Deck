@@ -21,10 +21,13 @@ import re
 import secrets
 import time
 
+from . import sandbox
 from .config import PROJECT_ROOT
-from .sandbox import WORKSPACE
 
-UPLOAD_DIR = os.path.join(WORKSPACE, "uploads")
+
+def upload_dir(owner=None):
+    """每个用户自己的 uploads 目录；owner 不传时取当前工具上下文。"""
+    return os.path.join(sandbox.user_workspace(owner), "uploads")
 INDEX_PATH = os.path.join(PROJECT_ROOT, ".cache", "upload_index.json")
 
 MAX_BYTES = 4 * 1024 * 1024
@@ -154,7 +157,7 @@ def sweep(ttl=TTL_SECONDS):
     index = _load_index()
     removed = 0
     for aid, item in list(index.items()):
-        path = os.path.join(UPLOAD_DIR, item.get("file") or "")
+        path = os.path.join(upload_dir(item.get("owner")), item.get("file") or "")
         old = now - float(item.get("ts") or 0) > ttl
         if old or not os.path.isfile(path):
             try:
@@ -163,17 +166,7 @@ def sweep(ttl=TTL_SECONDS):
                 pass
             index.pop(aid, None)
             removed += 1
-    # 目录里没登记的孤儿文件也顺手清掉
-    try:
-        known = {item.get("file") for item in index.values()}
-        for name in os.listdir(UPLOAD_DIR):
-            if name not in known:
-                try:
-                    os.remove(os.path.join(UPLOAD_DIR, name))
-                except OSError:
-                    pass
-    except OSError:
-        pass
+    # 孤儿文件不全局扫，避免跨用户目录误删
     if removed:
         _save_index(index)
     return removed
@@ -184,7 +177,9 @@ FILE_MAX_BYTES = 20 * 1024 * 1024          # 单文件 20MB
 FILE_MAX_COUNT = 6
 FILE_EXTS = (".pdf", ".docx", ".doc", ".txt", ".md", ".csv", ".json", ".py",
              ".js", ".ts", ".java", ".c", ".cpp", ".h", ".zip", ".xlsx", ".pptx",
-             ".html", ".xml", ".yaml", ".yml", ".log", ".sql")
+             ".html", ".xml", ".yaml", ".yml", ".log", ".sql",
+             # 音频：给视频配背景音乐用（上传后模型会拿 make_public_link 做成直链）
+             ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".opus")
 
 _SAFE_NAME = re.compile(r"[^\w.\-\u4e00-\u9fff]+")
 
@@ -216,11 +211,12 @@ def save_file(name, data_url, owner=None):
         return None, "空文件"
 
     sweep()
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    udir = upload_dir(owner)
+    os.makedirs(udir, exist_ok=True)
     index = _load_index()
     fid = secrets.token_hex(6)
     stored = f"{fid}{ext}"
-    path = os.path.join(UPLOAD_DIR, stored)
+    path = os.path.join(udir, stored)
     with open(path, "wb") as fp:
         fp.write(data)
     index[fid] = {"file": stored, "ts": time.time(), "owner": owner,
@@ -230,10 +226,12 @@ def save_file(name, data_url, owner=None):
             "size": len(data), "ext": ext}, ""
 
 
-def file_info(fid):
+def file_info(fid, owner=None):
     """按 id 取已上传文件的信息（文件名 / 路径 / 大小），给别人拼标记用。"""
     item = _load_index().get(str(fid or ""))
     if not item or item.get("kind") != "file":
+        return None
+    if owner is not None and item.get("owner") is not None and int(item["owner"]) != int(owner):
         return None
     return {"id": str(fid), "path": f"uploads/{item.get('file')}",
             "name": item.get("name") or item.get("file"),
@@ -254,7 +252,8 @@ def save(data_urls, owner=None):
         urls = urls[:MAX_COUNT]
 
     sweep()
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    udir = upload_dir(owner)
+    os.makedirs(udir, exist_ok=True)
     index = _load_index()
     refs, notes = [], []
 
@@ -273,7 +272,7 @@ def save(data_urls, owner=None):
 
         aid = secrets.token_hex(6)
         fname = aid + "." + ext
-        full = os.path.join(UPLOAD_DIR, fname)
+        full = os.path.join(udir, fname)
         try:
             with open(full, "wb") as fh:
                 fh.write(clean)
@@ -290,12 +289,14 @@ def save(data_urls, owner=None):
     return refs, notes
 
 
-def data_url(aid):
-    """按 id 把图读回来，转成 data URL（rehydrate 用）。取不到返回空串。"""
+def data_url(aid, owner=None):
+    """按 id 把图读回来，转成 data URL（rehydrate 用）。owner 不匹配返回空串。"""
     item = _load_index().get(aid)
     if not item:
         return ""
-    path = os.path.join(UPLOAD_DIR, item.get("file") or "")
+    if owner is not None and item.get("owner") is not None and int(item["owner"]) != int(owner):
+        return ""
+    path = os.path.join(upload_dir(item.get("owner")), item.get("file") or "")
     try:
         with open(path, "rb") as fh:
             raw = fh.read()

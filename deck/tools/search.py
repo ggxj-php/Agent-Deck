@@ -914,7 +914,7 @@ def _html_to_text(markup: str) -> str:
     return BLANK_RE.sub("\n\n", out).strip()
 
 
-def open_url(url: str, max_chars: int = MAX_CHARS, budget: float = FETCH_DEADLINE,
+def _open_url_direct(url: str, max_chars: int = MAX_CHARS, budget: float = FETCH_DEADLINE,
              hop_timeout: float = FETCH_TIMEOUT) -> str:
     """打开一个网址，把网页正文抓回来。
 
@@ -1025,3 +1025,18 @@ def open_url(url: str, max_chars: int = MAX_CHARS, budget: float = FETCH_DEADLIN
 
     return f"这个链接跳了 {MAX_REDIRECTS} 次还没走到正经页面，助手不跟了"
 
+
+
+_OPEN_URL_FAIL_HEADS = ("打不开这个链接", "这个链接太慢", "这个链接跳转到了不给开",
+                        "这个链接在几个地址之间来回跳", "网页打开了，但里面没抓到正文",
+                        "这个链接是 PDF", "这个链接不是网页", "没给网址")
+
+
+def open_url(url: str, max_chars: int = MAX_CHARS, budget: float = FETCH_DEADLINE,
+             hop_timeout: float = FETCH_TIMEOUT) -> str:
+    text = (_open_url_direct(url, max_chars=max_chars, budget=budget,
+                             hop_timeout=hop_timeout) or "").strip()
+    if not text.startswith(_OPEN_URL_FAIL_HEADS):
+        return text
+    return (text + "\n\n（还没结束：继续试 browser_open → ultra_fetch；"
+            "不要只因为 open_url 失败就告诉用户打不开。）")

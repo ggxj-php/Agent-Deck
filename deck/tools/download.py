@@ -13,7 +13,8 @@ import secrets
 import threading
 import time
 
-from ..sandbox import WORKSPACE, safe_path
+from .. import sandbox
+from ..sandbox import safe_path
 
 TTL_SECONDS = 20 * 60          # 20 分钟后失效
 MAX_ENTRIES = 500              # 内存里最多留这么多条，超出按最早丢
@@ -53,7 +54,7 @@ def sweep(now=None):
 
 def _looks_inside(rel_path, full):
     """确认解析后的真实路径还在 workspace 里（防符号链接跳出）。"""
-    root = os.path.realpath(WORKSPACE)
+    root = os.path.realpath(sandbox.user_workspace())
     return os.path.realpath(full).startswith(root + os.sep)
 
 
@@ -91,7 +92,7 @@ def make_download_link(path: str) -> str:
     if size > 50 * 1024 * 1024:
         return json.dumps({"error": "文件超过 50MB，不方便走临时链接"}, ensure_ascii=False)
 
-    rel = os.path.relpath(full, WORKSPACE).replace(os.sep, "/")
+    rel = os.path.relpath(full, sandbox.user_workspace()).replace(os.sep, "/")
     name = os.path.basename(full)
     token = secrets.token_hex(16)
     owner = current_owner()

@@ -9,6 +9,7 @@ from deck import sandbox
 @pytest.fixture(autouse=True)
 def workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(sandbox, "WORKSPACE", str(tmp_path))
+    sandbox.set_owner(1)
     return tmp_path
 
 
@@ -19,7 +20,7 @@ def test_相对路径能解析(workspace):
 
 
 def test_根目录本身可以(workspace):
-    assert sandbox.safe_path("") == os.path.realpath(str(workspace))
+    assert sandbox.safe_path("") == os.path.realpath(str(sandbox.user_workspace()))
 
 
 @pytest.mark.parametrize("bad", [
@@ -42,7 +43,9 @@ def test_波浪号不展开只当普通目录名(workspace):
 def test_软链接指向外面被拒(workspace):
     outside = workspace.parent / "secret.txt"
     outside.write_text("secret", encoding="utf-8")
-    link = workspace / "link.txt"
+    root = sandbox.user_workspace()
+    os.makedirs(root, exist_ok=True)
+    link = os.path.join(root, "link.txt")
     try:
         os.symlink(outside, link)
     except (OSError, NotImplementedError):

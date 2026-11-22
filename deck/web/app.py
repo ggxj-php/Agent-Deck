@@ -598,9 +598,9 @@ def get_upload(image_id: str, request: Request):
     """
     user = _user_of(request)
     owner = uploads.owner_of(image_id)
-    if owner is not None and int(owner) != int(user["id"]):
+    if owner is None or int(owner) != int(user["id"]):
         raise HTTPException(status_code=404, detail="图片不存在")
-    url = uploads.data_url(image_id)
+    url = uploads.data_url(image_id, owner=user["id"])
     if not url or "," not in url:
         raise HTTPException(status_code=404, detail="图片过期了")
     header, payload = url.split(",", 1)
@@ -723,7 +723,7 @@ def chat(req: ChatRequest, request: Request):
     file_marks = []
     for item in (req.files or [])[:uploads.FILE_MAX_COUNT]:
         fid = str((item or {}).get("id") or "")
-        info = uploads.file_info(fid)
+        info = uploads.file_info(fid, owner=user["id"])
         if not info:
             continue
         file_marks.append(

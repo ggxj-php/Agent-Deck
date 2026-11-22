@@ -8,7 +8,10 @@ PDF 和 Word 里的**文字**直接抽出来；抽不出文字的图（扫描页
 看图按张计费，所以默认每次最多描述 3 张；额度用完只报还剩几张，不再调用。
 """
 import base64
+import hashlib
 import os
+from collections import OrderedDict
+from threading import Lock
 
 from .. import llm, settings
 from ..sandbox import safe_path
@@ -19,12 +22,27 @@ MIN_IMAGE_BYTES = 6 * 1024         # 太小的多半是图标 / 装饰，不值�
 DEFAULT_MAX_IMAGES = 3             # 单次最多描述几张图
 HARD_MAX_IMAGES = 10
 DEFAULT_PAGE_CAP = 12              # 不给 pages 时最多读多少页
-VISION_MAX_TOKENS = 600
+VISION_MAX_TOKENS = int(os.environ.get("VISION_MAX_TOKENS", "3000"))
+VISION_MAX_SIDE = int(os.environ.get("VISION_MAX_SIDE", "3000"))
+VISION_JPEG_QUALITY = int(os.environ.get("VISION_JPEG_QUALITY", "92"))
 
-DEFAULT_IMAGE_PROMPT = (
-    "用中文简要描述这张图的内容。如果有文字，把关键文字也抄出来；"
-    "如果是图表，说明它画的是什么、有哪些关键数据。200 字以内，不要客套。"
+# 同一张图 + 同一个 prompt 的视觉结果缓存。模型在长会话里很容易重复 read_img，
+# 每次都要重新走视觉模型（慢、按张计费）；缓存后重复调用直接返回。
+_IMG_CACHE = OrderedDict()
+_IMG_CACHE_LOCK = Lock()
+_IMG_CACHE_MAX = 64
+
+TRANSCRIBE_INSTRUCTION = (
+    "完整、逐字转录图片里所有可见内容：题目、选项、填空、手写答案、公式、符号、"
+    "表格每一行每一列、图表标题和坐标轴，保持原有顺序和题号。"
+    "不要摘要、不要省略、不要只写要点、不要客套；看不清的字用「□」标出。"
+    "数学公式里的上下标、分位数、自由度必须逐字保留：例如 χ²_{0.975}(21) 不能写成 χ²_{0.05}(21)，"
+    "t_{0.2}(6) 不能写成 t_{0.1}(6)，χ²_{0.01}(42) 不能漏掉 42；看不清就列入下面的位置。"
+    "如果任何字、公式、表格或手写答案看不清，不要猜：在转录末尾单独写「看不清的位置：」，"
+    "写清题号、第几行/第几列/哪个字段、大致在图片的哪个区域，并明确建议用户重拍该位置。"
+    "如果图片几乎没有文字，再详细描述画面和图表内容。"
 )
+DEFAULT_IMAGE_PROMPT = TRANSCRIBE_INSTRUCTION
 
 
 def _sniff_mime(data):
@@ -52,15 +70,16 @@ def _prepare_image(data):
     try:
         import io
 
-        from PIL import Image
+        from PIL import Image, ImageOps
 
         img = Image.open(io.BytesIO(data))
+        img = ImageOps.exif_transpose(img)
         if img.mode not in ("RGB", "L"):
             img = img.convert("RGB")
-        if max(img.size) > 1600:
-            img.thumbnail((1600, 1600))
+        if max(img.size) > VISION_MAX_SIDE:
+            img.thumbnail((VISION_MAX_SIDE, VISION_MAX_SIDE))
         buf = io.BytesIO()
-        img.save(buf, "JPEG", quality=85)
+        img.save(buf, "JPEG", quality=VISION_JPEG_QUALITY)
         out = buf.getvalue()
         return out if len(out) < len(data) else data
     except Exception:                              # noqa: BLE001
@@ -77,15 +96,24 @@ def _describe_image(data, prompt=""):
         return None, "格式认不出来（不是常见图片）"
     if len(data) > MAX_IMAGE_BYTES:
         return None, f"{len(data)} 字节，超过 {MAX_IMAGE_BYTES} 上限（和聊天发图一致）"
+    extra = (prompt or "").strip()
+    ask = TRANSCRIBE_INSTRUCTION
+    if extra:
+        ask += "\n\n用户额外关注：" + extra + "（仍然要先把整张图完整转录，不要只回答这一点）"
+    key = hashlib.sha256(data).hexdigest() + "|" + ask
+    with _IMG_CACHE_LOCK:
+        cached = _IMG_CACHE.get(key)
+        if cached:
+            _IMG_CACHE.move_to_end(key)
+            return cached, ""
     url = "data:" + mime + ";base64," + base64.b64encode(data).decode("ascii")
-    ask = (prompt or "").strip() or DEFAULT_IMAGE_PROMPT
     try:
         text = llm.complete(
             [{
                 "role": "user",
                 "content": [
                     {"type": "text", "text": ask},
-                    {"type": "image_url", "image_url": {"url": url}},
+                    {"type": "image_url", "image_url": {"url": url, "detail": "high"}},
                 ],
             }],
             model=settings.vision_model(),
@@ -97,6 +125,12 @@ def _describe_image(data, prompt=""):
     except Exception as exc:                       # noqa: BLE001
         return None, f"视觉模型调用失败：{exc}"
     text = (text or "").strip()
+    if text:
+        with _IMG_CACHE_LOCK:
+            _IMG_CACHE[key] = text
+            _IMG_CACHE.move_to_end(key)
+            while len(_IMG_CACHE) > _IMG_CACHE_MAX:
+                _IMG_CACHE.popitem(last=False)
     if not text:
         return None, "视觉模型没返回内容"
     return text, None
@@ -364,9 +398,10 @@ SPECS = [
         "function": {
             "name": "read_img",
             "description": (
-                "读取工作区 workspace 里的一张图片，交给视觉模型描述内容"
-                "（图里的文字、图表含义、画面内容）。和聊天里直接发图走同一套多模态配置。"
-                "支持 png/jpg/gif/webp/bmp，单张不超过 4MB。"
+                "读取工作区里的一张图片，做高分辨率逐字转录，不要摘要。"
+                "返回题目/选项/手写答案/公式/表格的完整文字；图片没有文字时再描述画面。"
+                "支持 png/jpg/gif/webp/bmp，单张不超过 4MB；同一张图同一 prompt 会复用缓存，"
+                "不要为了同一个目的反复读同一张图。"
             ),
             "parameters": {
                 "type": "object",
@@ -377,7 +412,7 @@ SPECS = [
                     },
                     "prompt": {
                         "type": "string",
-                        "description": "想重点看什么（可选），例如「这张表里第三列是什么」",
+                        "description": "额外关注点（可选）；无论如何都会先完整逐字转录整张图",
                     },
                 },
                 "required": ["path"],

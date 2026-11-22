@@ -69,14 +69,17 @@ def _message_tokens(message):
     """一条消息的估算值。带图的按一张图固定几百 token 算（图片那一轮跑完就被抹掉了）。"""
     content = message.get("content")
     total = 4  # 每条消息的角色、分隔符那点固定开销
+    def _is_data_image(text):
+        return isinstance(text, str) and "data:image/" in text and ";base64," in text
     if isinstance(content, str):
-        total += text_tokens(content)
+        total += 800 if _is_data_image(content) else text_tokens(content)
     elif isinstance(content, list):
         for part in content:
             if not isinstance(part, dict):
                 continue
             if part.get("type") == "text":
-                total += text_tokens(part.get("text") or "")
+                _t = part.get("text") or ""
+                total += 800 if _is_data_image(_t) else text_tokens(_t)
             elif part.get("type") == "image_url":
                 total += 800
     for call in message.get("tool_calls") or []:

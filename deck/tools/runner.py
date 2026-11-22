@@ -9,8 +9,9 @@ import tempfile
 import threading
 import time
 
+from .. import sandbox
 from ..config import CXX
-from ..sandbox import WORKSPACE, safe_path
+from ..sandbox import safe_path
 from . import _codescan
 
 SPECS = [
@@ -53,7 +54,8 @@ _PY_GUARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_pyguard.p
 
 # JS 没有钩子可用，改用 Node 自带的权限模型：只放开 workspace 的读写，
 # 不给 --allow-child-process / --allow-worker / --allow-addons，这些就都用不了
-_NODE_PERM = ["--permission", "--allow-fs-read=" + WORKSPACE, "--allow-fs-write=" + WORKSPACE]
+def _node_perm(root):
+    return ["--permission", "--allow-fs-read=" + root, "--allow-fs-write=" + root]
 
 # 子进程环境变量里这些字样的一律抹掉，免得模型能读到 API Key 之类的机密
 _SECRET_ENV = ("KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "AUTH")
@@ -99,7 +101,7 @@ def _kill_tree(proc):
 def _is_skill_script(full_path):
     """是不是装在 workspace/skills/ 下的技能脚本（技能是管理员装的、按信任代码处理）"""
     try:
-        rel = os.path.relpath(os.path.realpath(full_path), os.path.realpath(WORKSPACE))
+        rel = os.path.relpath(os.path.realpath(full_path), os.path.realpath(sandbox.WORKSPACE))
     except ValueError:
         return False
     return rel.replace(os.sep, "/").startswith("skills/")
@@ -122,9 +124,10 @@ def _exec(cmd: list, timeout: int, stdin: str = "", skill_script: bool = False):
         # 技能由管理员在后台从仓库安装并明确启用，按「受信任代码」处理；
         # 普通 workspace 脚本仍然禁 subprocess。
         env["DSH_SKILL_SCRIPT"] = "1"
+    root = sandbox.WORKSPACE if skill_script else sandbox.user_workspace()
     proc = subprocess.Popen(
         cmd,
-        cwd=WORKSPACE,
+        cwd=root,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -258,16 +261,19 @@ def run_code(path: str, args=None, stdin: str = "", timeout: int = RUN_TIMEOUT) 
     if blocked:
         return blocked
 
+    skill = _is_skill_script(full)
+    root = sandbox.WORKSPACE if skill else sandbox.user_workspace()
     if ext == ".py":
         code, out = _exec(
-            [sys.executable, _PY_GUARD, WORKSPACE, full] + args, timeout, stdin,
-            skill_script=_is_skill_script(full),
+            [sys.executable, _PY_GUARD, root, full] + args, timeout, stdin,
+            skill_script=skill,
         )
         return out if code is None else f"退出码 {code}\n{_shorten(out)}"
 
     if ext in _RUNNERS:
-        perm = _NODE_PERM if ext in (".js", ".mjs") else []
-        code, out = _exec(_RUNNERS[ext] + perm + [full] + args, timeout, stdin)
+        perm = _node_perm(root) if ext in (".js", ".mjs") else []
+        code, out = _exec(_RUNNERS[ext] + perm + [full] + args, timeout, stdin,
+                          skill_script=skill)
         return out if code is None else f"退出码 {code}\n{_shorten(out)}"
 
     if ext in (".cpp", ".cc", ".cxx", ".c"):

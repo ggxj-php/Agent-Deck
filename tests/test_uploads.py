@@ -12,7 +12,7 @@ from deck import uploads
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
-    monkeypatch.setattr(uploads, "UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setattr(uploads, "upload_dir", lambda owner=None: str(tmp_path / "uploads"))
     monkeypatch.setattr(uploads, "INDEX_PATH", str(tmp_path / "index.json"))
     return tmp_path
 

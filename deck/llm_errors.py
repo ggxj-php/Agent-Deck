@@ -109,6 +109,18 @@ def _retry_after(body, exc):
     return 0.0
 
 
+_TRANSIENT_429_RES = (
+    re.compile(r"上游负载|分组[^。\n]{0,8}饱和|负载已饱和|请稍后再试", re.I),
+    re.compile(r"overloaded|saturated|temporarily\s+unavailable|try\s+again\s+later", re.I),
+    re.compile(r"\bbusy\b|\bcapacity\b|rate\s+limit", re.I),
+)
+
+
+def _looks_like_transient_429(detail):
+    """429 里常见的“上游饱和/稍后重试”，是限流，不是余额没了。"""
+    return any(rx.search(str(detail or "")) for rx in _TRANSIENT_429_RES)
+
+
 _RATE_QUOTA_RES = (
     re.compile(r"allocated\s+quota\s+exceeded", re.I),
     re.compile(r"please\s+increase\s+your\s+quota\s+limit", re.I),
@@ -177,9 +189,14 @@ def classify(exc):
         code = RATE_LIMIT
         if retry_after <= 0:
             retry_after = 62.0
+    elif status == 429 and _looks_like_transient_429(detail):
+        # 有些上游把“分组负载已饱和”也塞进 insufficient_quota 里；
+        # 这不是余额耗尽，是瞬时过载，应该退避重试。
+        code = RATE_LIMIT
+        if retry_after <= 0:
+            retry_after = 5.0
     elif _looks_like_quota(detail) or status == 402:
-        # 注意：DSH 也是先判额度再判限流。阿里的 429 insufficient_quota 属于这一档，
-        # 重试多少次都没用，直接告诉用户去查配额。
+        # 真正的额度耗尽（没有“稍后再试/上游饱和”字样）才是终态。
         code = QUOTA
     elif status == 429 or type_ == "rate_limit_error" or code_ in ("rate_limit", "rate_limit_error"):
         code = RATE_LIMIT

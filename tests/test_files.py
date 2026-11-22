@@ -8,7 +8,7 @@ from deck.tools import files
 @pytest.fixture(autouse=True)
 def workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(sandbox, "WORKSPACE", str(tmp_path))
-    monkeypatch.setattr(files, "WORKSPACE", str(tmp_path))
+    sandbox.set_owner(1)
     return tmp_path
 
 

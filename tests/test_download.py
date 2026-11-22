@@ -3,12 +3,14 @@ import json
 import os
 import time
 
+from deck import sandbox
 from deck.tools import download
 
 
-def test_正常生成链接(tmp_path):
+def test_正常生成链接(tmp_path, monkeypatch):
+    monkeypatch.setattr(sandbox, "WORKSPACE", str(tmp_path))
     download.set_owner(1)
-    path = os.path.join(download.WORKSPACE, "notes")
+    path = os.path.join(sandbox.user_workspace(), "notes")
     os.makedirs(path, exist_ok=True)
     file = os.path.join(path, "a.txt")
     with open(file, "w") as fp:
@@ -26,20 +28,22 @@ def test_不允许越界路径():
         assert "error" in out, bad
 
 
-def test_别人打不开():
+def test_别人打不开(tmp_path, monkeypatch):
+    monkeypatch.setattr(sandbox, "WORKSPACE", str(tmp_path))
     download.set_owner(1)
-    os.makedirs(os.path.join(download.WORKSPACE, "notes"), exist_ok=True)
-    with open(os.path.join(download.WORKSPACE, "notes", "b.txt"), "w") as fp:
+    os.makedirs(os.path.join(sandbox.user_workspace(), "notes"), exist_ok=True)
+    with open(os.path.join(sandbox.user_workspace(), "notes", "b.txt"), "w") as fp:
         fp.write("x")
     token = json.loads(download.make_download_link("notes/b.txt"))["url"].split("/")[-1]
     assert download.lookup(token, 1) is not None
     assert download.lookup(token, 2) is None       # 其他用户
 
 
-def test_过期失效():
+def test_过期失效(tmp_path, monkeypatch):
+    monkeypatch.setattr(sandbox, "WORKSPACE", str(tmp_path))
     download.set_owner(1)
-    os.makedirs(os.path.join(download.WORKSPACE, "notes"), exist_ok=True)
-    with open(os.path.join(download.WORKSPACE, "notes", "c.txt"), "w") as fp:
+    os.makedirs(os.path.join(sandbox.user_workspace(), "notes"), exist_ok=True)
+    with open(os.path.join(sandbox.user_workspace(), "notes", "c.txt"), "w") as fp:
         fp.write("x")
     token = json.loads(download.make_download_link("notes/c.txt"))["url"].split("/")[-1]
     download._LINKS[token]["expires"] = time.time() - 1

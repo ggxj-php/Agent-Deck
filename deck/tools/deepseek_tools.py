@@ -77,7 +77,7 @@ def ultra_fetch(url: str) -> str:
 SPECS = [
     {"type": "function", "function": {
         "name": "ultra_search",
-        "description": "究极兜底搜索（付费）：常规 web_search 结果跑题/被墙/明显不可靠时再用。返回权威度更高的结果和长摘要。**搜到结果后别只看摘要，挑最相关的 1~2 条读正文（优先 open_url，打不开/内容不对再用 ultra_fetch）。**",
+        "description": "究极兜底搜索（付费）：常规 web_search 结果跑题/被墙/明显不可靠时再用。返回权威度更高的结果和长摘要。**搜到结果后别只看摘要；这一轮既然已经用了 ultra_search，挑最相关的 1~2 条读正文时优先直接用 ultra_fetch。**",
         "parameters": {"type": "object", "properties": {
             "query": {"type": "string", "description": "搜索词（1~128 字，支持 site: / -site: / 引号）"},
             "count": {"type": "integer", "description": "返回条数，默认 8，最多 20"},
@@ -85,7 +85,7 @@ SPECS = [
             "required": ["query"]}}},
     {"type": "function", "function": {
         "name": "ultra_fetch",
-        "description": "究极兜底抓取（付费）：把网页抓成 Markdown 正文。**最后一层兜底**——open_url 打不开/被拦/抓回来内容不对时用它；也可以在 ultra_search 之后用来读结果页正文。",
+        "description": "究极兜底抓取（付费）：把网页抓成 Markdown 正文。打开链接的正常链路是 open_url → browser_open，**这两个都不行才用本工具**。但如果这一轮已经用过 ultra_search，读它的结果链接要**优先用本工具**，不要再用前两个重试。",
         "parameters": {"type": "object", "properties": {
             "url": {"type": "string", "description": "http/https 网址"}}, "required": ["url"]}}},
 ]
