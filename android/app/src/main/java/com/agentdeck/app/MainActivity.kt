@@ -25,6 +25,7 @@ import com.agentdeck.app.ui.ChatViewModel
 import com.agentdeck.app.ui.LoginScreen
 import com.agentdeck.app.ui.SplashScreen
 import com.agentdeck.app.ui.components.ImagePreviewHost
+import com.agentdeck.app.ui.components.LatexPreviewHost
 import com.agentdeck.app.ui.components.TablePreviewHost
 import com.agentdeck.app.ui.theme.DeckTheme
 
@@ -86,6 +87,8 @@ class MainActivity : ComponentActivity() {
                         ImagePreviewHost()
                         // 全屏看表格：同一个窗口，insets 跟聊天界面一致
                         TablePreviewHost()
+                        // 全屏看宽公式（点一下公式卡片进来）
+                        LatexPreviewHost()
                     }
                 }
             }

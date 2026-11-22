@@ -576,19 +576,22 @@ private fun MdBlockView(
         )
 
         is MdBlock.MathBlock -> {
-            // 公式卡片只包公式本身；「可左右滑动」提示由 WideScrollHint 画在卡片下方，
+            // 公式卡片只包公式本身；「点击放大查看」提示由 WideFormulaHint 画在卡片下方，
             // 免得卡片为了塞一行小字被撑高、提示又贴在右下圆角上像脚注。
-            val wideState = remember(block.latex) { WideScrollState() }
+            val wideState = remember(block.latex) { WideFormulaState() }
+            val open = { LatexPreview.show(block.latex) }
             Column(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
                         .background(palette.softFill)
+                        // 只有超宽公式才整块可点：短公式点一下弹全屏属于误触
+                        .then(if (wideState.active) Modifier.clickable { open() } else Modifier)
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    // panWhenWide：长公式按原尺寸画、左右滑动，不再为塞进屏宽把字压成一条
+                    // panWhenWide：长公式按 1:1 原尺寸画，超宽的部分裁掉并提示点开放大
                     LatexImage(
                         latex = block.latex,
                         palette = palette,
@@ -597,7 +600,7 @@ private fun MdBlockView(
                         wideState = wideState,
                     )
                 }
-                WideScrollHint(wideState, palette)
+                WideFormulaHint(wideState, palette) { open() }
             }
         }
 

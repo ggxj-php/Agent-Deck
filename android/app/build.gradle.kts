@@ -35,8 +35,8 @@ android {
         applicationId = "com.agentdeck.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 30
-        versionName = "1.18.11"
+        versionCode = 31
+        versionName = "1.18.12"
     }
 
     // 品牌覆盖：app/src/local/ 放私有名字和头像图标（该目录已被 gitignore 忽略），

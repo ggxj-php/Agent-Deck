@@ -4,10 +4,9 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.util.Log
 import android.util.LruCache
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -17,13 +16,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,8 +32,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -192,36 +189,31 @@ internal fun sanitizeLatex(latex: String): String {
 private val fadeWidth = 18.dp
 
 /**
- * 宽公式的横滑状态，由 [LatexImage] 写、[WideScrollHint] 读。
+ * 宽公式的状态：要不要在卡片下方提示「点击放大查看」。
  *
- * 为什么要绕这一道：提示文字早先画在公式卡片**里面**（滚动区下方的常驻行），
- * 结果粉色卡片为了塞这行小字被撑高一条空白，字还紧贴在右下圆角上，看着像公式
- * 自带的一行脚注——用户的原话是「这里不太适配」。现在卡片只包公式，提示由调用
- * 方画在卡片外面（[WideScrollHint]），所以状态得往外提一层。
+ * 为什么不再做行内横滑：`horizontalScroll` 嵌在 `LazyColumn` 里，两套 scrollable
+ * 靠 touchSlop 的方向判定争手势——手指起手带一点竖直分量、或者按在卡片留白处
+ * （根本没落在滚动区里），事件就被纵向列表拿走了，表现就是「有时候根本划不动」，
+ * 而且 `systemGestureExclusion` 在全面屏手势下也未必保得住边缘那几十 dp。
+ * 现在改成点一下开全屏，全屏里只有公式自己，没有纵向列表抢手势。
  */
-class WideScrollState {
-    /** 这张公式是否真的要横滑（装得下就没有提示）。 */
+class WideFormulaState {
+    /** 这张公式是否超宽（只有超宽时才值得点开放大）。 */
     var active by mutableStateOf(false)
-
-    /** 是否还停在最左边：停着才提示「可以往右滑」，滑过就收起。 */
-    var atStart by mutableStateOf(true)
 }
 
 /**
- * 宽公式的滑动提示：一行 10.5sp 小字，画在公式卡片**下方**。
+ * 宽公式的放大提示：一行 10.5sp 小字 + 自绘放大镜，画在公式卡片**下方**。
  *
- * 高度在 [WideScrollState.active] 时恒定为 15dp：滑到底收起文字时不会把下面的
- * 内容顶上去（拖动途中跳一下比留着一条空白更难接受）。公式不宽时整行不存在，
- * 普通短公式下面不会多出空隙。
+ * 高度恒定为 15dp，公式不宽时整行不存在，普通短公式下面不会多出空隙。
  */
 @Composable
-internal fun WideScrollHint(state: WideScrollState, palette: DeckPalette) {
+internal fun WideFormulaHint(
+    state: WideFormulaState,
+    palette: DeckPalette,
+    onClick: () -> Unit,
+) {
     if (!state.active) return
-    // 滑过之后不是「啪」一下消失，淡出更顺眼；高度始终占着，不影响下面的位置
-    val alpha by animateFloatAsState(
-        targetValue = if (state.atStart) 1f else 0f,
-        label = "wide-hint",
-    )
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -230,14 +222,12 @@ internal fun WideScrollHint(state: WideScrollState, palette: DeckPalette) {
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.graphicsLayer { this.alpha = alpha },
+            modifier = Modifier.clickable(onClick = onClick).padding(start = 6.dp),
         ) {
-            // 不用「↔」字符：中文/符号字体的回落字形比正文字号小一圈、基线还偏低，
-            // 摆在「可左右滑动」旁边像掉下去半个字。自己画一个，粗细和字号都对得上。
-            ScrollArrow(color = palette.inkSoft.copy(alpha = 0.8f))
+            ZoomIcon(color = palette.inkSoft.copy(alpha = 0.8f))
             Spacer(Modifier.width(4.dp))
             Text(
-                text = "可左右滑动",
+                text = "点击放大查看",
                 fontSize = 10.5.sp,
                 color = palette.inkSoft.copy(alpha = 0.8f),
             )
@@ -245,25 +235,30 @@ internal fun WideScrollHint(state: WideScrollState, palette: DeckPalette) {
     }
 }
 
-/** 双向箭头（← →合在一起），给「可左右滑动」提示用。 */
+/** 放大镜图标：一个圆 + 斜柄 + 圆内一个「+」。 */
 @Composable
-private fun ScrollArrow(
+private fun ZoomIcon(
     color: Color,
-    width: Dp = 12.dp,
-    height: Dp = 8.dp,
+    size: Dp = 11.dp,
 ) {
-    Canvas(modifier = Modifier.size(width, height)) {
-        val stroke = 1.1.dp.toPx()
-        val cy = size.height / 2f
-        val left = 0.55.dp.toPx()
-        val right = size.width - 0.55.dp.toPx()
-        val head = 2.2.dp.toPx()
-        val wing = head * 0.72f
-        drawLine(color, Offset(left, cy), Offset(right, cy), strokeWidth = stroke, cap = StrokeCap.Round)
-        drawLine(color, Offset(left + head, cy - wing), Offset(left, cy), strokeWidth = stroke, cap = StrokeCap.Round)
-        drawLine(color, Offset(left + head, cy + wing), Offset(left, cy), strokeWidth = stroke, cap = StrokeCap.Round)
-        drawLine(color, Offset(right - head, cy - wing), Offset(right, cy), strokeWidth = stroke, cap = StrokeCap.Round)
-        drawLine(color, Offset(right - head, cy + wing), Offset(right, cy), strokeWidth = stroke, cap = StrokeCap.Round)
+    Canvas(modifier = Modifier.size(size)) {
+        val sw = 1.1.dp.toPx()
+        val r = this.size.width * 0.31f
+        val c = Offset(this.size.width * 0.42f, this.size.height * 0.42f)
+        drawCircle(color, radius = r, center = c, style = Stroke(width = sw))
+        // 手柄：从圆的 45° 方向往外
+        val d = r * 0.72f
+        drawLine(
+            color,
+            Offset(c.x + d, c.y + d),
+            Offset(this.size.width * 0.94f, this.size.height * 0.94f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round,
+        )
+        // 圆里的加号
+        val arm = r * 0.45f
+        drawLine(color, Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), strokeWidth = sw * 0.9f, cap = StrokeCap.Round)
+        drawLine(color, Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), strokeWidth = sw * 0.9f, cap = StrokeCap.Round)
     }
 }
 
@@ -273,10 +268,14 @@ private fun ScrollArrow(
  * [panWhenWide] 只给**独立成块的显示公式**（`$$...$$`）用：那种公式常常一路排到
  * 两三个屏宽，若按 `ContentScale.Fit` 缩进屏宽，一张 900px 高的式子会被压成
  * 一条几像素高的灰带，字全糊在一起（用户的原话是「挤在一条里，太小了看不清」）。
- * 打开后改为**按 1:1 原尺寸绘制，超宽时左右滑动**，和网页端 `overflow-x:auto` 一致。
- * 行内公式不能开：段落里一个公式跟着可左右滑，会和整页竖滑抢手感。
+ * 打开后**按 1:1 原尺寸绘制**，超出屏宽的部分裁掉、右端渐隐，并提示「点击放大查看」。
  *
- * [wideState] 传进来时会把「能不能滑 / 滑到哪」写进去，由调用方决定提示画在哪里。
+ * 早先是就地横滑（`horizontalScroll`），但在聊天列表里经常划不动：横向滚动和
+ * `LazyColumn` 的纵向滚动要靠 touchSlop 的方向判定争手势，起手稍微斜一点、或者
+ * 按在卡片留白处（没落进滚动区），事件就被列表拿走了。现在改成点开全屏看，
+ * 全屏里只有公式自己，手势不再打架。
+ *
+ * [wideState] 传进来时会把「是不是超宽」写进去，由调用方决定提示画在哪里、能不能点。
  */
 @Composable
 fun LatexImage(
@@ -286,7 +285,7 @@ fun LatexImage(
     textSize: Int = 17,
     panWhenWide: Boolean = false,
     fadeColor: Color = Color.Transparent,
-    wideState: WideScrollState? = null,
+    wideState: WideFormulaState? = null,
 ) {
     val density = LocalDensity.current
     val sizePx = with(density) { textSize.sp.toPx() }.toInt()
@@ -325,95 +324,60 @@ fun LatexImage(
                     val wDp = with(density) { bitmap!!.width.toDp() }
                     val hDp = with(density) { bitmap!!.height.toDp() }
                     val ratio = if (wDp.value > 0f) hDp.value / wDp.value else 1f
-                    // 轻微超宽（缩不到 18%）就还按屏宽缩一缩：为此让用户滑一次不值得
+                    // 轻微超宽（缩不到 18%）就还按屏宽缩一缩：这种式子放大看也多不出多少信息
                     val fitScale = if (wDp.value > 0f) maxWidth.value / wDp.value else 1f
-                    val needsScroll = wDp > maxWidth && fitScale < 0.82f
+                    val needsExpand = wDp > maxWidth && fitScale < 0.82f
 
-                    val scroll = rememberScrollState()
-                    val atStart by remember(scroll) {
-                        derivedStateOf { scroll.value <= 0 }
-                    }
-                    val atEnd by remember(scroll) {
-                        derivedStateOf { scroll.value >= scroll.maxValue }
-                    }
-
-                    // 把状态交给外面：提示画在卡片下方（见 WideScrollHint），不挤在卡片里。
-                    // 注意这里必须先在本函数体里读一次 atStart——只在 SideEffect 的 lambda 里读
-                    // 是不订阅的，滚动再多也不会重组，外面那行提示会一直挂着（真机上就是这个现象）。
-                    val startNow = atStart
-                    val scrollNow = needsScroll
-                    SideEffect {
-                        wideState?.active = scrollNow
-                        wideState?.atStart = if (scrollNow) startNow else true
-                    }
+                    // 只有超宽时才提示「点击放大」，普通短公式下面不多这一行
+                    SideEffect { wideState?.active = needsExpand }
 
                     when {
-                        // 装得下就原尺寸居中放，别给用户一个白滑的滚动条
-                        !needsScroll && wDp <= maxWidth -> Image(
+                        // 装得下就原尺寸居中放
+                        !needsExpand && wDp <= maxWidth -> Image(
                             bitmap = image,
                             contentDescription = latex,
                             contentScale = ContentScale.Fit,
                         )
 
-                        !needsScroll -> Image(
+                        !needsExpand -> Image(
                             bitmap = image,
                             contentDescription = latex,
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.size(maxWidth, (maxWidth.value * ratio).dp),
                         )
 
+                        // 超宽：按 1:1 画、右边裁掉一截（右侧渐隐），点一下开全屏看。
+                        // 这里再也不放 horizontalScroll——列表里那一层纵向滚动会把它抢掉。
                         else -> Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                // 两侧渐隐直接在绘制阶段画。原来是用两个 fillMaxHeight() 的
-                                // 兄弟 Box 叠上去——聊天列表是纵向无界的，父级 maxHeight 是
-                                // Infinity，fillMaxHeight 拿不到高度，那两个渐变一直是 0 高，
-                                // 屏幕上就是公式被硬切一刀（用户说的「像截断了」）。
+                                .height(hDp)
+                                .clipToBounds()
                                 .drawWithContent {
                                     drawContent()
                                     if (fadeColor.alpha > 0f) {
                                         val w = fadeWidth.toPx()
-                                        // 末端必须画到完全不透明：只到 0.92 的话，裁切线那里还留着
-                                        // 一层 8% 的墨迹，看着仍然是一刀切断的硬边。
+                                        // 末端画到完全不透明：只到 0.92 的话裁切线那里还留着
+                                        // 一层 8% 的墨迹，看着仍然像被硬切了一刀
                                         val fade = fadeColor.copy(alpha = 1f)
-                                        if (!atEnd) {
-                                            drawRect(
-                                                brush = Brush.horizontalGradient(
-                                                    listOf(Color.Transparent, fade),
-                                                    startX = size.width - w,
-                                                    endX = size.width,
-                                                ),
-                                                topLeft = Offset(size.width - w, 0f),
-                                                size = Size(w, size.height),
-                                            )
-                                        }
-                                        if (!atStart) {
-                                            drawRect(
-                                                brush = Brush.horizontalGradient(
-                                                    listOf(fade, Color.Transparent),
-                                                    startX = 0f,
-                                                    endX = w,
-                                                ),
-                                                size = Size(w, size.height),
-                                            )
-                                        }
+                                        drawRect(
+                                            brush = Brush.horizontalGradient(
+                                                listOf(Color.Transparent, fade),
+                                                startX = size.width - w,
+                                                endX = size.width,
+                                            ),
+                                            topLeft = Offset(size.width - w, 0f),
+                                            size = Size(w, size.height),
+                                        )
                                     }
                                 },
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(scroll)
-                                    // 从屏幕边缘起手横滑时，别让系统的返回手势把它吃掉
-                                    .systemGestureExclusion(),
-                            ) {
-                                Image(
-                                    bitmap = image,
-                                    contentDescription = latex,
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier.size(wDp, hDp),
-                                )
-                            }
+                            Image(
+                                bitmap = image,
+                                contentDescription = latex,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.size(wDp, hDp),
+                            )
                         }
                     }
                 }
