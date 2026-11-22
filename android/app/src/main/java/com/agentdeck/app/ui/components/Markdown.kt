@@ -586,8 +586,13 @@ private fun MdBlockView(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
                         .background(palette.softFill)
-                        // 只有超宽公式才整块可点：短公式点一下弹全屏属于误触
-                        .then(if (wideState.active) Modifier.clickable { open() } else Modifier)
+                        // 所有显示公式都能点开全屏。
+                        //
+                        // 早先只给「明显超宽」的挂点击，结果是同样是粉色卡片，有的点得动、
+                        // 有的点不动，而外观上完全看不出差别——用户的原话是「这点击放大为啥
+                        // 有的好使有的不好使」。一致比「防误触」重要：反正 tap 才触发，
+                        // 手指带位移就是列表滚动，不会误开。
+                        .clickable { open() }
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                     contentAlignment = Alignment.Center,
                 ) {

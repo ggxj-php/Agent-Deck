@@ -205,7 +205,9 @@ class WideFormulaState {
 /**
  * 宽公式的放大提示：一行 10.5sp 小字 + 自绘放大镜，画在公式卡片**下方**。
  *
- * 高度恒定为 15dp，公式不宽时整行不存在，普通短公式下面不会多出空隙。
+ * 高度恒定为 20dp，公式不宽时整行不存在，普通短公式下面不会多出空隙。
+ * 点区比字形大一圈（外面 3dp、右侧 6dp 的内边距都算在 clickable 里）：
+ * 一行 11dp 高的灰字太难点中，用户会以为「点了没反应」，而实际上只是差两个像素。
  */
 @Composable
 internal fun WideFormulaHint(
@@ -217,12 +219,14 @@ internal fun WideFormulaHint(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(15.dp),
+            .height(20.dp),
         contentAlignment = Alignment.CenterEnd,
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.clickable(onClick = onClick).padding(start = 6.dp),
+            modifier = Modifier
+                .clickable(onClick = onClick)
+                .padding(horizontal = 6.dp, vertical = 3.dp),
         ) {
             ZoomIcon(color = palette.inkSoft.copy(alpha = 0.8f))
             Spacer(Modifier.width(4.dp))
@@ -324,12 +328,18 @@ fun LatexImage(
                     val wDp = with(density) { bitmap!!.width.toDp() }
                     val hDp = with(density) { bitmap!!.height.toDp() }
                     val ratio = if (wDp.value > 0f) hDp.value / wDp.value else 1f
-                    // 轻微超宽（缩不到 18%）就还按屏宽缩一缩：这种式子放大看也多不出多少信息
+                    // 按屏宽能缩到几成
                     val fitScale = if (wDp.value > 0f) maxWidth.value / wDp.value else 1f
+                    // 渲染路径用「缩不下 18%」这个偏保守的门槛：只超一点的式子按屏宽
+                    // 缩一缩还看得清，为它截掉右边反而浪费空间。
                     val needsExpand = wDp > maxWidth && fitScale < 0.82f
+                    // 但「要不要提示能放大」不能跟它用同一个门槛。早先两处共用一个值，
+                    // 于是比卡片宽一点点（1.0~1.2 倍）的式子既不提示、也点不动——
+                    // 用户看着和别的卡片一模一样，点下去没反应，就是「有的好使有的不好使」。
+                    // 现在只要超出可用宽度就提示，窄的虽不提示但也能点。
+                    val overflow = wDp > maxWidth
 
-                    // 只有超宽时才提示「点击放大」，普通短公式下面不多这一行
-                    SideEffect { wideState?.active = needsExpand }
+                    SideEffect { wideState?.active = overflow }
 
                     when {
                         // 装得下就原尺寸居中放
