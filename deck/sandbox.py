@@ -42,7 +42,7 @@ def _reserved(name: str) -> bool:
     return base in _RESERVED
 
 
-def safe_path(path: str) -> str:
+def safe_path(path: str, owner=None) -> str:
     """把相对路径解析成 workspace 内的绝对路径，越界就抛 ValueError。
 
     比较时两边都过一遍 normcase：Windows 文件系统不区分大小写，而 IDE 传进来的
@@ -53,18 +53,18 @@ def safe_path(path: str) -> str:
             if seg and _reserved(seg):
                 raise ValueError(f"路径里含 Windows 保留设备名，不能当普通文件用：{path}")
     rel = os.path.normpath(str(path or "."))
+    owner = current_owner() if owner is None else owner
     # 共享技能目录：所有用户只读共用（run_code 的技能脚本靠它）
     if rel == "skills" or rel.startswith("skills" + os.sep):
         base = WORKSPACE
     elif rel == "browser" or rel.startswith("browser" + os.sep):
         base = os.path.join(WORKSPACE, "browser")
-        owner = current_owner()
         if owner is not None:
             parts = rel.split(os.sep)
             if len(parts) >= 2 and parts[1] not in (str(owner), ".."):
                 raise ValueError("不能访问其他用户的浏览器文件")
     else:
-        base = user_workspace()
+        base = user_workspace(owner)
     full = os.path.realpath(os.path.join(base, rel))
     root = os.path.normcase(base)
     target = os.path.normcase(full)

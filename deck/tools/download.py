@@ -52,9 +52,9 @@ def sweep(now=None):
     return removed
 
 
-def _looks_inside(rel_path, full):
-    """确认解析后的真实路径还在 workspace 里（防符号链接跳出）。"""
-    root = os.path.realpath(sandbox.user_workspace())
+def _looks_inside(rel_path, full, owner=None):
+    """确认解析后的真实路径还在该用户 workspace 里（防符号链接跳出）。"""
+    root = os.path.realpath(sandbox.user_workspace(owner))
     return os.path.realpath(full).startswith(root + os.sep)
 
 
@@ -116,9 +116,10 @@ def make_download_link(path: str) -> str:
 
 
 def file_path(item):
-    """给下载接口用：返回真实绝对路径（已校验在 workspace 内）。"""
-    full = safe_path(item["path"])
-    if not _looks_inside(item["path"], full):
+    """给下载接口用：按链接 owner 解析真实绝对路径，不能依赖 Web 线程的 owner。"""
+    owner = item.get("owner")
+    full = safe_path(item["path"], owner=owner)
+    if not _looks_inside(item["path"], full, owner=owner):
         return ""
     return full
 

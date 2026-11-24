@@ -9,7 +9,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import browser as browser_mod
-from . import context, ratelimit, sandbox, settings, uploads
+from . import context, ratelimit, sandbox, settings, skill_router, uploads
 from . import usage as usage_mod
 from .config import (
     CONTEXT_OVERFLOW_RETRIES,
@@ -256,6 +256,21 @@ def _sticker_moods(args):
 _IMAGE_MARK = re.compile(r"\[图片 #([0-9a-f]{6,32})")
 
 
+def _inject_skill_context(messages, skill):
+    """把预路由加载的 SKILL.md 追加到 system 消息；只改本次请求，不改历史。"""
+    note = (f"【服务端技能预路由】检测到本次任务匹配技能「{skill['name']}」，已自动加载。"
+            "必须优先按这个技能的流程做；不要重复 list_skills/load_skill。"
+            "如果本轮用户明确要求与技能冲突，以用户要求为准。\n\n" + skill["text"])
+    if skill.get("clipped"):
+        note += "\n\n（技能正文过长，已截断；需要细节再 read_skill_file。）"
+    out = [dict(m) for m in messages]
+    if out and out[0].get("role") == "system":
+        out[0]["content"] = (str(out[0].get("content") or "") + "\n\n" + note).strip()
+    else:
+        out.insert(0, {"role": "system", "content": note})
+    return out
+
+
 def _rehydrate(messages, max_images=3, window=2, owner=None):
     """把最近一两轮里带 [图片 #id] 标记的消息，重新塞回图片（多模态）。
 
@@ -426,6 +441,10 @@ class DeckAgent:
           done        {context}                    这一轮结束（附带当前上下文用量）
         """
         sandbox.set_owner(self.owner)
+        auto_skill = skill_router.route(user_input)
+        if auto_skill:
+            yield {"type": "notice",
+                   "text": f"已自动加载技能：{auto_skill['name']}，本轮按它来做。"}
         # 历史快把模型的上下文窗口填满时，先把旧的那段压成摘要（见 deck/context.py）。
         # 放在追加用户消息之前：这句刚说的话不该被压掉。压失败也照常往下走。
         squeezed = context.compress_if_needed(self.messages)
@@ -509,6 +528,8 @@ class DeckAgent:
                   try:
                     specs = active_specs(extra=("ask_user",) if self.interactive else ())
                     sent_messages = _sendable(_trim_history(_rehydrate(self.messages, owner=self.owner)))
+                    if auto_skill:
+                        sent_messages = _inject_skill_context(sent_messages, auto_skill)
                     # 上游有「每分钟 token 配额」：发之前先排队，别把额度一次打爆。
                     # 记账要把工具 schema + 系统提示也算进去（之前漏了，导致实际超支）
                     overhead = (len(json.dumps(specs, ensure_ascii=False))
