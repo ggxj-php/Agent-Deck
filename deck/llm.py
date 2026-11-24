@@ -212,7 +212,8 @@ def _consume_stream(stream, model):
 
 
 def stream_chat(messages: list, tools: list, model: str = "",
-                api_key: str = "", base_url: str = "", thinking: bool = True):
+                api_key: str = "", base_url: str = "", thinking: bool = True,
+                tool_choice=None):
     """流式发一次请求，边收边吐增量；出错按分类决定「重试 / 放弃 / 让上层压缩」。
 
     依次产出 ("thinking", 片段) / ("content", 片段) / ("tool_pending", 名字)，
@@ -234,8 +235,11 @@ def stream_chat(messages: list, tools: list, model: str = "",
 
     extra = _think_extra(thinking)
     kwargs = {"extra_body": extra} if extra else {}
+    if tool_choice:
+        kwargs["tool_choice"] = tool_choice
     attempt = 0
     dropped_extra = False
+    dropped_tool_choice = False
     while True:
         emitted = False
         try:
@@ -260,6 +264,12 @@ def stream_chat(messages: list, tools: list, model: str = "",
             if (err.code == INVALID and extra and not dropped_extra and not emitted):
                 dropped_extra = True
                 kwargs = {}
+                continue
+            # 有些代理/模型不认 tool_choice：去掉后重试一次，别让强制检索把整轮打挂。
+            if (err.code == INVALID and tool_choice and not dropped_tool_choice and not emitted):
+                dropped_tool_choice = True
+                tool_choice = None
+                kwargs.pop("tool_choice", None)
                 continue
             if err.code in RETRYABLE and not emitted and attempt < LLM_MAX_RETRIES:
                 delay = _backoff_seconds(attempt, err.retry_after)

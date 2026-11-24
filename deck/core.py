@@ -9,7 +9,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import browser as browser_mod
-from . import context, ratelimit, sandbox, settings, skill_router, uploads
+from . import context, kb_router, ratelimit, sandbox, settings, skill_router, uploads
 from . import usage as usage_mod
 from .config import (
     CONTEXT_OVERFLOW_RETRIES,
@@ -256,6 +256,18 @@ def _sticker_moods(args):
 _IMAGE_MARK = re.compile(r"\[图片 #([0-9a-f]{6,32})")
 
 
+def _inject_kb_context(messages, note):
+    """把知识库目录/提示/兜底结果追加到 system 消息；只改本次请求。"""
+    if not note:
+        return messages
+    out = [dict(m) for m in messages]
+    if out and out[0].get("role") == "system":
+        out[0]["content"] = (str(out[0].get("content") or "") + "\n\n" + note).strip()
+    else:
+        out.insert(0, {"role": "system", "content": note})
+    return out
+
+
 def _inject_skill_context(messages, skill):
     """把预路由加载的 SKILL.md 追加到 system 消息；只改本次请求，不改历史。"""
     note = (f"【服务端技能预路由】检测到本次任务匹配技能「{skill['name']}」，已自动加载。"
@@ -442,9 +454,20 @@ class DeckAgent:
         """
         sandbox.set_owner(self.owner)
         auto_skill = skill_router.route(user_input)
+        kb_route = kb_router.route(user_input)
+        has_upload = bool(image or images)
+        # 纯文本：只给提示，让模型自己调 search_knowledge（高置信度首轮强制）。
+        # 图片任务：先读图/看图更重要，保留服务端预检索作为兜底。
+        auto_kb = (kb_router.prefetch_context(user_input)
+                   if (kb_route and has_upload) else None)
+        kb_hint = (kb_route["hint"] if (kb_route and not auto_kb) else "")
         if auto_skill:
             yield {"type": "notice",
                    "text": f"已自动加载技能：{auto_skill['name']}，本轮按它来做。"}
+        if kb_hint and kb_route and kb_route["level"] == "high":
+            yield {"type": "notice", "text": "知识库可能命中，提醒模型先检索。"}
+        if auto_kb and "【服务端知识库预检索】" in auto_kb:
+            yield {"type": "notice", "text": "已自动检索知识库，正在结合资料回答。"}
         # 历史快把模型的上下文窗口填满时，先把旧的那段压成摘要（见 deck/context.py）。
         # 放在追加用户消息之前：这句刚说的话不该被压掉。压失败也照常往下走。
         squeezed = context.compress_if_needed(self.messages)
@@ -530,6 +553,10 @@ class DeckAgent:
                     sent_messages = _sendable(_trim_history(_rehydrate(self.messages, owner=self.owner)))
                     if auto_skill:
                         sent_messages = _inject_skill_context(sent_messages, auto_skill)
+                    if kb_hint:
+                        sent_messages = _inject_kb_context(sent_messages, kb_hint)
+                    if auto_kb:
+                        sent_messages = _inject_kb_context(sent_messages, auto_kb)
                     # 上游有「每分钟 token 配额」：发之前先排队，别把额度一次打爆。
                     # 记账要把工具 schema + 系统提示也算进去（之前漏了，导致实际超支）
                     overhead = (len(json.dumps(specs, ensure_ascii=False))
@@ -558,9 +585,19 @@ class DeckAgent:
                         yield {"type": "notice",
                                "text": "模型额度排队中，已等 "
                                        f"{waited_total:.0f} 秒，继续等…"}
+                    kb_choice = None
+                    if (kb_route and kb_route["level"] == "high"
+                            and not has_upload and _ == 0):
+                        tool_names = {
+                            (spec.get("function") or {}).get("name") for spec in specs
+                        }
+                        if "search_knowledge" in tool_names:
+                            kb_choice = {"type": "function",
+                                         "function": {"name": "search_knowledge"}}
                     for kind, payload in stream_chat(
                         sent_messages, specs, model,
                         api_key=api_key, base_url=base_url, thinking=think,
+                        tool_choice=kb_choice,
                     ):
                         if kind == "message":
                             message = payload

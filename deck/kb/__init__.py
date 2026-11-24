@@ -123,6 +123,15 @@ def stats():
     return data
 
 
+def search_scored(query, top_k=KB_TOP_K):
+    """返回 [(score, chunk), ...]；给需要按相关性决定是否注入的调用方用。"""
+    kb = _kb
+    if kb is None or not kb.chunks:
+        _build_bg("首次检索")
+        return []
+    return kb.search(query, top_k)
+
+
 def search(query, top_k=KB_TOP_K):
     """检索知识库，返回拼好的原文片段（带出处），供模型直接阅读。"""
     kb = _kb
