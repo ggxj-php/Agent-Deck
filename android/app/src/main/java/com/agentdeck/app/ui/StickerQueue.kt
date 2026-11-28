@@ -26,6 +26,15 @@ internal sealed interface StickerPart {
     data class Mark(val mood: String, val name: String) : StickerPart
 }
 
+/**
+ * 按表情包标记切段，切点处的行内格式先补平衡。
+ *
+ * 标记可能落在 `**加粗**` 中间（模型一边写、标记一边插），直接切会把 `**` 劈成两半，
+ * 两段都渲染成字面的 `**`、加粗整段消失。补平衡的细节见 [repairInlineSpans]。
+ */
+internal fun splitStickerMarksKeepingInline(text: String): List<StickerPart> =
+    splitStickerMarks(repairInlineSpans(text, STICKER_MARK.findAll(text).map { it.range }.toList()))
+
 internal fun splitStickerMarks(text: String): List<StickerPart> {
     val out = ArrayList<StickerPart>()
     var cursor = 0

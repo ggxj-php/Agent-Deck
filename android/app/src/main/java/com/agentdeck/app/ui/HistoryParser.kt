@@ -56,15 +56,24 @@ object HistoryParser {
                     val codeRanges = codeRanges(item.text)
                     // 历史里的表情包标记经常卡在句子中间，先挪到最近的句末/换行，
                     // 和网页端 snapStickersToBoundaries 一个规则（代码块里的标记不动）
-                    val rawText = if (codeRanges.isEmpty()) snapStickersToBoundaries(item.text) else item.text
+                    val snapped = if (codeRanges.isEmpty()) snapStickersToBoundaries(item.text) else item.text
+                    // 表情包 / 产物标记要被抠出去单独画，抠点落在 `**` 中间会把格式劈成两半，
+                    // 两段各剩半个标记、都渲染成字面量。先把抠点两侧补平衡，再按标记拆块。
+                    val splitRanges = (ARTIFACT.findAll(snapped) + STICKER.findAll(snapped))
+                        .filter { mark -> codeRanges.none { mark.range.first in it } }
+                        .map { it.range }
+                        .toList()
+                    val rawText = repairInlineSpans(snapped, splitRanges)
+                    // 补进去的标记会把后面的偏移整体推后，代码块范围按新文本重算
+                    val safeCodeRanges = if (splitRanges.isEmpty()) codeRanges else codeRanges(rawText)
                     var cursor = 0
                     for (match in ARTIFACT.findAll(rawText)) {
-                        if (codeRanges.any { match.range.first in it }) continue
+                        if (safeCodeRanges.any { match.range.first in it }) continue
                         appendAssistantSegment(
                             blocks,
                             rawText.substring(cursor, match.range.first),
                             stickerUrl,
-                            codeRanges,
+                            safeCodeRanges,
                             cursor,
                         )
                         blocks.add(Block.Artifact(match.groupValues[1], match.groupValues[2]))
@@ -74,7 +83,7 @@ object HistoryParser {
                         blocks,
                         rawText.substring(cursor),
                         stickerUrl,
-                        codeRanges,
+                        safeCodeRanges,
                         cursor,
                     )
                     // 空回复（比如只调了工具）就不占位置

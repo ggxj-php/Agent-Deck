@@ -72,6 +72,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.TextUnit
+import com.agentdeck.app.ui.repairInlineSpans
 import com.agentdeck.app.ui.theme.DeckPalette
 
 /* ------------------------------------------------------------------
@@ -154,41 +155,6 @@ internal fun splitInlineMathPlaceholders(source: String): MathSplitText {
 
 private val DOWNLOAD_LINE = Regex("""\[([^\]]*)]\((/d/[^)\s]+)\)""")
 
-/** 下载链接常被这些行内标记包着（`📥 **[文件](/d/x)**（4 页）`）。 */
-private val SPLIT_MARKS = listOf("**", "~~", "*", "`")
-
-private fun countOf(text: String, mark: String): Int {
-    var count = 0
-    var at = text.indexOf(mark)
-    while (at >= 0) {
-        count++
-        at = text.indexOf(mark, at + mark.length)
-    }
-    return count
-}
-
-/**
- * 下载卡片是把链接从段落里抠出来单独画的，抠完前后两半各剩半个标记
- * （`📥 **` + `**（4 页…）`），各自都找不到配对，于是 `**` 原样印在屏幕上。
- *
- * 只有「开标记在前半、闭标记在后半」这一种情况要处理：前半里落单（奇数个）就说明
- * 有个 `**` 还在等配对，它的搭档一定在被切开的后半里，两边一起删掉。
- * 配对完好的（`**重点**`）不动。
- */
-private fun stripSplitMarks(before: String, after: String): Pair<String, String> {
-    var head = before
-    var tail = after
-    for (mark in SPLIT_MARKS) {
-        if (countOf(head, mark) % 2 == 0) continue
-        val open = head.lastIndexOf(mark)
-        val close = tail.indexOf(mark)
-        if (open < 0 || close < 0) continue
-        head = head.removeRange(open, open + mark.length).trimEnd()
-        tail = tail.removeRange(close, close + mark.length).trimStart()
-    }
-    return head to tail
-}
-
 private val HEADING = Regex("""^(#{1,6})\s+(.*)$""")
 private val BULLET = Regex("""^\s*[-*+]\s+(.*)$""")
 private val ORDERED = Regex("""^\s*(\d+)[.)]\s+(.*)$""")
@@ -219,15 +185,19 @@ fun parseMarkdown(source: String): List<MdBlock> {
                     // 链接可能带前缀（比如「👉 [手册.docx](/d/xxx)」），前后文字拆成段落，
                     // 中间那段一定要渲染成可下载的卡片，而不是普通文字链接。
                     download != null -> {
-                        // 卡片会把段落切开，切分点两侧落单的强调标记要一起削掉（详见 stripSplitMarks）
-                        val (before, after) = stripSplitMarks(
-                            text.substring(0, download.range.first).trim(),
-                            text.substring(download.range.last + 1).trim(),
+                        // 卡片会把段落切开（`📥 **[文件](/d/x)**（4 页）`）：先把切点两侧的行内
+                        // 标记补平衡，别把 `**` 劈成两半、也别像以前那样把标记直接删掉丢格式
+                        val fixed = repairInlineSpans(
+                            text,
+                            DOWNLOAD_LINE.findAll(text).map { it.range }.toList(),
                         )
+                        val link = DOWNLOAD_LINE.find(fixed) ?: download
+                        val before = fixed.substring(0, link.range.first).trim()
+                        val after = fixed.substring(link.range.last + 1).trim()
                         if (before.isNotEmpty()) blocks += MdBlock.Paragraph(demath(before))
                         blocks += MdBlock.Download(
-                            download.groupValues[1].ifBlank { "下载附件" },
-                            download.groupValues[2],
+                            link.groupValues[1].ifBlank { "下载附件" },
+                            link.groupValues[2],
                         )
                         if (after.isNotEmpty()) blocks += MdBlock.Paragraph(demath(after))
                     }

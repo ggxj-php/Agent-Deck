@@ -71,7 +71,7 @@ import com.agentdeck.app.ui.Role
 import com.agentdeck.app.ui.UiMessage
 import com.agentdeck.app.ui.HistoryParser
 import com.agentdeck.app.ui.StickerPart
-import com.agentdeck.app.ui.splitStickerMarks
+import com.agentdeck.app.ui.splitStickerMarksKeepingInline
 import com.agentdeck.app.ui.theme.DeckPalette
 
 fun resolveUrl(baseUrl: String, raw: String): String =
@@ -443,7 +443,9 @@ private fun MarkdownWithStickers(
     selectable: Boolean = true,
 ) {
     val parts = remember(markdown) {
-        splitStickerMarks(HistoryParser.snapStickersToBoundaries(markdown))
+        // 先挪到句末，再在切点补平衡行内标记：标记夹在 `**` 中间时直接切，
+        // 两段各剩半个 `**`，屏幕上就是一堆字面量、加粗也没了
+        splitStickerMarksKeepingInline(HistoryParser.snapStickersToBoundaries(markdown))
     }
     if (parts.none { it is StickerPart.Mark }) {
         MarkdownText(
